@@ -4,24 +4,24 @@ import pThrottle from "p-throttle";
 import { z } from "zod";
 import { config } from "../../shared/config.js";
 import { log } from "../../shared/logger.js";
+import { cached } from "../../shared/cache.js";
 
 const BASE_URL = "http://www.omdbapi.com";
 
 // OMDb free tier: 1000 req/day. Throttle to 2 req/s as a polite buffer.
 const throttle = pThrottle({ limit: 2, interval: 1000 });
 
-// OMDb returns weird shapes — "N/A" for missing fields, ratings as strings, etc.
 const OmdbResponseSchema = z.object({
   Title: z.string().optional(),
   Year: z.string().optional(),
-  Runtime: z.string().optional(),       // "179 min" or "N/A"
+  Runtime: z.string().optional(),
   Genre: z.string().optional(),
   Director: z.string().optional(),
   Actors: z.string().optional(),
   Plot: z.string().optional(),
   Poster: z.string().optional(),
-  imdbRating: z.string().optional(),    // "7.6" or "N/A"
-  imdbVotes: z.string().optional(),     // "97,231"
+  imdbRating: z.string().optional(),
+  imdbVotes: z.string().optional(),
   imdbID: z.string().optional(),
   Ratings: z.array(z.object({
     Source: z.string(),
@@ -39,7 +39,7 @@ export interface OmdbData {
   metacritic?: number;
   director?: string;
   cast: string[];
-  runtime?: number;        // minutes
+  runtime?: number;
 }
 
 function parseNumberOrUndef(s: string | undefined): number | undefined {
@@ -70,24 +70,32 @@ function parseMetacritic(ratings: { Source: string; Value: string }[] | undefine
   return m ? parseInt(m[1], 10) : undefined;
 }
 
+// Throttle only the actual HTTP call, so cache hits return instantly.
+const throttledOfetch = throttle((imdbId: string) =>
+  ofetch(BASE_URL, {
+    query: { apikey: config.OMDB_API_KEY, i: imdbId, plot: "short" },
+    retry: 2,
+    retryDelay: 500,
+  })
+);
+
 /**
  * Fetch OMDb data for a single IMDb ID.
+ * Cache hits return instantly; cache misses respect the throttle.
  * Returns null if not found / no data available.
  */
-export const fetchOmdbByImdbId = throttle(async (imdbId: string): Promise<OmdbData | null> => {
+export async function fetchOmdbByImdbId(imdbId: string): Promise<OmdbData | null> {
   try {
-    const raw = await ofetch(BASE_URL, {
-      query: { apikey: config.OMDB_API_KEY, i: imdbId, plot: "short" },
-      retry: 2,
-      retryDelay: 500,
-    });
+    const raw = await cached(
+      `omdb:${imdbId}`,
+      () => throttledOfetch(imdbId),
+      { ttlSeconds: 24 * 60 * 60 }
+    );
     
     const parsed = OmdbResponseSchema.parse(raw);
     
-    // OMDb returns Response="False" + Error for not-found
     const responseTrue = parsed.Response === "True" || parsed.Response === true;
-   if (!responseTrue) {
-      // Common for unreleased films — don't pollute logs unless explicitly debugging
+    if (!responseTrue) {
       if (process.env.DEBUG_OMDB === "1") {
         log.info(`OMDb: no data for ${imdbId} (${parsed.Error ?? "unknown"})`);
       }
@@ -110,4 +118,4 @@ export const fetchOmdbByImdbId = throttle(async (imdbId: string): Promise<OmdbDa
     log.warn(`OMDb fetch failed for ${imdbId}`, err instanceof Error ? err.message : err);
     return null;
   }
-});
+}

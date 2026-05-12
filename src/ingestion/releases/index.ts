@@ -1,25 +1,18 @@
 // src/ingestion/releases/index.ts
 import { log } from "../../shared/logger.js";
 import type { Release } from "../../shared/types.js";
-import { discoverIndianReleases, getImdbId } from "./tmdb.js";
+import { discoverIndianReleases, getImdbId, getStreamingPlatforms } from "./tmdb.js";
 import { fetchOmdbByImdbId } from "./omdb.js";
 
-/**
- * Full ingestion pipeline for OTT releases:
- *  1. Discover from TMDb (multi-language sweep)
- *  2. Resolve IMDb IDs
- *  3. Enrich with OMDb (ratings, RT, director, cast, runtime)
- */
 export async function ingestReleases(
   startDate: string,
   endDate: string
 ): Promise<Release[]> {
-  // Step 1
+  // 1. Discover
   const releases = await discoverIndianReleases(startDate, endDate);
-  
   if (releases.length === 0) return releases;
   
-  // Step 2: resolve IMDb IDs (parallel, throttled by tmdbFetch internally)
+  // 2. Resolve IMDb IDs
   log.info(`Resolving IMDb IDs for ${releases.length} releases...`);
   const withImdb = await Promise.all(
     releases.map(async r => {
@@ -28,18 +21,26 @@ export async function ingestReleases(
       return { ...r, imdbId: imdbId ?? undefined };
     })
   );
+  log.info(`  IMDb IDs found: ${withImdb.filter(r => r.imdbId).length}/${releases.length}`);
   
-  const resolvedCount = withImdb.filter(r => r.imdbId).length;
-  log.info(`  IMDb IDs found: ${resolvedCount}/${releases.length}`);
+  // 3. Fetch streaming platforms (JustWatch via TMDb)
+  log.info(`Fetching streaming platforms (JustWatch via TMDb)...`);
+  const withPlatforms = await Promise.all(
+    withImdb.map(async r => {
+      if (!r.tmdbId) return r;
+      const platforms = await getStreamingPlatforms(r.tmdbId);
+      return { ...r, platform: platforms };
+    })
+  );
+  log.info(`  Streaming on at least 1 platform: ${withPlatforms.filter(r => r.platform.length > 0).length}/${releases.length}`);
   
-  // Step 3: enrich with OMDb where we have an IMDb ID
+  // 4. Enrich with OMDb
   log.info(`Enriching with OMDb (IMDb ratings + RT)...`);
   const enriched = await Promise.all(
-    withImdb.map(async r => {
+    withPlatforms.map(async r => {
       if (!r.imdbId) return r;
       const omdb = await fetchOmdbByImdbId(r.imdbId);
       if (!omdb) return r;
-      
       return {
         ...r,
         imdbRating: omdb.imdbRating,
@@ -54,7 +55,10 @@ export async function ingestReleases(
   );
   
   const ratedCount = enriched.filter(r => r.imdbRating !== undefined).length;
-  log.success(`OMDb: enriched ${ratedCount}/${releases.length} with IMDb ratings`);
+  log.success(
+    `Pipeline complete — ${enriched.length} releases ` +
+    `(${ratedCount} rated, ${enriched.filter(r => r.platform.length > 0).length} on a platform)`
+  );
   
   return enriched;
 }
