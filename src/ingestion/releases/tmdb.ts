@@ -125,3 +125,23 @@ export async function discoverIndianReleases(
   log.success(`TMDb: total ${all.length} Indian releases found`);
   return all;
 }
+
+// External IDs response from TMDb
+const TMDbExternalIdsSchema = z.object({
+  imdb_id: z.string().nullable().optional(),
+});
+
+/**
+ * Fetch IMDb ID for a TMDb movie.
+ * Returns null if not available.
+ */
+export async function getImdbId(tmdbId: number): Promise<string | null> {
+  try {
+    const response = await tmdbFetch(`/movie/${tmdbId}/external_ids`);
+    const parsed = TMDbExternalIdsSchema.parse(response);
+    return parsed.imdb_id || null;
+  } catch (err) {
+    log.warn(`Failed to fetch IMDb ID for TMDb ${tmdbId}`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
