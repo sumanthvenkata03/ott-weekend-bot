@@ -8,7 +8,8 @@
     "build": "tsc",
     "claude:test": "tsx src/claude-test.ts",
     "job:wednesday": "tsx src/jobs/wednesday-drop.ts",
-    "job:saturday": "tsx src/jobs/saturday-verdict.ts"
+    "job:saturday": "tsx src/jobs/saturday-verdict.ts",
+    "job:sunday": "tsx src/jobs/sunday-spotlight.ts"
   },
   "keywords": [],
   "author": "",

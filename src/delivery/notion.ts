@@ -6,6 +6,23 @@ import type { Release } from "../shared/types.js";
 
 const notion = new Client({ auth: config.NOTION_TOKEN });
 
+export interface SundaySpotlightDraft {
+  pillar: "Sun Spotlight";
+  weekendDates: string;
+  film: Release;                 // the single picked film
+  caption: string;
+  hashtags: string;
+  reelScript: {
+    hook: string;                // 0–3 sec
+    whyItWorks: string;          // 3–15 sec, 3 specific reasons
+    watchNote: string;           // 15–22 sec, subtitle/dub call-out
+    cta: string;                 // 22–30 sec
+    onScreenText: string[];      // 4 frames of text overlays
+    visualDirection: string;     // shot list / B-roll notes
+  };
+  caseAgainstSkepticism: string; // reply template for "I don't watch X-language films"
+}
+
 export interface VerdictSlide {
   filmTitle: string;
   language: string;
@@ -44,6 +61,158 @@ export interface WednesdayDropDraft {
  */
 function truncate(s: string, max = 1900): string {
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
+}
+
+export async function writeSundaySpotlightToNotion(
+  draft: SundaySpotlightDraft
+): Promise<string> {
+  log.info("Writing Sunday Spotlight draft to Notion...");
+  
+  const title = `Sun Spotlight — ${draft.film.title} (${draft.film.language})`;
+  const hypeScore = draft.film.imdbRating !== undefined
+    ? Math.round(draft.film.imdbRating * 10)
+    : null;
+  
+  const response = await notion.pages.create({
+    parent: { database_id: config.NOTION_RELEASES_DB_ID },
+    properties: {
+      Name: { title: [{ text: { content: title } }] },
+      Status: { status: { name: "Draft" } },
+      Pillar: { select: { name: draft.pillar } },
+      Platform: { multi_select: draft.film.platform.map(p => ({ name: p })) },
+      Language: { multi_select: [{ name: draft.film.language }] },
+      Verdict: { select: { name: "🔥 Must Watch" } },   // Spotlight = endorsement by definition
+      ...(hypeScore !== null && { "Hype Score": { number: hypeScore } }),
+      Caption: { rich_text: [{ text: { content: truncate(draft.caption) } }] },
+      Hashtags: { rich_text: [{ text: { content: truncate(draft.hashtags, 500) } }] },
+    },
+    children: [
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: "The Film" } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [{
+            text: {
+              content: truncate(
+                `${draft.film.title} (${draft.film.language}) — ${draft.film.releaseDate}\n` +
+                `Director: ${draft.film.director ?? "—"}\n` +
+                `Cast: ${draft.film.cast.slice(0, 4).join(", ") || "—"}\n` +
+                `Platform: ${draft.film.platform.length ? draft.film.platform.join(", ") : "TBA"}\n` +
+                (draft.film.imdbRating ? `IMDb: ${draft.film.imdbRating} (${draft.film.imdbVotes ?? 0} votes)\n` : "") +
+                `\n${draft.film.synopsis}`
+              ),
+            },
+          }],
+        },
+      },
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: "Caption" } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: { rich_text: [{ text: { content: truncate(draft.caption) } }] },
+      },
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: "Reel Script (30 sec)" } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [
+            { text: { content: "Hook (0–3 sec): " }, annotations: { bold: true } },
+            { text: { content: truncate(draft.reelScript.hook, 500) } },
+          ],
+        },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [
+            { text: { content: "Why It Works (3–15 sec): " }, annotations: { bold: true } },
+            { text: { content: truncate(draft.reelScript.whyItWorks, 1500) } },
+          ],
+        },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [
+            { text: { content: "Watch Note (15–22 sec): " }, annotations: { bold: true } },
+            { text: { content: truncate(draft.reelScript.watchNote, 800) } },
+          ],
+        },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [
+            { text: { content: "CTA (22–30 sec): " }, annotations: { bold: true } },
+            { text: { content: truncate(draft.reelScript.cta, 500) } },
+          ],
+        },
+      },
+      {
+        object: "block",
+        type: "heading_3",
+        heading_3: { rich_text: [{ text: { content: "On-Screen Text Frames" } }] },
+      },
+      ...draft.reelScript.onScreenText.map((t, i) => ({
+        object: "block" as const,
+        type: "bulleted_list_item" as const,
+        bulleted_list_item: {
+          rich_text: [{ text: { content: `Frame ${i + 1}: ${truncate(t, 200)}` } }],
+        },
+      })),
+      {
+        object: "block",
+        type: "heading_3",
+        heading_3: { rich_text: [{ text: { content: "Visual Direction" } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: { rich_text: [{ text: { content: truncate(draft.reelScript.visualDirection, 1500) } }] },
+      },
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: "Hashtags" } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: { rich_text: [{ text: { content: truncate(draft.hashtags, 1900) } }] },
+      },
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: `Reply template — when someone says "I don't watch ${draft.film.language} films"` } }] },
+      },
+      {
+        object: "block",
+        type: "quote",
+        quote: { rich_text: [{ text: { content: truncate(draft.caseAgainstSkepticism, 1900) } }] },
+      },
+    ],
+  });
+  
+  const url = (response as { url?: string }).url ?? "(no URL returned)";
+  log.success(`Spotlight draft written to Notion: ${url}`);
+  return url;
 }
 
 /**
