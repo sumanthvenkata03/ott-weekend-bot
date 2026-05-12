@@ -6,6 +6,7 @@ import { generateMondayMovement } from "../content/weekend/monday-movement.js";
 import { writeMovementToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
+import { notifyDraftReady } from "../delivery/slack.js";
 
 async function main() {
   log.info("📰 Monday Movement job — starting");
@@ -58,6 +59,18 @@ async function main() {
   log.info(`Caption (${draft.caption.length} chars): ${draft.caption.slice(0, 100)}...`);
   
   const url = await writeMovementToNotion(draft);
+
+  await notifyDraftReady({
+    pillar: "Mon Movement",
+    emoji: "📰",
+    title: draft.weekLabel,
+    subtitle: draft.weekHeadline,
+    notionUrl: url,
+    metadata: {
+      "New arrivals": String(featuredArrivals.length),
+      "Hidden gems": String(gems.length),
+    },
+  });
   
   log.success(`\n🎉 Monday Movement draft is in Notion:\n   ${url}\n   Review and post manually.`);
 }

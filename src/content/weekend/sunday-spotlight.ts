@@ -74,7 +74,7 @@ DELIVERABLES (respond as JSON):
 
 The film's language is ${film.language}. The audience you're persuading defaults to Hindi/English content. The CTA must feel like a dare, not a request.`;
   
-  const output = await callClaudeJSON<LLMOutput>(prompt);
+  const output = await callClaudeJSON<LLMOutput>(prompt, "opus");
   
   return {
     pillar: "Sun Spotlight",

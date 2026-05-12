@@ -8,9 +8,10 @@
     "build": "tsc",
     "claude:test": "tsx src/claude-test.ts",
     "job:wednesday": "tsx src/jobs/wednesday-drop.ts",
+    "job:thursday": "tsx src/jobs/thursday-compare.ts",
     "job:saturday": "tsx src/jobs/saturday-verdict.ts",
     "job:sunday": "tsx src/jobs/sunday-spotlight.ts",
-     "job:monday": "tsx src/jobs/monday-movement.ts"
+    "job:monday": "tsx src/jobs/monday-movement.ts"
   },
   "keywords": [],
   "author": "",
@@ -23,6 +24,7 @@
     "typescript": "^6.0.3"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.95.2",
     "@notionhq/client": "^5.21.0",
     "better-sqlite3": "^12.9.0",
     "date-fns": "^4.1.0",

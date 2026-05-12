@@ -5,6 +5,7 @@ import { generateWednesdayDrop } from "../content/weekend/wednesday-drop.js";
 import { writeWednesdayDropToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
+import { notifyDraftReady } from "../delivery/slack.js";
 
 async function main() {
   log.info("🎬 Wednesday Drop job — starting");
@@ -40,6 +41,18 @@ async function main() {
   
   // 4. Write to Notion
   const url = await writeWednesdayDropToNotion(draft);
+  
+  await notifyDraftReady({
+    pillar: "Wed Drop",
+    emoji: "🎬",
+    title: `Weekend of ${startDate} → ${endDate}`,
+    subtitle: draft.caption.slice(0, 200) + (draft.caption.length > 200 ? "…" : ""),
+    notionUrl: url,
+    metadata: {
+      "Releases": String(featured.length),
+      "Languages": Array.from(new Set(featured.map(r => r.language))).join(", "),
+    },
+  });
   
   log.success(`\n🎉 Wednesday Drop draft is in Notion:\n   ${url}\n   Review and post manually.`);
 }

@@ -111,7 +111,7 @@ IMPORTANT:
 - Skip kar do calls are encouraged when justified — don't be polite to every film.
 - The "filmTitle", "language", "platform" fields must match the input exactly.`;
   
-  const output = await callClaudeJSON<LLMOutput>(prompt);
+  const output = await callClaudeJSON<LLMOutput>(prompt, "opus");
   
   // Map output to typed VerdictSlide[]
   const verdicts: VerdictSlide[] = output.verdicts.map(v => ({

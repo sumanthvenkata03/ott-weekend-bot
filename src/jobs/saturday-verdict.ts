@@ -5,7 +5,7 @@ import { generateSaturdayVerdict } from "../content/weekend/saturday-verdict.js"
 import { writeSaturdayVerdictToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
-
+import { notifyDraftReady } from "../delivery/slack.js";
 /**
  * Pick the weekend window for "this Saturday":
  * - If today IS Sat/Sun: this weekend (Fri-Sun)
@@ -61,6 +61,18 @@ async function main() {
   log.info(`Verdict tally: ${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join("  ")}`);
   
   const url = await writeSaturdayVerdictToNotion(draft);
+
+  await notifyDraftReady({
+    pillar: "Sat Verdict",
+    emoji: "⚖️",
+    title: `Weekend of ${startDate} → ${endDate}`,
+    subtitle: draft.hotTake,
+    notionUrl: url,
+    metadata: {
+      "Verdicts": Object.entries(tally).map(([k, v]) => `${k} ${v}`).join("  "),
+      "Films": String(draft.verdicts.length),
+    },
+  });
   
   log.success(`\n🎉 Saturday Verdict draft is in Notion:\n   ${url}\n   Review and post manually.`);
 }

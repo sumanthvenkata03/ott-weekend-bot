@@ -6,7 +6,7 @@ import { generateSundaySpotlight } from "../content/weekend/sunday-spotlight.js"
 import { writeSundaySpotlightToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
-
+import { notifyDraftReady } from "../delivery/slack.js";
 /**
  * Sunday Spotlight runs on Sunday morning, targeting the just-passed weekend.
  * If run any other day, targets the most recent Fri-Sun.
@@ -56,6 +56,19 @@ async function main() {
   log.info(`Reel hook: "${draft.reelScript.hook}"`);
   
   const url = await writeSundaySpotlightToNotion(draft);
+  
+  await notifyDraftReady({
+    pillar: "Sun Spotlight",
+    emoji: "🎬",
+    title: `${film.title} (${film.language})`,
+    subtitle: draft.reelScript.hook,
+    notionUrl: url,
+    metadata: {
+      "Language": film.language,
+      "Platform": film.platform.length ? film.platform.join(", ") : "TBA",
+      ...(film.imdbRating ? { "IMDb": `${film.imdbRating} (${film.imdbVotes ?? 0} votes)` } : {}),
+    },
+  });
   
   log.success(`\n🎉 Sunday Spotlight draft is in Notion:\n   ${url}\n   Review and post manually.`);
 }

@@ -6,6 +6,27 @@ import type { Release } from "../shared/types.js";
 
 const notion = new Client({ auth: config.NOTION_TOKEN });
 
+export interface CompareDraft {
+  pillar: "Thu Compare";
+  weekendDates: string;
+  filmA: Release;
+  filmB: Release;
+  caption: string;
+  hashtags: string;
+  reelScript: {
+    hook: string;                   // 0-2 sec
+    filmABeats: string[];            // 3 quick cuts, 2-8 sec
+    filmBBeats: string[];            // 3 quick cuts, 8-14 sec
+    decidingLine: string;            // 14-18 sec, the "watch X if you want Y, Y if you want Z" beat
+    cta: string;                     // 18-20 sec
+    onScreenText: string[];          // 4 text overlays for each beat
+    visualDirection: string;
+    suggestedAudioMood: string;      // "calm", "energetic", "dramatic" for finding trending audio
+    coverFrameText: string;          // what shows in the IG grid thumbnail
+  };
+  pinnedCommentSeed: string;         // a "controversial but defensible" take to pin
+}
+
 export interface SundaySpotlightDraft {
   pillar: "Sun Spotlight";
   weekendDates: string;
@@ -66,6 +87,195 @@ export interface MovementDraft {
   
   carouselSlides: string;        // markdown summary of slide structure
   weekHeadline: string;          // 1-line takeaway, the post's spine
+}
+
+export async function writeCompareToNotion(draft: CompareDraft): Promise<string> {
+  log.info("Writing Thursday Compare draft to Notion...");
+  
+  const releases = [draft.filmA, draft.filmB];
+  const allPlatforms = Array.from(new Set(releases.flatMap(r => r.platform)));
+  const allLanguages = Array.from(new Set(releases.map(r => r.language)));
+  
+  const title = `Thu Compare — ${draft.filmA.title} vs ${draft.filmB.title}`;
+  
+  // Compare doesn't have a single verdict — leave Pending, the deciding line IS the verdict
+  const response = await notion.pages.create({
+    parent: { database_id: config.NOTION_RELEASES_DB_ID },
+    properties: {
+      Name: { title: [{ text: { content: title } }] },
+      Status: { status: { name: "Draft" } },
+      Pillar: { select: { name: draft.pillar } },
+      Platform: { multi_select: allPlatforms.map(p => ({ name: p })) },
+      Language: { multi_select: allLanguages.map(l => ({ name: l })) },
+      Verdict: { select: { name: "Pending" } },
+      Caption: { rich_text: [{ text: { content: truncate(draft.caption) } }] },
+      Hashtags: { rich_text: [{ text: { content: truncate(draft.hashtags, 500) } }] },
+    },
+    children: [
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: "The Face-Off" } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [{
+            text: {
+              content: truncate(
+                `Film A: ${draft.filmA.title} (${draft.filmA.language})\n` +
+                `  Director: ${draft.filmA.director ?? "—"} | ` +
+                `Cast: ${draft.filmA.cast.slice(0, 3).join(", ") || "—"} | ` +
+                `Genres: ${draft.filmA.genre.join(", ") || "—"}\n` +
+                `  Platform: ${draft.filmA.platform.length ? draft.filmA.platform.join(", ") : "TBA"}\n\n` +
+                `Film B: ${draft.filmB.title} (${draft.filmB.language})\n` +
+                `  Director: ${draft.filmB.director ?? "—"} | ` +
+                `Cast: ${draft.filmB.cast.slice(0, 3).join(", ") || "—"} | ` +
+                `Genres: ${draft.filmB.genre.join(", ") || "—"}\n` +
+                `  Platform: ${draft.filmB.platform.length ? draft.filmB.platform.join(", ") : "TBA"}`
+              ),
+            },
+          }],
+        },
+      },
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: "Caption" } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: { rich_text: [{ text: { content: truncate(draft.caption) } }] },
+      },
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: "Reel Script (20 sec)" } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [
+            { text: { content: "Hook (0–2 sec): " }, annotations: { bold: true } },
+            { text: { content: truncate(draft.reelScript.hook, 400) } },
+          ],
+        },
+      },
+      {
+        object: "block",
+        type: "heading_3",
+        heading_3: { rich_text: [{ text: { content: `Film A — ${draft.filmA.title} (2–8 sec)` } }] },
+      },
+      ...draft.reelScript.filmABeats.map((b, i) => ({
+        object: "block" as const,
+        type: "bulleted_list_item" as const,
+        bulleted_list_item: {
+          rich_text: [{ text: { content: `Beat ${i + 1}: ${truncate(b, 400)}` } }],
+        },
+      })),
+      {
+        object: "block",
+        type: "heading_3",
+        heading_3: { rich_text: [{ text: { content: `Film B — ${draft.filmB.title} (8–14 sec)` } }] },
+      },
+      ...draft.reelScript.filmBBeats.map((b, i) => ({
+        object: "block" as const,
+        type: "bulleted_list_item" as const,
+        bulleted_list_item: {
+          rich_text: [{ text: { content: `Beat ${i + 1}: ${truncate(b, 400)}` } }],
+        },
+      })),
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [
+            { text: { content: "Deciding Line (14–18 sec): " }, annotations: { bold: true } },
+            { text: { content: truncate(draft.reelScript.decidingLine, 600) } },
+          ],
+        },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [
+            { text: { content: "CTA (18–20 sec): " }, annotations: { bold: true } },
+            { text: { content: truncate(draft.reelScript.cta, 400) } },
+          ],
+        },
+      },
+      {
+        object: "block",
+        type: "heading_3",
+        heading_3: { rich_text: [{ text: { content: "On-Screen Text Frames" } }] },
+      },
+      ...draft.reelScript.onScreenText.map((t, i) => ({
+        object: "block" as const,
+        type: "bulleted_list_item" as const,
+        bulleted_list_item: {
+          rich_text: [{ text: { content: `Frame ${i + 1}: ${truncate(t, 200)}` } }],
+        },
+      })),
+      {
+        object: "block",
+        type: "heading_3",
+        heading_3: { rich_text: [{ text: { content: "Visual Direction" } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: { rich_text: [{ text: { content: truncate(draft.reelScript.visualDirection, 1500) } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [
+            { text: { content: "Audio mood: " }, annotations: { bold: true } },
+            { text: { content: draft.reelScript.suggestedAudioMood } },
+          ],
+        },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [
+            { text: { content: "Cover frame text: " }, annotations: { bold: true } },
+            { text: { content: draft.reelScript.coverFrameText } },
+          ],
+        },
+      },
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: "Pinnable Hot Take (for engagement)" } }] },
+      },
+      {
+        object: "block",
+        type: "quote",
+        quote: { rich_text: [{ text: { content: truncate(draft.pinnedCommentSeed, 500) } }] },
+      },
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: "Hashtags" } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: { rich_text: [{ text: { content: truncate(draft.hashtags, 1900) } }] },
+      },
+    ],
+  });
+  
+  const url = (response as { url?: string }).url ?? "(no URL returned)";
+  log.success(`Compare draft written to Notion: ${url}`);
+  return url;
 }
 
 export async function writeMovementToNotion(draft: MovementDraft): Promise<string> {

@@ -99,7 +99,7 @@ DELIVERABLES (respond as JSON):
 
 Be specific. Take stands. Lean South-heavy where the films justify it.`;
   
-  const output = await callClaudeJSON<LLMOutput>(prompt);
+  const output = await callClaudeJSON<LLMOutput>(prompt, "sonnet");
   
   // Render carousel slides as markdown for the Notion body
   const carouselSlides = output.carouselSlides

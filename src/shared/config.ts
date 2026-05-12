@@ -11,8 +11,10 @@ const ConfigSchema = z.object({
   
   // News (later weeks, optional for now)
   YOUTUBE_API_KEY: z.string().optional(),
+  SLACK_WEBHOOK_URL: z.string().url().optional(),
   REDDIT_CLIENT_ID: z.string().optional(),
   REDDIT_CLIENT_SECRET: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
   REDDIT_USER_AGENT: z.string().optional(),
   
   // Notion

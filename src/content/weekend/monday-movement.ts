@@ -92,7 +92,7 @@ IMPORTANT:
 - Don't dilute. If there's only 1 great arrival, lead with it and don't pad with weak ones.
 - Hidden gems should feel like "you missed this and you shouldn't have" — not just "another good film."`;
   
-  const output = await callClaudeJSON<LLMOutput>(prompt);
+  const output = await callClaudeJSON<LLMOutput>(prompt, "sonnet");
   
   const carouselSlides = output.carouselSlides
     .map(s => `**Slide ${s.slideNumber}** (${s.type}): **${s.title}** — ${s.body}`)
