@@ -177,6 +177,74 @@ export async function discoverIndianReleases(
   return all;
 }
 
+/**
+ * Discover Indian films that landed on OTT in a date range.
+ * Uses TMDb's release_type=4 filter (Digital releases).
+ *
+ * Note: TMDb's release_type data is uneven for India — many regional films
+ * don't have it populated. We treat this as "supplementary signal" alongside
+ * the standard discover call, not a replacement.
+ */
+export async function discoverIndianOTTArrivals(
+  startDate: string,
+  endDate: string
+): Promise<Release[]> {
+  log.info(`Fetching TMDb OTT arrivals ${startDate} → ${endDate}`);
+  
+  const langs = ["hi", "te", "ta", "ml", "kn", "mr", "bn", "pa"];
+  const all: Release[] = [];
+  
+  for (const lang of langs) {
+    try {
+      const response = await tmdbFetchCached<unknown>(
+        "/discover/movie",
+        {
+          "with_original_language": lang,
+          "with_release_type": "4",  // 4 = Digital
+          "release_date.gte": startDate,
+          "release_date.lte": endDate,
+          "sort_by": "popularity.desc",
+          "region": "IN",
+          "include_adult": "false",
+        },
+        6 * 60 * 60
+      );
+      
+      const parsed = TMDbDiscoverResponseSchema.parse(response);
+      if (parsed.results.length > 0) {
+        log.info(`  [${lang}] ${parsed.results.length} OTT arrivals`);
+      }
+      
+      for (const m of parsed.results) {
+        all.push({
+          id: `tmdb-${m.id}`,
+          tmdbId: m.id,
+          title: m.title,
+          originalTitle: m.original_title !== m.title ? m.original_title : undefined,
+          language: mapLanguage(m.original_language),
+          isSeries: false,
+          platform: [],
+          releaseDate: m.release_date,
+          genre: m.genre_ids.map(id => GENRE_MAP[id]).filter(Boolean),
+          cast: [],
+          synopsis: m.overview,
+          posterUrl: posterUrl(m.poster_path),
+          backdropUrl: backdropUrl(m.backdrop_path),
+          audioLanguages: [m.original_language],
+          subtitleLanguages: [],
+          sources: ["tmdb-ott"],
+          fetchedAt: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      log.warn(`OTT arrivals fetch failed for ${lang}`, err instanceof Error ? err.message : err);
+    }
+  }
+  
+  log.success(`TMDb OTT arrivals: ${all.length} films`);
+  return all;
+}
+
 /** Fetch IMDb ID for a TMDb movie. */
 export async function getImdbId(tmdbId: number): Promise<string | null> {
   try {

@@ -3,6 +3,7 @@ import { log } from "../../shared/logger.js";
 import type { Release } from "../../shared/types.js";
 import { discoverIndianReleases, getImdbId, getStreamingPlatforms } from "./tmdb.js";
 import { fetchOmdbByImdbId } from "./omdb.js";
+import { discoverIndianOTTArrivals } from "./tmdb.js";
 
 export async function ingestReleases(
   startDate: string,
@@ -58,6 +59,58 @@ export async function ingestReleases(
   log.success(
     `Pipeline complete — ${enriched.length} releases ` +
     `(${ratedCount} rated, ${enriched.filter(r => r.platform.length > 0).length} on a platform)`
+  );
+  
+  return enriched;
+}
+
+
+/**
+ * Ingest just-arrived OTT films in the date range, fully enriched.
+ * Mirrors ingestReleases() but uses release_type=4 filter for OTT-first films.
+ */
+export async function ingestOTTArrivals(
+  startDate: string,
+  endDate: string
+): Promise<Release[]> {
+  const releases = await discoverIndianOTTArrivals(startDate, endDate);
+  if (releases.length === 0) return releases;
+  
+  log.info(`Resolving IMDb IDs for ${releases.length} arrivals...`);
+  const withImdb = await Promise.all(
+    releases.map(async r => {
+      if (!r.tmdbId) return r;
+      const imdbId = await getImdbId(r.tmdbId);
+      return { ...r, imdbId: imdbId ?? undefined };
+    })
+  );
+  
+  log.info(`Fetching streaming platforms...`);
+  const withPlatforms = await Promise.all(
+    withImdb.map(async r => {
+      if (!r.tmdbId) return r;
+      const platforms = await getStreamingPlatforms(r.tmdbId);
+      return { ...r, platform: platforms };
+    })
+  );
+  
+  log.info(`Enriching with OMDb...`);
+  const enriched = await Promise.all(
+    withPlatforms.map(async r => {
+      if (!r.imdbId) return r;
+      const omdb = await fetchOmdbByImdbId(r.imdbId);
+      if (!omdb) return r;
+      return {
+        ...r,
+        imdbRating: omdb.imdbRating,
+        imdbVotes: omdb.imdbVotes,
+        rottenTomatoes: omdb.rottenTomatoes,
+        director: omdb.director ?? r.director,
+        cast: omdb.cast.length > 0 ? omdb.cast : r.cast,
+        runtime: omdb.runtime ?? r.runtime,
+        sources: Array.from(new Set([...r.sources, "omdb"])),
+      };
+    })
   );
   
   return enriched;

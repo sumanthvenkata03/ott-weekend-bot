@@ -55,6 +55,137 @@ export interface WednesdayDropDraft {
   carouselSlides: string;        // markdown summary of 10-slide structure
 }
 
+export interface MovementDraft {
+  pillar: "Mon Movement";
+  weekLabel: string;             // "Week of May 4 — May 10, 2026"
+  caption: string;
+  hashtags: string;
+  
+  newArrivals: Release[];        // landed in last 7 days
+  hiddenGems: Release[];         // older but worth surfacing
+  
+  carouselSlides: string;        // markdown summary of slide structure
+  weekHeadline: string;          // 1-line takeaway, the post's spine
+}
+
+export async function writeMovementToNotion(draft: MovementDraft): Promise<string> {
+  log.info("Writing Monday Movement draft to Notion...");
+  
+  const allReleases = [...draft.newArrivals, ...draft.hiddenGems];
+  const allPlatforms = Array.from(new Set(allReleases.flatMap(r => r.platform)));
+  const allLanguages = Array.from(new Set(allReleases.map(r => r.language)));
+  
+  const title = `Mon Movement — ${draft.weekLabel}`;
+  
+  const response = await notion.pages.create({
+    parent: { database_id: config.NOTION_RELEASES_DB_ID },
+    properties: {
+      Name: { title: [{ text: { content: title } }] },
+      Status: { status: { name: "Draft" } },
+      Pillar: { select: { name: draft.pillar } },
+      Platform: { multi_select: allPlatforms.map(p => ({ name: p })) },
+      Language: { multi_select: allLanguages.map(l => ({ name: l })) },
+      Verdict: { select: { name: "Pending" } },
+      Caption: { rich_text: [{ text: { content: truncate(draft.caption) } }] },
+      Hashtags: { rich_text: [{ text: { content: truncate(draft.hashtags, 500) } }] },
+    },
+    children: [
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: "Week Headline" } }] },
+      },
+      {
+        object: "block",
+        type: "quote",
+        quote: { rich_text: [{ text: { content: truncate(draft.weekHeadline, 500) } }] },
+      },
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: "Caption" } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: { rich_text: [{ text: { content: truncate(draft.caption) } }] },
+      },
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: "Carousel Structure" } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: { rich_text: [{ text: { content: truncate(draft.carouselSlides) } }] },
+      },
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: `New OTT Arrivals (${draft.newArrivals.length})` } }] },
+      },
+      ...(draft.newArrivals.length === 0
+        ? [{
+            object: "block" as const,
+            type: "paragraph" as const,
+            paragraph: { rich_text: [{ text: { content: "— none with confirmed digital releases this week" } }] },
+          }]
+        : draft.newArrivals.map(r => ({
+            object: "block" as const,
+            type: "bulleted_list_item" as const,
+            bulleted_list_item: {
+              rich_text: [{
+                text: {
+                  content: truncate(
+                    `${r.title} (${r.language}) — ${r.releaseDate}` +
+                    (r.platform.length ? ` — ${r.platform.join(", ")}` : "") +
+                    (r.imdbRating ? ` — IMDb ${r.imdbRating}` : ""),
+                    1900
+                  ),
+                },
+              }],
+            },
+          }))),
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: `Hidden Gems Worth Surfacing (${draft.hiddenGems.length})` } }] },
+      },
+      ...draft.hiddenGems.map(r => ({
+        object: "block" as const,
+        type: "bulleted_list_item" as const,
+        bulleted_list_item: {
+          rich_text: [{
+            text: {
+              content: truncate(
+                `${r.title} (${r.language})` +
+                (r.platform.length ? ` — ${r.platform.join(", ")}` : "") +
+                (r.imdbRating ? ` — IMDb ${r.imdbRating}` : ""),
+                1900
+              ),
+            },
+          }],
+        },
+      })),
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: "Hashtags" } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: { rich_text: [{ text: { content: truncate(draft.hashtags, 1900) } }] },
+      },
+    ],
+  });
+  
+  const url = (response as { url?: string }).url ?? "(no URL returned)";
+  log.success(`Movement draft written to Notion: ${url}`);
+  return url;
+}
+
 /**
  * Truncate text to Notion's 2000-char limit per rich_text block.
  * Notion rejects rich_text over 2000 chars per single property.

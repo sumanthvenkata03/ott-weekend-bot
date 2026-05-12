@@ -9,7 +9,8 @@
     "claude:test": "tsx src/claude-test.ts",
     "job:wednesday": "tsx src/jobs/wednesday-drop.ts",
     "job:saturday": "tsx src/jobs/saturday-verdict.ts",
-    "job:sunday": "tsx src/jobs/sunday-spotlight.ts"
+    "job:sunday": "tsx src/jobs/sunday-spotlight.ts",
+     "job:monday": "tsx src/jobs/monday-movement.ts"
   },
   "keywords": [],
   "author": "",

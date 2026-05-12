@@ -80,3 +80,63 @@ export function pickSpotlight(releases: Release[]): Release | null {
   
   return scored[0].release;
 }
+
+/**
+ * Pick top-N hidden gems from a pool of releases.
+ * Same scoring logic as spotlight, but returns N films instead of 1,
+ * and excludes any film already in the exclude list (e.g., the films
+ * already covered as "new arrivals" this week).
+ */
+export function pickHiddenGems(
+  releases: Release[],
+  count: number,
+  excludeIds: Set<string> = new Set()
+): Release[] {
+  const candidates = releases.filter(r => !excludeIds.has(r.id));
+  
+  // Reuse spotlightScore via private export — but we need it accessible.
+  // Inline a copy here for clarity. (We'll DRY this up in Step 11.)
+  const scored = candidates.map(r => ({
+    release: r,
+    score: hiddenGemScore(r),
+  }));
+  
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, count).map(s => s.release);
+}
+
+function hiddenGemScore(r: Release): number {
+  let score = 0;
+  
+  // Underserved languages still win, but smaller boost (Mon Movement is broader)
+  if (UNDERSERVED.includes(r.language)) score += 30;
+  else if (MAINSTREAM.includes(r.language)) score += 15;
+  
+  // IMDb signal — vote-weighted
+  if (r.imdbRating !== undefined && r.imdbVotes !== undefined && r.imdbVotes > 0) {
+    const voteWeight = Math.log10(r.imdbVotes + 1) / 5;
+    score += r.imdbRating * voteWeight * 6;   // weighted higher for hidden gems
+  }
+  
+  // STREAMING MATTERS HERE — hidden gem you can't watch isn't useful
+  if (r.platform.length > 0) score += 25;
+else score -= 30;  // films without a platform aren't useful for Mon Movement
+  
+  // Production signals
+  if (r.director) score += 8;
+  if (r.cast.length >= 2) score += 6;
+  if (r.runtime && r.runtime >= 80) score += 3;
+  
+  // Synopsis depth
+  if (r.synopsis.length > 200) score += 3;
+  
+  // Genre — these are the ones underserved cinemas typically win
+  const STRONG_GENRES = ["Thriller", "Drama", "Mystery", "Crime", "Documentary"];
+  if (r.genre.some(g => STRONG_GENRES.includes(g))) score += 4;
+  
+  // Deterministic tiebreaker
+  const seed = r.id.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  score += (seed % 100) / 100;
+  
+  return score;
+}
