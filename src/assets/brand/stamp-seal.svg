@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="The Big Screen Index rubber stamp seal">
+  <defs>
+    <path id="stamp-arc-top" d="M 80,200 A 120,120 0 0,1 320,200"/>
+    <path id="stamp-arc-bottom" d="M 80,200 A 120,120 0 0,0 320,200"/>
+  </defs>
+  <circle cx="200" cy="200" r="160" fill="none" stroke="#A33223" stroke-width="6"/>
+  <circle cx="200" cy="200" r="148" fill="none" stroke="#A33223" stroke-width="1.5"/>
+  <circle cx="200" cy="200" r="120" fill="none" stroke="#A33223" stroke-width="2"/>
+  <text font-family="Georgia, 'Playfair Display', serif" font-size="20" font-weight="700" fill="#A33223" letter-spacing="9">
+    <textPath href="#stamp-arc-top" startOffset="50%" text-anchor="middle">★ THE BIG SCREEN INDEX ★</textPath>
+  </text>
+  <text font-family="Georgia, 'Playfair Display', serif" font-size="14" font-weight="500" fill="#A33223" letter-spacing="7">
+    <textPath href="#stamp-arc-bottom" startOffset="50%" text-anchor="middle">EST · MMXXVI · ON RECORD</textPath>
+  </text>
+  <text x="200" y="170" text-anchor="middle" font-family="Georgia, 'Playfair Display', serif" font-size="18" fill="#A33223" letter-spacing="4">★ VOL · 01 ★</text>
+  <line x1="120" y1="184" x2="280" y2="184" stroke="#A33223" stroke-width="1"/>
+  <text x="200" y="218" text-anchor="middle" font-family="Georgia, 'Playfair Display', serif" font-size="42" font-weight="700" fill="#A33223" letter-spacing="2">TBSI</text>
+  <line x1="120" y1="232" x2="280" y2="232" stroke="#A33223" stroke-width="1"/>
+  <text x="200" y="252" text-anchor="middle" font-family="Georgia, 'Playfair Display', serif" font-size="14" fill="#A33223" letter-spacing="5">FILM RECORD</text>
+</svg>

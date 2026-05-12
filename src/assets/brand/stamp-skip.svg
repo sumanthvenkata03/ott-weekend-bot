@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 120" role="img" aria-label="SKIP stamp">
+  <g transform="translate(200 60) rotate(-6)">
+    <rect x="-180" y="-44" width="360" height="88" fill="none" stroke="#A33223" stroke-width="6"/>
+    <rect x="-172" y="-36" width="344" height="72" fill="none" stroke="#A33223" stroke-width="1.5"/>
+    <text x="0" y="-6" text-anchor="middle" font-family="Georgia, 'Playfair Display', serif" font-size="12" fill="#A33223" letter-spacing="6">★ THE VERDICT ★</text>
+    <text x="0" y="30" text-anchor="middle" font-family="Georgia, 'Playfair Display', serif" font-size="44" font-weight="700" fill="#A33223" letter-spacing="14">SKIP</text>
+  </g>
+</svg>

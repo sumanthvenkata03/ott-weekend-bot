@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 240" role="img" aria-label="The Big Screen Index wordmark">
+  <rect width="800" height="240" fill="#F4ECDC"/>
+  <line x1="60" y1="48" x2="740" y2="48" stroke="#1A1614" stroke-width="2"/>
+  <line x1="60" y1="54" x2="740" y2="54" stroke="#1A1614" stroke-width="0.8"/>
+  <text x="400" y="94" text-anchor="middle" font-family="Georgia, 'Playfair Display', serif" font-size="22" fill="#1A1614" letter-spacing="6">★ EST 2026 · MUMBAI · ON RECORD ★</text>
+  <text x="400" y="160" text-anchor="middle" font-family="Georgia, 'Playfair Display', serif" font-size="60" font-weight="700" fill="#1A1614" letter-spacing="4">THE BIG SCREEN</text>
+  <text x="400" y="206" text-anchor="middle" font-family="Georgia, 'Playfair Display', serif" font-size="60" font-weight="700" fill="#A33223" letter-spacing="14" font-style="italic">INDEX</text>
+  <line x1="60" y1="220" x2="740" y2="220" stroke="#1A1614" stroke-width="0.8"/>
+  <line x1="60" y1="226" x2="740" y2="226" stroke="#1A1614" stroke-width="2"/>
+</svg>
