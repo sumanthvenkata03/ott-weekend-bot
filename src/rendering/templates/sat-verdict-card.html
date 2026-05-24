@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;0,800;1,400;1,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;0,800;1,400;1,700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --ink: #1A1614;
@@ -191,27 +191,51 @@
     margin-bottom: 4px;
     opacity: 1;
   }
-  .platform-row {
-    margin-top: auto;
+  .platform-line {
     display: flex;
-    gap: 8px;
     align-items: center;
-    padding-top: 16px;
-  }
-  .platform-tag {
-    background: var(--ink);
-    color: var(--brass);
+    gap: 14px;
     font-family: 'Inter', sans-serif;
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    padding: 6px 12px;
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    padding-bottom: 6px;
+    margin-top: 12px;
+    margin-bottom: 18px;
+    border-bottom: 2px solid var(--platform-line-color, #C49A3F);
+    color: var(--platform-line-color, #C49A3F);
+  }
+  body.must-watch .platform-line,
+  body.worth-a-try .platform-line {
+    --platform-line-color: #F4ECDC;
+    --stamp-border-color: #A33223;
+  }
+  .platform-line .star {
+    color: #A33223;
+  }
+  .logo-stamp {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 5px;
+    border: 1.5px solid var(--stamp-border-color, var(--platform-line-color, #C49A3F));
+    border-radius: 2px;
+    flex-shrink: 0;
+    box-sizing: border-box;
+  }
+  .logo-stamp svg {
+    width: 100%;
+    height: 100%;
+    display: block;
   }
 
   /* Verdict stamp variants */
   .verdict-stamp {
     position: absolute;
-    bottom: 210px;
+    bottom: 130px;
     right: 60px;
     transform: rotate(-6deg);
     padding: 12px 20px;
@@ -303,17 +327,23 @@
     <!-- Metadata -->
     <div class="metadata">
       <div class="admit-one">★ ADMIT ONE ★</div>
+      <div class="platform-line">
+        <span class="star">★</span>
+        {% if card.platform and card.platform.length > 0 %}
+          <span>NOW ON</span>
+          <span>{{ card.platform[0] | upper }}</span>
+          {% set stem = card.platformLogos[0] %}
+          {% if stem %}<span class="logo-stamp">{{ stem | platformLogoSvg | safe }}</span>{% endif %}
+        {% else %}
+          <span>STREAMING TBA</span>
+        {% endif %}
+      </div>
       <div class="film-title">{{ card.filmTitle }}</div>
       <div class="lang-line">{{ card.language }}{% if card.runtime %} · {{ card.runtime }} min{% endif %}</div>
       <div class="one-line">{{ card.oneLineVerdict }}</div>
       <div class="watch-if">
         <div class="label">★ WATCH IF</div>
         {{ card.watchIf | truncate(120) }}
-      </div>
-      <div class="platform-row">
-        {% for p in card.platform %}{% if loop.index <= 3 %}
-        <span class="platform-tag">{{ p | upper }}</span>
-        {% endif %}{% endfor %}
       </div>
     </div>
 

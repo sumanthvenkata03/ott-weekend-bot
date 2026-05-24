@@ -5,7 +5,8 @@
 import puppeteer, { Browser, Page } from "puppeteer";
 import nunjucks from "nunjucks";
 import { mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { log } from "../shared/logger.js";
 
@@ -53,6 +54,20 @@ env.addFilter("pluralize", (singular: unknown, count: unknown, plural?: string) 
   const n = Number(count);
   if (n === 1) return String(singular);
   return plural ?? `${singular}s`;
+});
+
+// Inline a platform logo SVG by filename stem (e.g. "netflix" → contents of netflix.svg).
+// Returns "" when the stem is empty or the file is missing.
+env.addFilter("platformLogoSvg", (stem: unknown) => {
+  const slug = String(stem ?? "").trim();
+  if (!slug) return "";
+  try {
+    const path = resolve(process.cwd(), "src/assets/platform-logos", `${slug}.svg`);
+    const svg = readFileSync(path, "utf-8");
+    return svg.replace(/<\?xml.*?\?>/, "").trim();
+  } catch {
+    return "";
+  }
 });
 
 // Singleton browser — launched once per process, reused across renders

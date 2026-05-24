@@ -68,6 +68,7 @@ export interface WedDropGridItem {
   filmTitle: string;
   language: string;
   platform: string[];
+  platformLogos: string[];     // ["netflix", "jiohotstar"] — filename stems
   posterUrl?: string;
   fallbackColor: string;
 }
@@ -108,6 +109,7 @@ export interface MonMovementGridItem {
   filmTitle: string;
   language: string;
   platform: string[];
+  platformLogos: string[];     // ["netflix", "jiohotstar"] — filename stems
   posterUrl?: string;
   fallbackColor: string;
   isGem: boolean;  // true for hiddenGems, false for newArrivals
