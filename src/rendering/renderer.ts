@@ -42,7 +42,6 @@ env.addFilter("date", (input: string, fmt: string) => {
 env.addFilter("truncate", (s: unknown, max = 80) => {
   const str = String(s ?? "").trim();
   if (str.length <= max) return str;
-  // Find the last space within the limit so we don't break mid-word
   const cutoff = str.slice(0, max - 1);
   const lastSpace = cutoff.lastIndexOf(" ");
   const safeCut = lastSpace > max * 0.6 ? cutoff.slice(0, lastSpace) : cutoff;
@@ -84,14 +83,10 @@ export async function closeBrowser(): Promise<void> {
 }
 
 export interface RenderOptions {
-  /** Template filename without extension (e.g. "sat-verdict-cover") */
   templateName: string;
-  /** Data passed to the Nunjucks template */
   data: Record<string, unknown>;
-  /** Output dimensions */
   width: number;
   height: number;
-  /** Absolute or project-relative path where the PNG is written */
   outputPath: string;
 }
 
@@ -110,16 +105,35 @@ export async function renderToPNG(options: RenderOptions): Promise<string> {
   const page: Page = await browser.newPage();
   await page.setViewport({ width, height, deviceScaleFactor: 2 });
 
-  // 3. Load HTML, wait for fonts + images
+  // 3. Load HTML
   await page.setContent(html, {
     waitUntil: ["load", "networkidle0"],
     timeout: 30_000,
   });
 
-  // 4. Wait an extra tick for any web fonts (Playfair / Inter) to settle
+  // 4. Explicitly wait for every <img> tag to load OR fail.
+  //    This is more reliable than networkidle0 alone for CDN images
+  //    (TMDb CDN can be slower than 500ms idle threshold).
+  await page.evaluate(async () => {
+    const imgs = Array.from(document.images);
+    await Promise.all(
+      imgs.map(img => {
+        if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+        return new Promise<void>(resolve => {
+          const done = () => resolve();
+          img.addEventListener("load", done, { once: true });
+          img.addEventListener("error", done, { once: true });
+          // Safety net: don't wait more than 8s for any single image
+          setTimeout(done, 8_000);
+        });
+      })
+    );
+  });
+
+  // 5. Extra settle for fonts
   await new Promise(resolve => setTimeout(resolve, 250));
 
-  // 5. Ensure output directory exists, then screenshot
+  // 6. Ensure output directory exists, then screenshot
   await mkdir(dirname(outputPath), { recursive: true });
   await page.screenshot({
     path: outputPath,

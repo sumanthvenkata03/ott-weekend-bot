@@ -27,21 +27,29 @@
     overflow: hidden;
   }
 
-  /* Hero poster fills most of the canvas */
+  /* Hero layer: image overlay on a colored fallback background */
   .hero {
     position: absolute;
     top: 0; left: 0; right: 0;
     height: 78%;
     background-color: {{ hero.fallbackColor }};
-    background-image: {% if hero.posterUrl %}url('{{ hero.posterUrl }}'){% else %}none{% endif %};
-    background-size: cover;
-    background-position: center top;
+    overflow: hidden;
+  }
+  .hero-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center top;
+    z-index: 2;
   }
 
-  /* Fallback typography card (shown when no poster URL) */
+  /* Fallback typography (always rendered, hidden when an image loads on top) */
   .hero-fallback {
     position: absolute;
     inset: 0;
+    z-index: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -50,6 +58,7 @@
     text-align: center;
     color: var(--cream);
   }
+  .hero-fallback-hidden { display: none; }
   .hero-fallback .lang-tag {
     font-family: 'Playfair Display', serif;
     font-size: 32px;
@@ -88,6 +97,7 @@
       rgba(20, 16, 14, 0.92) 35%,
       rgba(20, 16, 14, 0.7) 65%,
       rgba(20, 16, 14, 0.0) 100%);
+    z-index: 5;
   }
 
   /* Top masthead */
@@ -211,8 +221,10 @@
 
   <!-- HERO IMAGE LAYER -->
   <div class="hero">
-    {% if not hero.posterUrl %}
-    <div class="hero-fallback">
+    {% if hero.posterUrl %}
+      <img src="{{ hero.posterUrl }}" class="hero-img" alt="" />
+    {% endif %}
+    <div class="hero-fallback {% if hero.posterUrl %}hero-fallback-hidden{% endif %}">
       <div class="lang-tag">{{ hero.language | upper }}</div>
       <div class="title-big">{{ hero.filmTitle }}</div>
       <div class="rule"></div>
@@ -220,7 +232,6 @@
         {% if hero.director %}DIR · {{ hero.director | upper }}{% endif %}
       </div>
     </div>
-    {% endif %}
   </div>
 
   <!-- DARK GRADIENT OVERLAY -->

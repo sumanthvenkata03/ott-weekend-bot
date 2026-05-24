@@ -139,12 +139,10 @@ const isMainModule = import.meta.url.endsWith(
 );
 
 if (isMainModule) {
-  // Sample data with diverse verdicts AND a real TMDb poster URL
-  // The Bramayugam Malayalam horror has a known TMDb poster — tests CDN fetch
   const sampleDraft: SaturdayVerdictDraft = {
     pillar: "Sat Verdict",
     weekendDates: "May 16 — May 18, 2026",
-    caption: "Three verdicts, three different calls. Pennum Porattum earns the watch. Pati Patni is a hard skip. Sattendru is a maybe.",
+    caption: "Three verdicts, three different calls.",
     hashtags: "#OTTReleases #Malayalam #WeekendWatch",
     hotTake: "A quiet Malayalam film about siblings cleaning out their dead mother's house has more to say in 90 minutes than three Hindi releases combined this weekend.",
     verdicts: [
@@ -198,7 +196,7 @@ if (isMainModule) {
         director: "Mathew Thomas",
         cast: ["Parvathy Thiruvothu", "Tovino Thomas"],
         synopsis: "Two siblings return home to clean out their late mother's house.",
-        posterUrl: undefined,  // fallback test
+        posterUrl: undefined,
         audioLanguages: ["Malayalam"],
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
@@ -216,8 +214,8 @@ if (isMainModule) {
         director: "Rahul Sadasivan",
         cast: ["Mammootty", "Arjun Ashokan", "Sidharth Bharathan"],
         synopsis: "A 17th-century horror set in a forsaken mansion.",
-        // This is a real TMDb poster URL — tests CDN fetch
-        posterUrl: "https://image.tmdb.org/t/p/w500/oxLwGRoTuFOFFqEUg1lODHGS3KW.jpg",
+        // Real verified TMDb poster URL — tests CDN fetch end-to-end
+        posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
         audioLanguages: ["Malayalam"],
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
@@ -235,7 +233,7 @@ if (isMainModule) {
         director: "Mudassar Aziz",
         cast: ["Ayushmann Khurrana", "Tabu", "Wamiqa Gabbi"],
         synopsis: "The third installment of a franchise nobody asked for.",
-        posterUrl: undefined,  // fallback test (different language → different color)
+        posterUrl: undefined,
         audioLanguages: ["Hindi"],
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
