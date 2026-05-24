@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;0,800;1,400;1,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1A1614;
+    --cream: #F4ECDC;
+    --vermillion: #A33223;
+    --brass: #C49A3F;
+    --bottle: #2E5742;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 1080px;
+    height: 1080px;
+    overflow: hidden;
+    font-family: 'Playfair Display', Georgia, serif;
+    background: var(--brass);
+    color: var(--ink);
+  }
+  /* Skip variant: cream background, vermillion border accent */
+  body.skip { background: var(--cream); }
+  /* Worth a try: brass gold (default, no override) */
+  /* Must watch: brass gold (default) */
+
+  .canvas {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Masthead */
+  .masthead {
+    position: absolute;
+    top: 50px;
+    left: 60px;
+    right: 60px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .masthead .label {
+    font-family: 'Playfair Display', serif;
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: 4px;
+    color: var(--ink);
+  }
+  .masthead .date {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 20px;
+    color: var(--ink);
+  }
+
+  /* Perforation line — the ticket-stub signature */
+  .perforation {
+    position: absolute;
+    top: 130px;
+    left: 0; right: 0;
+    border-top: 2px dashed var(--ink);
+  }
+  .perforation::before,
+  .perforation::after {
+    content: '';
+    position: absolute;
+    top: -16px;
+    width: 32px;
+    height: 32px;
+    background: var(--cream);
+    border-radius: 50%;
+  }
+  body:not(.skip) .perforation::before,
+  body:not(.skip) .perforation::after {
+    background: var(--ink);  /* matches the cream-on-brass perf hole illusion */
+  }
+  .perforation::before { left: -16px; }
+  .perforation::after  { right: -16px; }
+
+  /* Ticket body — poster window left, metadata right */
+  .ticket-body {
+    position: absolute;
+    top: 180px;
+    left: 60px;
+    right: 60px;
+    bottom: 180px;
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 50px;
+  }
+  .poster-window {
+    background-color: {{ card.fallbackColor }};
+    background-image: {% if card.posterUrl %}url('{{ card.posterUrl }}'){% else %}none{% endif %};
+    background-size: cover;
+    background-position: center;
+    border: 4px solid var(--vermillion);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* Fallback typography card (when no posterUrl) */
+  .poster-fallback {
+    color: var(--cream);
+    text-align: center;
+    padding: 30px;
+  }
+  .poster-fallback .lang {
+    font-family: 'Playfair Display', serif;
+    font-size: 16px;
+    letter-spacing: 6px;
+    opacity: 0.75;
+    margin-bottom: 16px;
+  }
+  .poster-fallback .title-stack {
+    font-family: 'Playfair Display', serif;
+    font-size: 38px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    line-height: 1;
+  }
+  .poster-fallback .credit {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 2px;
+    margin-top: 18px;
+    opacity: 0.7;
+  }
+
+  /* Metadata block */
+  .metadata { display: flex; flex-direction: column; }
+  .admit-one {
+    font-family: 'Playfair Display', serif;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 5px;
+    color: var(--ink);
+    border-bottom: 1px solid var(--ink);
+    padding-bottom: 8px;
+    margin-bottom: 14px;
+  }
+  .film-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 56px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    line-height: 0.98;
+    color: var(--ink);
+    margin-bottom: 18px;
+  }
+  .lang-line {
+    font-family: 'Playfair Display', serif;
+    font-style: italic;
+    font-size: 20px;
+    color: var(--ink);
+    margin-bottom: 16px;
+    opacity: 0.85;
+  }
+  .one-line {
+    font-family: 'Playfair Display', serif;
+    font-size: 22px;
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--ink);
+    border-top: 1px solid var(--ink);
+    padding-top: 14px;
+    margin-bottom: 16px;
+  }
+  .watch-if {
+    font-family: 'Inter', sans-serif;
+    font-size: 16px;
+    line-height: 1.45;
+    color: var(--ink);
+    opacity: 0.85;
+  }
+  .watch-if .label {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-size: 13px;
+    margin-bottom: 4px;
+    opacity: 1;
+  }
+  .platform-row {
+    margin-top: auto;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding-top: 16px;
+  }
+  .platform-tag {
+    background: var(--ink);
+    color: var(--brass);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    padding: 6px 12px;
+  }
+
+  /* THE VERDICT STAMP — tilted, prominent, the heart of the slide */
+  .verdict-stamp {
+    position: absolute;
+    bottom: 210px;
+    right: 60px;
+    transform: rotate(-6deg);
+    padding: 12px 20px;
+    z-index: 10;
+    text-align: center;
+    font-family: 'Playfair Display', serif;
+    font-weight: 700;
+  }
+  .verdict-stamp .kicker {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 3px;
+    margin-bottom: 2px;
+  }
+  .verdict-stamp .label {
+    font-size: 26px;
+    letter-spacing: 4px;
+  }
+  /* Variant: MUST WATCH — vermillion fill */
+  .verdict-must-watch {
+    background: var(--vermillion);
+    color: var(--cream);
+    border: 2px solid var(--cream);
+    box-shadow: inset 0 0 0 4px var(--vermillion);
+  }
+  /* Variant: WORTH A TRY — brass gold on ink */
+  .verdict-worth-a-try {
+    background: var(--ink);
+    color: var(--brass);
+    border: 2px solid var(--brass);
+  }
+  /* Variant: SKIP — outline vermillion, no fill */
+  .verdict-skip {
+    background: transparent;
+    color: var(--vermillion);
+    border: 5px solid var(--vermillion);
+    padding: 14px 28px;
+  }
+  .verdict-skip .label {
+    font-size: 32px;
+    letter-spacing: 8px;
+  }
+
+  /* Footer mark */
+  .footer {
+    position: absolute;
+    bottom: 50px;
+    left: 60px;
+    right: 60px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1.5px solid var(--ink);
+    padding-top: 14px;
+    font-family: 'Playfair Display', serif;
+    font-size: 16px;
+    letter-spacing: 4px;
+    color: var(--ink);
+  }
+  .footer .meta { font-family: 'JetBrains Mono', monospace; font-size: 14px; letter-spacing: 1px; }
+</style>
+</head>
+<body class="{{ card.verdictKind }}">
+<div class="canvas">
+
+  <!-- Masthead -->
+  <div class="masthead">
+    <span class="label">★ THE VERDICT · №{{ issue }}</span>
+    <span class="date">{{ date | date('dd-mm') }}</span>
+  </div>
+
+  <!-- Perforation -->
+  <div class="perforation"></div>
+
+  <!-- Ticket body -->
+  <div class="ticket-body">
+
+    <!-- Poster window (with typographic fallback) -->
+    <div class="poster-window">
+      {% if not card.posterUrl %}
+      <div class="poster-fallback">
+        <div class="lang">{{ card.language | upper }}</div>
+        <div class="title-stack">{{ card.filmTitle }}</div>
+        {% if card.director %}
+        <div class="credit">DIR · {{ card.director | upper }}</div>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Metadata -->
+    <div class="metadata">
+      <div class="admit-one">★ ADMIT ONE ★</div>
+      <div class="film-title">{{ card.filmTitle }}</div>
+      <div class="lang-line">{{ card.language }}{% if card.runtime %} · {{ card.runtime }} min{% endif %}</div>
+      <div class="one-line">{{ card.oneLineVerdict }}</div>
+      <div class="watch-if">
+        <div class="label">★ WATCH IF</div>
+        {{ card.watchIf | truncate(120) }}
+      </div>
+      <div class="platform-row">
+        {% for p in card.platform %}{% if loop.index <= 3 %} <span class="platform-tag">{{ p | upper }}</span>
+          {% endif %}{% endfor %}
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Verdict stamp overlay -->
+  <div class="verdict-stamp verdict-{{ card.verdictKind }}">
+    {% if card.verdictKind == "skip" %}
+      <div class="kicker">★ THE VERDICT ★</div>
+      <div class="label">SKIP</div>
+    {% elif card.verdictKind == "must-watch" %}
+      <div class="kicker">★ THE VERDICT ★</div>
+      <div class="label">MUST WATCH</div>
+    {% else %}
+      <div class="kicker">★ THE VERDICT ★</div>
+      <div class="label">WORTH A TRY</div>
+    {% endif %}
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <span>★ SAT VERDICT · {{ slotNumber }}/{{ totalSlots }} ★</span>
+    <span class="meta">VOL. {{ vol }} · ISSUE {{ issue }}</span>
+  </div>
+
+</div>
+</body>
+</html>
