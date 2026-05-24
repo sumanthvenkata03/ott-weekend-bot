@@ -104,6 +104,7 @@ IMPORTANT:
     weekHeadline: output.weekHeadline,
     caption: output.caption,
     hashtags: output.hashtags.join(" "),
+    slides: output.carouselSlides,
     carouselSlides,
     newArrivals,
     hiddenGems,

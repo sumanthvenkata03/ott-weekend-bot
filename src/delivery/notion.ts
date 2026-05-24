@@ -84,15 +84,23 @@ export interface WednesdayDropDraft {
   carouselSlides: string;        // unchanged: markdown blob for Notion display
 }
 
+export interface MovementSlide {
+  slideNumber: number;
+  type: "cover" | "headline" | "arrival" | "gem" | "cta";
+  title: string;
+  body: string;
+}
+
 export interface MovementDraft {
   pillar: "Mon Movement";
   weekLabel: string;             // "Week of May 4 — May 10, 2026"
   caption: string;
   hashtags: string;
-  
+
   newArrivals: Release[];        // landed in last 7 days
   hiddenGems: Release[];         // older but worth surfacing
-  
+
+  slides: MovementSlide[];       // structured per-slide data for rendering
   carouselSlides: string;        // markdown summary of slide structure
   weekHeadline: string;          // 1-line takeaway, the post's spine
 }

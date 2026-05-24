@@ -5,6 +5,7 @@
 import type { Release, Verdict } from "../shared/types.js";
 import type { SaturdayVerdictDraft, VerdictSlide } from "../delivery/notion.js";
 import type { WednesdayDropDraft, WedDropSlide } from "../delivery/notion.js";
+import type { MovementDraft, MovementSlide } from "../delivery/notion.js";
 
 /** Common fields every render context carries */
 export interface RenderBase {
@@ -95,6 +96,46 @@ export interface WedDropCardContext extends RenderBase {
     cast: string[];
     runtime?: number;
   };
+  slotNumber: number;
+  totalSlots: number;
+}
+
+// ============================================================
+// Mon Movement — Newspaper Grid + arrival/gem dual-mode
+// ============================================================
+
+export interface MonMovementGridItem {
+  filmTitle: string;
+  language: string;
+  platform: string[];
+  posterUrl?: string;
+  fallbackColor: string;
+  isGem: boolean;  // true for hiddenGems, false for newArrivals
+}
+
+/** Full context for the Mon Movement cover slide (1080x1350) */
+export interface MonMovementCoverContext extends RenderBase {
+  pillarLabel: "MON MOVEMENT";
+  weekLabel: string;
+  weekHeadline: string;       // the LLM's pattern-recognition line, the post's spine
+  arrivalCount: number;
+  gemCount: number;
+  coverHeadline: string;      // from cover slide title
+  coverSubtext: string;       // from cover slide body
+  gridItems: MonMovementGridItem[];  // up to 4 for the cover grid (arrivals first, gems to fill)
+}
+
+/** Full context for a Mon Movement body card slide (1080x1080) */
+export interface MonMovementCardContext extends RenderBase {
+  pillarLabel: "MON MOVEMENT";
+  title: string;             // from slide.title
+  body: string;              // from slide.body
+  release: MonMovementGridItem & {
+    director?: string;
+    cast: string[];
+    runtime?: number;
+  };
+  slotKind: "arrival" | "gem";   // determines accent color + copy
   slotNumber: number;
   totalSlots: number;
 }
