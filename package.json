@@ -12,6 +12,7 @@
     "job:saturday": "tsx src/jobs/saturday-verdict.ts",
     "job:sunday": "tsx src/jobs/sunday-spotlight.ts",
     "job:monday": "tsx src/jobs/monday-movement.ts",
+    "render:wed-drop": "tsx src/rendering/render-wed-drop.ts",
     "render:sat-verdict": "tsx src/rendering/render-sat-verdict.ts"
   },
   "keywords": [],

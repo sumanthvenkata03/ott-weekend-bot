@@ -67,13 +67,21 @@ export interface SaturdayVerdictDraft {
   releases: Release[];           // for Notion's relations / Platform / Language tags
 }
 
+export interface WedDropSlide {
+  slideNumber: number;
+  type: "cover" | "index" | "release" | "cta";
+  title: string;
+  body: string;
+}
+
 export interface WednesdayDropDraft {
   pillar: "Wed Drop";
-  weekendDates: string;         // e.g. "May 15 — May 17, 2026"
+  weekendDates: string;
   caption: string;
   hashtags: string;
-  releases: Release[];           // films included in this drop
-  carouselSlides: string;        // markdown summary of 10-slide structure
+  releases: Release[];
+  slides: WedDropSlide[];        // new: structured slide data for rendering
+  carouselSlides: string;        // unchanged: markdown blob for Notion display
 }
 
 export interface MovementDraft {

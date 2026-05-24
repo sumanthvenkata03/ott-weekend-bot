@@ -107,11 +107,12 @@ Be specific. Take stands. Lean South-heavy where the films justify it.`;
     .join("\n\n");
   
   return {
-    pillar: "Wed Drop",
-    weekendDates,
-    caption: output.caption,
-    hashtags: output.hashtags.join(" "),
-    carouselSlides,
-    releases,
-  };
+  pillar: "Wed Drop",
+  weekendDates,
+  caption: output.caption,
+  hashtags: output.hashtags.join(" "),
+  slides: output.carouselSlides,      // new: preserve structured data
+  carouselSlides,
+  releases,
+};
 }

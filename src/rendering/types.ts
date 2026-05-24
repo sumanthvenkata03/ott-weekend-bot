@@ -4,6 +4,7 @@
 
 import type { Release, Verdict } from "../shared/types.js";
 import type { SaturdayVerdictDraft, VerdictSlide } from "../delivery/notion.js";
+import type { WednesdayDropDraft, WedDropSlide } from "../delivery/notion.js";
 
 /** Common fields every render context carries */
 export interface RenderBase {
@@ -51,6 +52,49 @@ export interface SatVerdictCardContext extends RenderBase {
   pillarLabel: "SAT VERDICT";
   card: SatVerdictCard;
   /** 1-indexed position in the carousel */
+  slotNumber: number;
+  totalSlots: number;
+}
+
+// ============================================================
+// Wed Drop — Newspaper Grid mode
+// ============================================================
+
+
+
+/** A poster + label combo for the cover grid */
+export interface WedDropGridItem {
+  filmTitle: string;
+  language: string;
+  platform: string[];
+  posterUrl?: string;
+  fallbackColor: string;
+}
+
+/** Full context for the Wed Drop cover slide (1080x1350) */
+export interface WedDropCoverContext extends RenderBase {
+  pillarLabel: "WED DROP";
+  weekendDates: string;
+  filmCount: number;
+  /** From LLM: 6-word headline + subtext (slide 1 in carouselSlides) */
+  coverHeadline: string;
+  coverSubtext: string;
+  /** Up to 4 films shown as a 2x2 grid */
+  gridItems: WedDropGridItem[];
+}
+
+/** Full context for a Wed Drop body card slide (1080x1080) */
+export interface WedDropCardContext extends RenderBase {
+  pillarLabel: "WED DROP";
+  /** From LLM: title (= film title) + body (= why this matters) */
+  title: string;
+  body: string;
+  /** Linked Release data for poster + metadata */
+  release: WedDropGridItem & {
+    director?: string;
+    cast: string[];
+    runtime?: number;
+  };
   slotNumber: number;
   totalSlots: number;
 }

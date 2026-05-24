@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;0,800;1,400;1,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1A1614;
+    --cream: #F4ECDC;
+    --vermillion: #A33223;
+    --brass: #C49A3F;
+    --bottle: #2E5742;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 1080px;
+    height: 1350px;
+    overflow: hidden;
+    font-family: 'Playfair Display', Georgia, serif;
+    background: var(--cream);
+    color: var(--ink);
+  }
+  .canvas { position: relative; width: 100%; height: 100%; padding: 60px 70px; }
+
+  /* Masthead — newspaper-style title bar */
+  .masthead {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 22px;
+    letter-spacing: 4px;
+    color: var(--ink);
+  }
+  .masthead .date {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    font-size: 20px;
+  }
+  .masthead-rule {
+    border-top: 4px solid var(--ink);
+    margin-top: 14px;
+    padding-top: 4px;
+    border-bottom: 1px solid var(--ink);
+  }
+
+  /* Headline block */
+  .headline-block {
+    margin-top: 40px;
+    text-align: center;
+  }
+  .headline-block .kicker {
+    font-family: 'Playfair Display', serif;
+    font-size: 18px;
+    font-style: italic;
+    color: var(--vermillion);
+    letter-spacing: 3px;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+  }
+  .headline-block .big {
+    font-family: 'Playfair Display', serif;
+    font-size: 84px;
+    font-weight: 700;
+    line-height: 0.98;
+    color: var(--ink);
+    letter-spacing: -1.5px;
+  }
+  .headline-block .sub {
+    font-family: 'Playfair Display', serif;
+    font-style: italic;
+    font-size: 32px;
+    color: var(--vermillion);
+    margin-top: 18px;
+    line-height: 1.3;
+  }
+
+  /* Poster grid 2x2 */
+  .poster-grid {
+    position: absolute;
+    top: 480px;
+    left: 70px;
+    right: 70px;
+    bottom: 160px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 18px;
+  }
+  .poster-cell {
+    background-color: var(--ink);
+    border: 4px solid var(--vermillion);
+    position: relative;
+    overflow: hidden;
+  }
+  .poster-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 2;
+  }
+  .poster-fallback {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--cream);
+    text-align: center;
+    padding: 16px;
+  }
+  .poster-fallback-hidden { display: none; }
+  .poster-fallback .lang {
+    font-family: 'Playfair Display', serif;
+    font-size: 12px;
+    letter-spacing: 4px;
+    opacity: 0.7;
+    margin-bottom: 10px;
+  }
+  .poster-fallback .title {
+    font-family: 'Playfair Display', serif;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.5px;
+  }
+  /* Title bar at bottom of each poster cell */
+  .poster-tag {
+    position: absolute;
+    bottom: 0;
+    left: 0; right: 0;
+    background: rgba(0,0,0,0.8);
+    color: var(--cream);
+    padding: 8px 12px;
+    font-family: 'Playfair Display', serif;
+    font-size: 17px;
+    font-weight: 700;
+    text-align: center;
+    z-index: 3;
+    border-top: 1.5px solid var(--brass);
+  }
+  .poster-tag .lang-pip {
+    color: var(--brass);
+    font-style: italic;
+    font-size: 13px;
+    font-weight: 500;
+    margin-left: 6px;
+  }
+
+  /* Footer */
+  .footer {
+    position: absolute;
+    bottom: 60px;
+    left: 70px;
+    right: 70px;
+    border-top: 4px solid var(--ink);
+    padding-top: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .footer .brand {
+    font-family: 'Playfair Display', serif;
+    font-size: 18px;
+    letter-spacing: 4px;
+    color: var(--ink);
+  }
+  .footer .meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    letter-spacing: 1px;
+    color: var(--ink);
+  }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <div class="masthead">
+    <span>★ THE BIG SCREEN INDEX · WED DROP</span>
+    <span class="date">№ {{ issue }} · {{ date | date('dd-mm-yy') }}</span>
+  </div>
+  <div class="masthead-rule"></div>
+
+  <div class="headline-block">
+    <div class="kicker">★ THE WEEKEND ENDS HERE ★</div>
+    <div class="big">{{ coverHeadline }}</div>
+    <div class="sub">{{ coverSubtext }}</div>
+  </div>
+
+  <div class="poster-grid">
+    {% for item in gridItems %}{% if loop.index <= 4 %}
+    <div class="poster-cell" style="background-color: {{ item.fallbackColor }};">
+      {% if item.posterUrl %}
+        <img src="{{ item.posterUrl }}" class="poster-img" alt="" />
+      {% endif %}
+      <div class="poster-fallback {% if item.posterUrl %}poster-fallback-hidden{% endif %}">
+        <div class="lang">{{ item.language | upper }}</div>
+        <div class="title">{{ item.filmTitle }}</div>
+      </div>
+      <div class="poster-tag">
+        {{ item.filmTitle }}<span class="lang-pip">{{ item.language }}</span>
+      </div>
+    </div>
+    {% endif %}{% endfor %}
+  </div>
+
+  <div class="footer">
+    <span class="brand">★ VOL. {{ vol }} · {{ filmCount }} {{ "FILM" | pluralize(filmCount, "FILMS") }} ★</span>
+    <span class="meta">{{ weekendDates }}</span>
+  </div>
+
+</div>
+</body>
+</html>
