@@ -339,7 +339,9 @@
         {% endif %}
       </div>
       <div class="film-title">{{ card.filmTitle }}</div>
-      <div class="lang-line">{{ card.language }}{% if card.runtime %} · {{ card.runtime }} min{% endif %}</div>
+      {% if card.runtime %}
+      <div class="lang-line">{{ card.language }} · {{ card.runtime }} min</div>
+      {% endif %}
       <div class="one-line">{{ card.oneLineVerdict }}</div>
       <div class="watch-if">
         <div class="label">★ WATCH IF</div>

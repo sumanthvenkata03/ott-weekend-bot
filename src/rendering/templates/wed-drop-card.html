@@ -251,7 +251,9 @@
         {% endif %}
       </div>
       <div class="film-title">{{ title }}</div>
+      {% if release.runtime or release.director %}
       <div class="meta-row">{{ release.language }}{% if release.runtime %} · {{ release.runtime }} min{% endif %}{% if release.director %} · dir. {{ release.director }}{% endif %}</div>
+      {% endif %}
       <div class="why-block">
         <div class="why-label">★ WHY THIS WEEKEND</div>
         <div class="why-body">{{ body | truncate(180) }}</div>

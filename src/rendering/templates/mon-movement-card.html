@@ -283,7 +283,9 @@
         {% endif %}
       </div>
       <div class="film-title">{{ title }}</div>
+      {% if release.runtime or release.director %}
       <div class="meta-row">{{ release.language }}{% if release.runtime %} · {{ release.runtime }} min{% endif %}{% if release.director %} · dir. {{ release.director }}{% endif %}</div>
+      {% endif %}
       <div class="why-block">
         {% if slotKind == 'gem' %}
         <div class="why-label is-gem">★ WHY YOU MISSED IT</div>

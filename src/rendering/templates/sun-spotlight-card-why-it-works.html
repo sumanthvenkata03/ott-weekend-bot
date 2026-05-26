@@ -261,7 +261,9 @@
   <div class="body-right">
     <div class="body-lang">{{ language | upper }}</div>
     <div class="body-title">{{ filmTitle }}</div>
+    {% if runtime or director %}
     <div class="body-meta">{{ language }}{% if runtime %} · {{ runtime }} min{% endif %}{% if director %} · dir. {{ director }}{% endif %}</div>
+    {% endif %}
     <div class="body-rule"></div>
     <div class="why-body">{{ whyItWorks }}</div>
     <div class="platform-line">

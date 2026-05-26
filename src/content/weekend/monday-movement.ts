@@ -98,7 +98,16 @@ DELIVERABLES (respond as JSON):
 IMPORTANT:
 - The weekHeadline is the most important line in the entire post. Make it specific, opinionated, and pattern-aware.
 - Don't dilute. If there's only 1 great arrival, lead with it and don't pad with weak ones.
-- Hidden gems should feel like "you missed this and you shouldn't have" — not just "another good film."`;
+- Hidden gems should feel like "you missed this and you shouldn't have" — not just "another good film."
+
+HEADLINE MIX RULE — the weekHeadline must acknowledge BOTH variants in this week's slate, the new arrivals (type "arrival") AND the hidden gems (type "gem"). Mon Movement always has ≥1 of each by design constraint, so this rule applies on every standard run. When the mix is heavily skewed (4 arrival + 1 gem, or 1 arrival + 4 gem), the lighter variant needs only a brief acknowledgment — a half-clause is enough — but it must appear.
+
+Acceptable headline shapes:
+- Lead with arrivals, acknowledge gems at the end: "...meanwhile Mollywood's March catalog is still the strongest watch"
+- Lead with the gem angle, acknowledge arrivals: "Two Malayalam thrillers worth catching up on while Hindi delivers its one big Sonakshi face-off"
+- Frame the contrast directly: "Telugu Prime Video's loud week vs. Mollywood's quiet excellence"
+
+Not acceptable: headline that only mentions arrivals when gems exist, or only mentions gems when arrivals exist.`;
   
   const output = await callClaudeJSON<LLMOutput>(prompt, "sonnet");
 
