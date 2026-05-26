@@ -6,6 +6,10 @@ import { writeSaturdayVerdictToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
 import { notifyDraftReady } from "../delivery/slack.js";
+import { renderSatVerdict } from "../rendering/render-sat-verdict.js";
+import { closeBrowser } from "../rendering/renderer.js";
+import { uploadPngsToR2 } from "../delivery/r2-upload.js";
+import { getIssueNumberForToday } from "../shared/issue-number.js";
 /**
  * Pick the weekend window for "this Saturday":
  * - If today IS Sat/Sun: this weekend (Fri-Sun)
@@ -59,9 +63,44 @@ async function main() {
     return acc;
   }, {});
   log.info(`Verdict tally: ${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join("  ")}`);
-  
-  const url = await writeSaturdayVerdictToNotion(draft);
 
+  const today = new Date();
+  const issueNumber = getIssueNumberForToday();
+  const dateStr = format(today, "yyyy-MM-dd");
+
+  log.info(`Rendering PNGs (Issue ${issueNumber})...`);
+  const renderResult = await renderSatVerdict(draft, issueNumber, "output/posts");
+
+  // Quality gate: LLM is told to produce 3-5 cards. If it didn't, fail loudly
+  // so we don't ship a malformed carousel.
+  const cardCount = renderResult.cardPaths.length;
+  if (cardCount < 3 || cardCount > 5) {
+    throw new Error(
+      `Sat Verdict produced ${cardCount} cards; expected 3-5. Check LLM prompt or rerun.`
+    );
+  }
+
+  log.info("Uploading to R2...");
+  const uploads = await uploadPngsToR2([
+    { localPath: renderResult.coverPath, r2Key: `sat-verdict/${dateStr}/cover.png` },
+    ...renderResult.cardPaths.map((p, i) => ({
+      localPath: p,
+      r2Key: `sat-verdict/${dateStr}/card-${String(i + 1).padStart(2, "0")}.png`,
+    })),
+  ]);
+  const cover = uploads[0]!;
+  const cardUploads = uploads.slice(1);
+
+  // Build imageUrls keyed card1..cardN dynamically so Notion attaches one image per verdict.
+  const imageUrls: { cover: string; [k: string]: string } = { cover: cover.publicUrl };
+  cardUploads.forEach((upload, i) => {
+    imageUrls[`card${i + 1}`] = upload.publicUrl;
+  });
+
+  log.info("Writing Notion draft...");
+  const url = await writeSaturdayVerdictToNotion(draft, imageUrls);
+
+  log.info("Sending Slack notification...");
   await notifyDraftReady({
     pillar: "Sat Verdict",
     emoji: "⚖️",
@@ -69,15 +108,23 @@ async function main() {
     subtitle: draft.hotTake,
     notionUrl: url,
     metadata: {
+      "Issue": String(issueNumber),
       "Verdicts": Object.entries(tally).map(([k, v]) => `${k} ${v}`).join("  "),
       "Films": String(draft.verdicts.length),
     },
+    coverImageUrl: cover.publicUrl,
+    bodyCardImageUrls: cardUploads.map(u => u.publicUrl),
   });
-  
-  log.success(`\n🎉 Saturday Verdict draft is in Notion:\n   ${url}\n   Review and post manually.`);
+
+  log.success(`\n✅ Sat Verdict PREVIEW delivered — Notion page: ${url}`);
+  log.success(`   Cover: ${cover.publicUrl}`);
 }
 
-main().catch(err => {
-  log.error("Saturday Verdict job failed", err);
-  process.exit(1);
-});
+main()
+  .catch(err => {
+    log.error("Saturday Verdict job failed", err);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await closeBrowser();
+  });

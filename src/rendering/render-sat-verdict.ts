@@ -1,6 +1,7 @@
 // src/rendering/render-sat-verdict.ts
 // Orchestrator: SaturdayVerdictDraft → 1 cover PNG + N body card PNGs
 
+import { promises as fs } from "node:fs";
 import { renderToPNG, closeBrowser } from "./renderer.js";
 import { format } from "date-fns";
 import { log } from "../shared/logger.js";
@@ -11,6 +12,24 @@ import type {
   SatVerdictCoverContext,
   SatVerdictCardContext,
 } from "./types.js";
+
+/**
+ * Delete any stale sat-verdict PNGs for this date before re-rendering, so a
+ * previous run's orphan cards (e.g. card-04 left over when this run only
+ * produces 3) don't get uploaded next time someone runs `npm run thumbnails`.
+ */
+async function cleanOldRenders(outputDir: string, datePrefix: string): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(outputDir);
+  } catch {
+    return; // dir doesn't exist yet — nothing to clean
+  }
+  const prefix = `sat-verdict-${datePrefix}-`;
+  const stale = entries.filter(e => e.startsWith(prefix) && e.endsWith(".png"));
+  await Promise.all(stale.map(e => fs.unlink(`${outputDir}/${e}`)));
+  if (stale.length > 0) log.info(`  Cleaned ${stale.length} stale Sat Verdict PNG(s)`);
+}
 
 /** Per-language fallback color when TMDb has no poster */
 const LANGUAGE_FALLBACK_COLORS: Record<string, string> = {
@@ -72,7 +91,7 @@ export interface RenderResult {
 
 export async function renderSatVerdict(
   draft: SaturdayVerdictDraft,
-  issueNumber: number,
+  issueNumber: string | number,
   outputDir = "output/posts"
 ): Promise<RenderResult> {
   log.info(`Rendering Sat Verdict — Issue №${issueNumber}`);
@@ -93,6 +112,8 @@ export async function renderSatVerdict(
     displayDate: format(today, "dd·MM·yy"),
     pillarLabel: "SAT VERDICT" as const,
   };
+
+  await cleanOldRenders(outputDir, baseCtx.date);
 
   // 1. Cover slide
   const coverPath = `${outputDir}/sat-verdict-${baseCtx.date}-cover.png`;

@@ -105,10 +105,22 @@ DELIVERABLES (respond as JSON):
   ]
 }
 
-IMPORTANT:
-- Generate verdicts for ALL ${releases.length} releases (don't skip any).
+CARD COUNT — quality over coverage:
+- Pick 3 to 5 films from the slate above. If only 3 are worth talking about, deliver 3. If 5 are, deliver 5.
+- Do NOT pad with weak Skips just to fill cards. A tight 3-card carousel beats a bloated 6-card one.
+
+VERDICT MIX — pick what the slate actually deserves:
+- Strong weekend: 1-2 Must Watch + 1-2 Worth a Try + 1 Skip
+- Average weekend: 1 Must Watch + 1-2 Worth a Try + 1-2 Skip
+- Weak weekend: 0-1 Must Watch + 1 Worth a Try + 2-3 Skip
+- Never deliver an all-Skip carousel. If the slate is that weak, deliver 1 Worth a Try (the least bad) + at most 2 Skips, OR return verdicts: [] and let the pillar skip this weekend entirely.
+
+MUST WATCH RULE:
+- At least one verdict MUST be 🔥 Must Watch IF any film legitimately qualifies. Don't withhold the call to seem balanced.
+- If NOTHING qualifies as Must Watch this weekend, that's fine — but say so in the hotTake ("No Must Watch this weekend — here's the next best thing.").
+
+OTHER:
 - If a film has no IMDb rating yet (unreleased), make your call based on director track record, cast, genre, synopsis. Be specific about why.
-- Skip kar do calls are encouraged when justified — don't be polite to every film.
 - The "filmTitle", "language", "platform" fields must match the input exactly.`;
   
   const output = await callClaudeJSON<LLMOutput>(prompt, "opus");

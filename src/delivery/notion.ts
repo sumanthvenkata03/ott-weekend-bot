@@ -415,8 +415,13 @@ export async function writeMovementToNotion(draft: MovementDraft): Promise<strin
 /**
  * Truncate text to Notion's 2000-char limit per rich_text block.
  * Notion rejects rich_text over 2000 chars per single property.
+ *
+ * Accepts null/undefined so a missing optional LLM field (e.g. an omitted
+ * watchSetup on a Skip verdict) doesn't crash the entire Notion write —
+ * the field just renders empty.
  */
-function truncate(s: string, max = 1900): string {
+function truncate(s: string | null | undefined, max = 1900): string {
+  if (!s) return "";
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
 }
 
@@ -425,6 +430,16 @@ export interface SundaySpotlightImageUrls {
   coverReel?: string;
   card1?: string;
   card2?: string;
+}
+
+/**
+ * Cover + per-verdict card images (card1..cardN). Variable length to match
+ * the Sat Verdict carousel's 3-5 cards. Extra cardK keys beyond the verdict
+ * count are simply ignored.
+ */
+export interface SatVerdictImageUrls {
+  cover?: string;
+  [cardKey: string]: string | undefined;
 }
 
 function externalImageBlock(url: string) {
@@ -734,15 +749,16 @@ export async function writeWednesdayDropToNotion(
  * Different page body shape than Wed Drop — opinionated verdicts per film.
  */
 export async function writeSaturdayVerdictToNotion(
-  draft: SaturdayVerdictDraft
+  draft: SaturdayVerdictDraft,
+  imageUrls?: SatVerdictImageUrls
 ): Promise<string> {
   log.info("Writing Saturday Verdict draft to Notion...");
-  
+
   const allPlatforms = Array.from(new Set(draft.releases.flatMap(r => r.platform)));
   const allLanguages = Array.from(new Set(draft.releases.map(r => r.language)));
-  
+
   const title = `Sat Verdict — ${draft.weekendDates}`;
-  
+
   // Average IMDb as proxy hype score (replaced in Week 2)
   const ratings = draft.releases
     .map(r => r.imdbRating)
@@ -750,14 +766,18 @@ export async function writeSaturdayVerdictToNotion(
   const hypeScore = ratings.length > 0
     ? Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10)
     : null;
-  
+
   // Pick the strongest verdict for the row-level Verdict select
   const verdictPriority: VerdictSlide["verdict"][] = ["🔥 Must Watch", "👀 Worth a Try", "⏭️ Skip"];
-  const rowVerdict = verdictPriority.find(v => draft.verdicts.some(d => d.verdict === v)) 
+  const rowVerdict = verdictPriority.find(v => draft.verdicts.some(d => d.verdict === v))
     ?? "🔥 Must Watch";
-  
+
+  // Per-verdict card images keyed by position: verdict at index i → imageUrls.card{i+1}.
+  // Looked up dynamically so we naturally support 3-5 cards (or more) without code changes.
+  const cardImageForIndex = (i: number): string | undefined => imageUrls?.[`card${i + 1}`];
+
   // Build the verdict slides as Notion blocks — toggles so each film is collapsible
-  const verdictBlocks = draft.verdicts.flatMap(v => [
+  const verdictBlocks = draft.verdicts.flatMap((v, i) => [
     {
       object: "block" as const,
       type: "toggle" as const,
@@ -767,6 +787,7 @@ export async function writeSaturdayVerdictToNotion(
           annotations: { bold: true },
         }],
         children: [
+          ...(cardImageForIndex(i) ? [externalImageBlock(cardImageForIndex(i)!)] : []),
           {
             object: "block" as const,
             type: "paragraph" as const,
@@ -855,6 +876,7 @@ export async function writeSaturdayVerdictToNotion(
       Hashtags: { rich_text: [{ text: { content: truncate(draft.hashtags, 500) } }] },
     },
     children: [
+      ...(imageUrls?.cover ? [externalImageBlock(imageUrls.cover)] : []),
       {
         object: "block",
         type: "heading_2",

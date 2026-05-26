@@ -46,7 +46,7 @@ export interface RenderResult {
 
 export async function renderWedDrop(
   draft: WednesdayDropDraft,
-  issueNumber: number,
+  issueNumber: string | number,
   outputDir = "output/posts"
 ): Promise<RenderResult> {
   log.info(`Rendering Wed Drop — Issue №${issueNumber}`);

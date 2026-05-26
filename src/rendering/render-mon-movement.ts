@@ -52,7 +52,7 @@ export interface RenderResult {
 
 export async function renderMonMovement(
   draft: MovementDraft,
-  issueNumber: number,
+  issueNumber: string | number,
   outputDir = "output/posts"
 ): Promise<RenderResult> {
   log.info(`Rendering Mon Movement — Issue №${issueNumber}`);
