@@ -129,6 +129,13 @@ export async function renderToPNG(options: RenderOptions): Promise<string> {
   // 4. Explicitly wait for every <img> tag to load OR fail.
   //    This is more reliable than networkidle0 alone for CDN images
   //    (TMDb CDN can be slower than 500ms idle threshold).
+  //
+  //    First inject a __name shim: tsx/esbuild wraps arrow functions in
+  //    __name(fn, "name") calls for Function.prototype.name preservation,
+  //    and those calls travel into the page when Puppeteer serializes the
+  //    function below. Without this shim, the evaluate throws ReferenceError.
+  //    Passed as a string so esbuild can't transform it and re-create the bug.
+  await page.evaluate("globalThis.__name = globalThis.__name || ((fn) => fn);");
   await page.evaluate(async () => {
     const imgs = Array.from(document.images);
     await Promise.all(

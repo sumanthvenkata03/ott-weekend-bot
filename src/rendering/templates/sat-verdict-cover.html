@@ -222,7 +222,7 @@
   <!-- HERO IMAGE LAYER -->
   <div class="hero">
     {% if hero.posterUrl %}
-      <img src="{{ hero.posterUrl }}" class="hero-img" alt="" />
+      <img src="{{ hero.posterUrl }}" class="hero-img" alt="" onerror="this.style.display='none'" />
     {% endif %}
     <div class="hero-fallback {% if hero.posterUrl %}hero-fallback-hidden{% endif %}">
       <div class="lang-tag">{{ hero.language | upper }}</div>

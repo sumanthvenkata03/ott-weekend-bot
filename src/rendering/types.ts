@@ -141,3 +141,31 @@ export interface MonMovementCardContext extends RenderBase {
   slotNumber: number;
   totalSlots: number;
 }
+
+// ============================================================
+// Sun Spotlight — Gallery aesthetic
+// Single context shared across 4 templates: feed cover (1080x1350),
+// reel cover (1080x1920), card-why-it-works + card-case-against (1080x1080).
+// ============================================================
+
+export interface SunSpotlightRenderContext {
+  // Cover-level
+  filmTitle: string;
+  language: string;
+  director?: string;
+  runtime?: number;
+  posterUrl?: string;
+  posterFallbackColor: string;
+  hook: string;
+  issueNumber: string;       // "044"
+  issueDate: string;         // "31·05·26"
+
+  // Card 1 (whyItWorks)
+  whyItWorks: string;
+  platform: string;          // first platform name, e.g. "SonyLIV"
+  platformLogoStem: string;  // filename stem, e.g. "sony-liv"
+
+  // Card 2 (caseAgainstSkepticism)
+  caseAgainstSkepticism: string;
+  ctaTagline: string;
+}

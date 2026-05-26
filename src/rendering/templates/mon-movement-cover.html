@@ -212,7 +212,7 @@
     <div class="poster-cell {% if item.isGem %}is-gem{% endif %}" style="background-color: {{ item.fallbackColor }};">
       <div class="kind-tag">{% if item.isGem %}GEM{% else %}NEW{% endif %}</div>
       {% if item.posterUrl %}
-        <img src="{{ item.posterUrl }}" class="poster-img" alt="" />
+        <img src="{{ item.posterUrl }}" class="poster-img" alt="" onerror="this.style.display='none'" />
       {% endif %}
       <div class="poster-fallback {% if item.posterUrl %}poster-fallback-hidden{% endif %}">
         <div class="lang">{{ item.language | upper }}</div>

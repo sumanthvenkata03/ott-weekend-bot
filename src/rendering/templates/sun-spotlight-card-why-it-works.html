@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;0,800;1,400;1,700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1A1614;
+    --cream: #F4ECDC;
+    --vermillion: #A33223;
+    --brass: #C49A3F;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 1080px;
+    height: 1080px;
+    overflow: hidden;
+    font-family: 'Playfair Display', Georgia, serif;
+    background: var(--cream);
+    color: var(--ink);
+  }
+  .canvas { position: relative; width: 100%; height: 100%; }
+
+  /* Top strip */
+  .strip-eyebrow {
+    position: absolute;
+    top: 65px;
+    left: 0; right: 0;
+    text-align: center;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 4px;
+    color: var(--brass);
+    text-transform: uppercase;
+  }
+  .strip-rule {
+    position: absolute;
+    top: 100px;
+    left: 80px;
+    right: 80px;
+    height: 1px;
+    background: var(--brass);
+  }
+
+  /* Poster left — 360x480 with brass corner brackets */
+  .poster-frame {
+    position: absolute;
+    top: 160px;
+    left: 80px;
+    width: 360px;
+    height: 480px;
+  }
+  .bracket { position: absolute; width: 28px; height: 28px; }
+  .bracket--tl { top: -16px; left: -16px;   border-top: 2px solid var(--brass); border-left: 2px solid var(--brass); }
+  .bracket--tr { top: -16px; right: -16px;  border-top: 2px solid var(--brass); border-right: 2px solid var(--brass); }
+  .bracket--bl { bottom: -16px; left: -16px;  border-bottom: 2px solid var(--brass); border-left: 2px solid var(--brass); }
+  .bracket--br { bottom: -16px; right: -16px; border-bottom: 2px solid var(--brass); border-right: 2px solid var(--brass); }
+  .poster-window {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+  }
+  .poster-fallback {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    color: var(--cream);
+  }
+  .poster-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 2;
+  }
+  .poster-fallback .lang {
+    position: absolute;
+    top: 180px;
+    left: 0; right: 0;
+    text-align: center;
+    font-family: 'Inter', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 5px;
+    opacity: 0.7;
+    text-transform: uppercase;
+  }
+  .poster-fallback .title {
+    position: absolute;
+    top: 220px;
+    left: 0; right: 0;
+    text-align: center;
+    font-family: 'Playfair Display', serif;
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0 20px;
+  }
+  .poster-fallback .credit {
+    position: absolute;
+    top: 290px;
+    left: 0; right: 0;
+    text-align: center;
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 3px;
+    opacity: 0.6;
+    text-transform: uppercase;
+  }
+
+  /* Body right */
+  .body-right {
+    position: absolute;
+    top: 160px;
+    left: 500px;
+    width: 500px;
+    height: 820px;
+  }
+  .body-lang {
+    position: absolute;
+    top: 10px;
+    left: 0;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 4px;
+    color: var(--ink);
+    opacity: 0.7;
+    text-transform: uppercase;
+  }
+  .body-title {
+    position: absolute;
+    top: 50px;
+    left: 0;
+    right: 0;
+    font-family: 'Playfair Display', serif;
+    font-size: 44px;
+    font-weight: 700;
+    line-height: 0.98;
+    color: var(--ink);
+    letter-spacing: -1px;
+  }
+  .body-meta {
+    position: absolute;
+    top: 110px;
+    left: 0;
+    font-family: 'Playfair Display', serif;
+    font-style: italic;
+    font-size: 18px;
+    color: var(--ink);
+    opacity: 0.65;
+  }
+  .body-rule {
+    position: absolute;
+    top: 150px;
+    left: 0;
+    width: 60px;
+    height: 0.5px;
+    background: var(--brass);
+  }
+  .why-body {
+    position: absolute;
+    top: 185px;
+    left: 0;
+    right: 0;
+    font-family: 'Playfair Display', serif;
+    font-weight: 400;
+    font-size: 28px;
+    line-height: 1.45;
+    color: var(--ink);
+    opacity: 0.9;
+  }
+
+  /* Platform-line + logo-stamp — copied verbatim from mon-movement-card.html */
+  .platform-line {
+    position: absolute;
+    top: 740px;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-family: 'Inter', sans-serif;
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: #C49A3F;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #C49A3F;
+  }
+  .platform-line .star {
+    color: #A33223;
+  }
+  .logo-stamp {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 5px;
+    border: 1.5px solid #C49A3F;
+    border-radius: 2px;
+    flex-shrink: 0;
+    box-sizing: border-box;
+  }
+  .logo-stamp svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* Footer */
+  .footer-left {
+    position: absolute;
+    bottom: 30px;
+    left: 40px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 3px;
+    color: var(--ink);
+    opacity: 0.55;
+  }
+  .footer-right {
+    position: absolute;
+    bottom: 30px;
+    right: 40px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--ink);
+    opacity: 0.55;
+  }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <div class="strip-eyebrow">★ SUN SPOTLIGHT · WHY IT WORKS · 1 / 2 ★</div>
+  <div class="strip-rule"></div>
+
+  <div class="poster-frame">
+    <div class="bracket bracket--tl"></div>
+    <div class="bracket bracket--tr"></div>
+    <div class="bracket bracket--bl"></div>
+    <div class="bracket bracket--br"></div>
+    <div class="poster-window" style="background-color: {{ posterFallbackColor }};">
+      <div class="poster-fallback">
+        <div class="lang">{{ language | upper }}</div>
+        <div class="title">{{ filmTitle }}</div>
+        {% if director %}<div class="credit">DIR · {{ director | upper }}</div>{% endif %}
+      </div>
+      {% if posterUrl %}<img class="poster-img" src="{{ posterUrl }}" alt="" onerror="this.style.display='none'" />{% endif %}
+    </div>
+  </div>
+
+  <div class="body-right">
+    <div class="body-lang">{{ language | upper }}</div>
+    <div class="body-title">{{ filmTitle }}</div>
+    <div class="body-meta">{{ language }}{% if runtime %} · {{ runtime }} min{% endif %}{% if director %} · dir. {{ director }}{% endif %}</div>
+    <div class="body-rule"></div>
+    <div class="why-body">{{ whyItWorks }}</div>
+    <div class="platform-line">
+      <span class="star">★</span>
+      {% if platform %}
+        <span>NOW ON</span>
+        <span>{{ platform | upper }}</span>
+        {% if platformLogoStem %}<span class="logo-stamp">{{ platformLogoStem | platformLogoSvg | safe }}</span>{% endif %}
+      {% else %}
+        <span>STREAMING TBA</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="footer-left">★ THE BIG SCREEN INDEX ★</div>
+  <div class="footer-right">VOL. 01 · ISSUE {{ issueNumber }}</div>
+
+</div>
+</body>
+</html>

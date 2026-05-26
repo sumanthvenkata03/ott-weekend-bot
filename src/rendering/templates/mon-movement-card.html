@@ -255,7 +255,7 @@
 
     <div class="poster-window {% if slotKind == 'gem' %}is-gem{% endif %}">
       {% if release.posterUrl %}
-        <img src="{{ release.posterUrl }}" class="poster-img" alt="" />
+        <img src="{{ release.posterUrl }}" class="poster-img" alt="" onerror="this.style.display='none'" />
       {% endif %}
       <div class="poster-fallback {% if release.posterUrl %}poster-fallback-hidden{% endif %}">
         <div class="lang {% if not release.director %}lang-large{% endif %}">{{ release.language | upper }}</div>

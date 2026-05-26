@@ -195,7 +195,7 @@
     {% for item in gridItems %}{% if loop.index <= 4 %}
     <div class="poster-cell" style="background-color: {{ item.fallbackColor }};">
       {% if item.posterUrl %}
-        <img src="{{ item.posterUrl }}" class="poster-img" alt="" />
+        <img src="{{ item.posterUrl }}" class="poster-img" alt="" onerror="this.style.display='none'" />
       {% endif %}
       <div class="poster-fallback {% if item.posterUrl %}poster-fallback-hidden{% endif %}">
         <div class="lang">{{ item.language | upper }}</div>

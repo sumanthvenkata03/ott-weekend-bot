@@ -313,7 +313,7 @@
     <!-- Poster window: img on top of colored fallback -->
     <div class="poster-window">
       {% if card.posterUrl %}
-        <img src="{{ card.posterUrl }}" class="poster-img" alt="" />
+        <img src="{{ card.posterUrl }}" class="poster-img" alt="" onerror="this.style.display='none'" />
       {% endif %}
       <div class="poster-fallback {% if card.posterUrl %}poster-fallback-hidden{% endif %}">
         <div class="lang">{{ card.language | upper }}</div>

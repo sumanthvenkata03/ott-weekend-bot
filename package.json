@@ -14,7 +14,8 @@
     "job:monday": "tsx src/jobs/monday-movement.ts",
     "render:wed-drop": "tsx src/rendering/render-wed-drop.ts",
     "render:sat-verdict": "tsx src/rendering/render-sat-verdict.ts",
-    "render:mon-movement": "tsx src/rendering/render-mon-movement.ts"
+    "render:mon-movement": "tsx src/rendering/render-mon-movement.ts",
+    "render:sun-spotlight": "tsx src/rendering/render-sun-spotlight.ts"
   },
   "keywords": [],
   "author": "",
