@@ -46,7 +46,7 @@ function formatIssueDate(d: Date): string {
 function buildContext(
   draft: SundaySpotlightDraft,
   date: Date,
-  issueNumber: number
+  issueNumber: number | string
 ): SunSpotlightRenderContext {
   const film = draft.film;
   const firstPlatform = film.platform[0];
@@ -78,7 +78,7 @@ export interface RenderResult {
 export async function renderSunSpotlight(
   draft: SundaySpotlightDraft,
   date: Date,
-  issueNumber: number,
+  issueNumber: number | string,
   outputDir = "output/posts"
 ): Promise<RenderResult> {
   log.info(`Rendering Sun Spotlight — Issue №${issueNumber}`);

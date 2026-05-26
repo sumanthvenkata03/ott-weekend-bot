@@ -13,6 +13,8 @@ export interface DraftNotification {
   subtitle?: string;                  // a one-line tease (caption opener, hot take, etc.)
   notionUrl: string;
   metadata?: Record<string, string>;  // extra context fields, shown as a list
+  coverImageUrl?: string;             // primary cover image — inline preview
+  bodyCardImageUrls?: string[];       // body card images — link buttons
 }
 
 /**
@@ -52,7 +54,26 @@ export async function notifyDraftReady(payload: DraftNotification): Promise<void
       })),
     });
   }
-  
+
+  if (payload.coverImageUrl) {
+    blocks.push({
+      type: "image",
+      image_url: payload.coverImageUrl,
+      alt_text: `${payload.pillar} cover preview`,
+    });
+  }
+
+  if (payload.bodyCardImageUrls && payload.bodyCardImageUrls.length > 0) {
+    blocks.push({
+      type: "actions",
+      elements: payload.bodyCardImageUrls.map((url, i) => ({
+        type: "button",
+        text: { type: "plain_text", text: `Card ${i + 1}`, emoji: true },
+        url,
+      })),
+    });
+  }
+
   blocks.push({
     type: "actions",
     elements: [

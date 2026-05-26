@@ -420,16 +420,35 @@ function truncate(s: string, max = 1900): string {
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
 }
 
+export interface SundaySpotlightImageUrls {
+  coverFeed?: string;
+  coverReel?: string;
+  card1?: string;
+  card2?: string;
+}
+
+function externalImageBlock(url: string) {
+  return {
+    object: "block" as const,
+    type: "image" as const,
+    image: {
+      type: "external" as const,
+      external: { url },
+    },
+  };
+}
+
 export async function writeSundaySpotlightToNotion(
-  draft: SundaySpotlightDraft
+  draft: SundaySpotlightDraft,
+  imageUrls?: SundaySpotlightImageUrls
 ): Promise<string> {
   log.info("Writing Sunday Spotlight draft to Notion...");
-  
+
   const title = `Sun Spotlight — ${draft.film.title} (${draft.film.language})`;
   const hypeScore = draft.film.imdbRating !== undefined
     ? Math.round(draft.film.imdbRating * 10)
     : null;
-  
+
   const response = await notion.pages.create({
     parent: { database_id: config.NOTION_RELEASES_DB_ID },
     properties: {
@@ -444,6 +463,8 @@ export async function writeSundaySpotlightToNotion(
       Hashtags: { rich_text: [{ text: { content: truncate(draft.hashtags, 500) } }] },
     },
     children: [
+      ...(imageUrls?.coverFeed ? [externalImageBlock(imageUrls.coverFeed)] : []),
+      ...(imageUrls?.coverReel ? [externalImageBlock(imageUrls.coverReel)] : []),
       {
         object: "block",
         type: "heading_2",
@@ -492,6 +513,7 @@ export async function writeSundaySpotlightToNotion(
           ],
         },
       },
+      ...(imageUrls?.card1 ? [externalImageBlock(imageUrls.card1)] : []),
       {
         object: "block",
         type: "paragraph",
@@ -559,6 +581,7 @@ export async function writeSundaySpotlightToNotion(
         type: "heading_2",
         heading_2: { rich_text: [{ text: { content: `Reply template — when someone says "I don't watch ${draft.film.language} films"` } }] },
       },
+      ...(imageUrls?.card2 ? [externalImageBlock(imageUrls.card2)] : []),
       {
         object: "block",
         type: "quote",

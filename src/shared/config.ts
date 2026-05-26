@@ -21,7 +21,16 @@ const ConfigSchema = z.object({
   NOTION_TOKEN: z.string().min(1, "NOTION_TOKEN missing in .env"),
   NOTION_RELEASES_DB_ID: z.string().min(1, "NOTION_RELEASES_DB_ID missing in .env"),
   NOTION_NEWS_DB_ID: z.string().min(1, "NOTION_NEWS_DB_ID missing in .env"),
-  
+
+  // R2 (Cloudflare). Creds optional so other jobs keep working before R2 is
+  // wired up; r2-upload.ts throws clearly if missing when actually called.
+  R2_ACCOUNT_ID: z.string().optional(),
+  R2_ACCESS_KEY_ID: z.string().optional(),
+  R2_SECRET_ACCESS_KEY: z.string().optional(),
+  R2_BUCKET_NAME: z.string().default("tbsi-posts"),
+  R2_PUBLIC_URL: z.string().url().default("https://pub-c0e6ecae0aba4413a1bbc7f43108546c.r2.dev"),
+  R2_S3_ENDPOINT: z.string().url().default("https://f7c79f30ee2349ab15f3fd506f7b5cc0.r2.cloudflarestorage.com"),
+
   // Runtime config with defaults
   IMPORTANCE_THRESHOLD: z.coerce.number().default(55),
   MAX_NEWS_POSTS_PER_DAY: z.coerce.number().default(6),
