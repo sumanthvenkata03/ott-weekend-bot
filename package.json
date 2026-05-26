@@ -15,7 +15,8 @@
     "render:wed-drop": "tsx src/rendering/render-wed-drop.ts",
     "render:sat-verdict": "tsx src/rendering/render-sat-verdict.ts",
     "render:mon-movement": "tsx src/rendering/render-mon-movement.ts",
-    "render:sun-spotlight": "tsx src/rendering/render-sun-spotlight.ts"
+    "render:sun-spotlight": "tsx src/rendering/render-sun-spotlight.ts",
+    "thumbnails": "tsx src/rendering/generate-thumbnails.ts"
   },
   "keywords": [],
   "author": "",
@@ -25,6 +26,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.7.0",
     "@types/nunjucks": "^3.2.6",
+    "sharp": "^0.34.5",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   },

@@ -46,6 +46,16 @@ export interface SatVerdictCoverContext extends RenderBase {
   weekendDates: string;
   /** Hero film for the cover (the Must Watch with highest priority) */
   hero: SatVerdictCard;
+  /** 3-poster inset strip near the bottom of the cover — one tile per verdict film, in original verdict order, max 3 */
+  posterStrip: SatVerdictPosterStripTile[];
+}
+
+/** One tile in the Sat Verdict cover poster strip */
+export interface SatVerdictPosterStripTile {
+  posterUrl?: string;
+  posterFallbackColor: string;
+  filmTitle: string;
+  language: string;
 }
 
 /** Full context for a Sat Verdict body card slide (1080x1080) */

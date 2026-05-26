@@ -96,12 +96,19 @@ export async function renderSatVerdict(
 
   // 1. Cover slide
   const coverPath = `${outputDir}/sat-verdict-${baseCtx.date}-cover.png`;
+  const posterStrip = cards.slice(0, 3).map(c => ({
+    posterUrl: c.posterUrl,
+    posterFallbackColor: c.fallbackColor,
+    filmTitle: c.filmTitle,
+    language: c.language,
+  }));
   const coverCtx: SatVerdictCoverContext = {
     ...baseCtx,
     hotTake: draft.hotTake,
     filmCount: cards.length,
     weekendDates: draft.weekendDates,
     hero,
+    posterStrip,
   };
   await renderToPNG({
     templateName: "sat-verdict-cover",

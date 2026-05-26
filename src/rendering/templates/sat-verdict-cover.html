@@ -154,10 +154,12 @@
     margin-top: 2px;
   }
 
-  /* Title block at bottom */
+  /* Title block — anchored from bottom so its content ends at y=1050,
+     giving 30px clearance above the poster strip that starts at y=1080.
+     1350 - 1050 = 300px from bottom. */
   .title-block {
     position: absolute;
-    bottom: 180px;
+    bottom: 300px;
     left: 70px;
     right: 70px;
     z-index: 10;
@@ -173,7 +175,7 @@
   }
   .title-block .headline {
     font-family: 'Playfair Display', serif;
-    font-size: 78px;
+    font-size: 64px;
     font-weight: 700;
     letter-spacing: -1.5px;
     line-height: 1.02;
@@ -189,6 +191,60 @@
     margin-top: 20px;
   }
 
+  /* Poster strip — 3 inset tiles between y=1080 and y=1260, above the footer.
+     Tile group is 780px wide centered (240*3 + 30*2), starting at x=150.
+     Labels sit at y=1245, just below the 160-tall tiles. */
+  .poster-strip {
+    position: absolute;
+    top: 1080px;
+    left: 0; right: 0;
+    height: 180px;
+    z-index: 8;
+  }
+  .strip-tile {
+    position: absolute;
+    top: 0;
+    width: 240px;
+    height: 160px;
+    border: 1.5px solid var(--brass);
+    overflow: hidden;
+  }
+  .strip-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 2;
+  }
+  .strip-fallback {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 10px;
+    text-align: center;
+    color: var(--cream);
+  }
+  .strip-fallback-hidden { display: none; }
+  .strip-fallback .lang {
+    font-family: 'Inter', sans-serif;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    opacity: 0.7;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+  .strip-fallback .title {
+    font-family: 'Playfair Display', serif;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.1;
+  }
   /* Footer mark */
   .footer {
     position: absolute;
@@ -254,6 +310,21 @@
     <div class="kicker">★ THE WEEKEND'S RULING ★</div>
     <div class="headline">{{ hero.oneLineVerdict }}</div>
     <div class="hot-take">{{ hotTake | truncate(140) }}</div>
+  </div>
+
+  <!-- POSTER STRIP — 3 inset tiles representing each verdict film -->
+  <div class="poster-strip">
+    {% for tile in posterStrip %}
+    <div class="strip-tile" style="left: {{ 150 + loop.index0 * 270 }}px; background-color: {{ tile.posterFallbackColor }};">
+      {% if tile.posterUrl %}
+        <img src="{{ tile.posterUrl }}" class="strip-img" alt="" onerror="this.style.display='none'" />
+      {% endif %}
+      <div class="strip-fallback {% if tile.posterUrl %}strip-fallback-hidden{% endif %}">
+        <div class="lang">{{ tile.language | upper }}</div>
+        <div class="title">{{ tile.filmTitle }}</div>
+      </div>
+    </div>
+    {% endfor %}
   </div>
 
   <!-- FOOTER -->
