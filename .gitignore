@@ -6,6 +6,8 @@ data/*.sqlite
 data/cache
 *.log
 .DS_Store
+.claude
+claude
 Thumbs.db
 output
 "@ | Out-File -Encoding utf8 .gitignore
