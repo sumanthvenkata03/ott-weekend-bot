@@ -62,14 +62,14 @@ DELIVERABLES (respond as JSON):
   "caption": "Under 130 words. Make a case for ${film.language} cinema, not just this film. Open with a bold claim that breaks the language barrier. End with 'Subs are great. Excuses are over.' or similar uncompromising CTA.",
   "hashtags": ["array of 12 hashtags, heavy on regional cinema tags — #${film.language}Cinema, #IndianCinema, plus specific film tags"],
   "reelScript": {
-    "hook": "0–3 sec voiceover. ONE bold claim that breaks the language barrier. e.g., 'This Malayalam thriller on Prime is better than 90% of Hindi releases this year. Here's why.'",
-    "whyItWorks": "3–15 sec voiceover. THREE specific reasons. NOT generic praise. NAME craft elements — a director's style choice, a writing structure, a performance technique. Example: 'One — the structure withholds the inciting incident until the 40-minute mark, betting on character first. Two — every supporting actor reads like they walked off a real street. Three — the cinematographer treats interior light like a 1970s Italian film.'",
-    "watchNote": "15–22 sec voiceover. Subtitle quality call-out, dub availability mention, who'll love it, who might struggle. Be honest about pacing or runtime.",
-    "cta": "22–30 sec voiceover. Direct, no hedging. End with 'Save this.' or 'Subs are great. Excuses are over.'",
+    "hook": "0–3 sec voiceover. Under 15 words. ONE bold claim that breaks the language barrier. e.g., 'This Malayalam thriller on Prime is better than 90% of Hindi releases this year. Here's why.'",
+    "whyItWorks": "3–15 sec voiceover. Under 80 words — 3-4 short sentences. THREE specific reasons. NOT generic praise. NAME craft elements — a director's style choice, a writing structure, a performance technique. Example: 'One — the structure withholds the inciting incident until the 40-minute mark, betting on character first. Two — every supporting actor reads like they walked off a real street. Three — the cinematographer treats interior light like a 1970s Italian film.'",
+    "watchNote": "15–22 sec voiceover. Under 25 words. Subtitle quality call-out, dub availability mention, who'll love it, who might struggle. Be honest about pacing or runtime.",
+    "cta": "22–30 sec voiceover. Under 12 words. Direct, no hedging. End with 'Save this.' or 'Subs are great. Excuses are over.'",
     "onScreenText": ["4 frames of bold text overlays, max 6 words each. e.g., 'PRIME VIDEO — NOW STREAMING', 'BETTER THAN BOLLYWOOD THIS YEAR', etc."],
     "visualDirection": "Shot list for the editor — what to show on screen during each beat. Use generic B-roll suggestions (Pexels-friendly): 'wide shot of city night skyline, cut to close-up of laptop with subtitles visible, ambient cafe shot, etc.' AVOID suggesting copyrighted film clips."
   },
-  "caseAgainstSkepticism": "Under 200 words. Reply template for IG comments like 'I don't watch ${film.language} films.' Acknowledge the skepticism, then defeat it with one specific film comparison (a ${film.language} film that broke through to Pan-Indian audiences) and one structural argument (subs are easy now, the algorithm rewards taste, etc.)."
+  "caseAgainstSkepticism": "Hard limit: 40-50 words. Maximum 60. This must read as a quotable epigram, not an essay. Reply template for IG comments like 'I don't watch ${film.language} films.' One specific reference (a film name, a director, a year, a number) is enough to defeat the skepticism. The card is a STAMP, not a paragraph."
 }
 
 The film's language is ${film.language}. The audience you're persuading defaults to Hindi/English content. The CTA must feel like a dare, not a request.`;
