@@ -1,6 +1,7 @@
 // src/rendering/render-mon-movement.ts
 // Orchestrator: MovementDraft → 1 cover PNG + N body card PNGs
 
+import { promises as fs } from "node:fs";
 import { renderToPNG, closeBrowser } from "./renderer.js";
 import { format } from "date-fns";
 import { log } from "../shared/logger.js";
@@ -11,6 +12,24 @@ import type {
   MonMovementCardContext,
   MonMovementGridItem,
 } from "./types.js";
+
+/**
+ * Delete any stale mon-movement PNGs for this date before re-rendering,
+ * so an earlier run's orphan cards don't get picked up by `npm run thumbnails`
+ * or re-uploaded on the next invocation.
+ */
+async function cleanOldRenders(outputDir: string, datePrefix: string): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(outputDir);
+  } catch {
+    return;
+  }
+  const prefix = `mon-movement-${datePrefix}-`;
+  const stale = entries.filter(e => e.startsWith(prefix) && e.endsWith(".png"));
+  await Promise.all(stale.map(e => fs.unlink(`${outputDir}/${e}`)));
+  if (stale.length > 0) log.info(`  Cleaned ${stale.length} stale Mon Movement PNG(s)`);
+}
 
 const LANGUAGE_FALLBACK_COLORS: Record<string, string> = {
   "Hindi":     "#A33223",
@@ -74,6 +93,8 @@ export async function renderMonMovement(
     displayDate: format(today, "dd·MM·yy"),
     pillarLabel: "MON MOVEMENT" as const,
   };
+
+  await cleanOldRenders(outputDir, baseCtx.date);
 
   // 1. Cover grid — balance arrivals/gems narratively, cap 4, interleave.
   //    Gems are half the point of Mon Movement, so don't let arrivals crowd them out.

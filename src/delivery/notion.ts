@@ -294,13 +294,30 @@ export async function writeCompareToNotion(draft: CompareDraft): Promise<string>
   return url;
 }
 
-export async function writeMovementToNotion(draft: MovementDraft): Promise<string> {
+export async function writeMovementToNotion(
+  draft: MovementDraft,
+  imageUrls?: MovementImageUrls
+): Promise<string> {
   log.info("Writing Monday Movement draft to Notion...");
-  
+
   const allReleases = [...draft.newArrivals, ...draft.hiddenGems];
   const allPlatforms = Array.from(new Set(allReleases.flatMap(r => r.platform)));
   const allLanguages = Array.from(new Set(allReleases.map(r => r.language)));
-  
+
+  // Build a title → cardImage lookup keyed off LLM slide order, so each
+  // Notion bullet shows the same image that's on the matching body card —
+  // even though the Notion page groups bullets by variant (arrivals vs
+  // gems) while card1..cardN are ordered by the LLM's slide order.
+  // Slide titles for gems sometimes arrive prefixed with "Hidden Gem: ".
+  const stripGemPrefix = (t: string) => t.replace(/^Hidden Gem:\s*/i, "").trim();
+  const cardImgByReleaseTitle = new Map<string, string>();
+  draft.slides
+    .filter(s => s.type === "arrival" || s.type === "gem")
+    .forEach((slide, i) => {
+      const img = imageUrls?.[`card${i + 1}`];
+      if (img) cardImgByReleaseTitle.set(stripGemPrefix(slide.title), img);
+    });
+
   const title = `Mon Movement — ${draft.weekLabel}`;
   
   const response = await notion.pages.create({
@@ -316,6 +333,7 @@ export async function writeMovementToNotion(draft: MovementDraft): Promise<strin
       Hashtags: { rich_text: [{ text: { content: truncate(draft.hashtags, 500) } }] },
     },
     children: [
+      ...(imageUrls?.cover ? [externalImageBlock(imageUrls.cover)] : []),
       {
         object: "block",
         type: "heading_2",
@@ -357,43 +375,51 @@ export async function writeMovementToNotion(draft: MovementDraft): Promise<strin
             type: "paragraph" as const,
             paragraph: { rich_text: [{ text: { content: "— none with confirmed digital releases this week" } }] },
           }]
-        : draft.newArrivals.map(r => ({
-            object: "block" as const,
-            type: "bulleted_list_item" as const,
-            bulleted_list_item: {
-              rich_text: [{
-                text: {
-                  content: truncate(
-                    `${r.title} (${r.language}) — ${r.releaseDate}` +
-                    (r.platform.length ? ` — ${r.platform.join(", ")}` : "") +
-                    (r.imdbRating ? ` — IMDb ${r.imdbRating}` : ""),
-                    1900
-                  ),
-                },
-              }],
-            },
-          }))),
+        : draft.newArrivals.flatMap(r => {
+            const bullet = {
+              object: "block" as const,
+              type: "bulleted_list_item" as const,
+              bulleted_list_item: {
+                rich_text: [{
+                  text: {
+                    content: truncate(
+                      `${r.title} (${r.language}) — ${r.releaseDate}` +
+                      (r.platform.length ? ` — ${r.platform.join(", ")}` : "") +
+                      (r.imdbRating ? ` — IMDb ${r.imdbRating}` : ""),
+                      1900
+                    ),
+                  },
+                }],
+              },
+            };
+            const img = cardImgByReleaseTitle.get(r.title);
+            return img ? [externalImageBlock(img), bullet] : [bullet];
+          })),
       {
         object: "block",
         type: "heading_2",
         heading_2: { rich_text: [{ text: { content: `Hidden Gems Worth Surfacing (${draft.hiddenGems.length})` } }] },
       },
-      ...draft.hiddenGems.map(r => ({
-        object: "block" as const,
-        type: "bulleted_list_item" as const,
-        bulleted_list_item: {
-          rich_text: [{
-            text: {
-              content: truncate(
-                `${r.title} (${r.language})` +
-                (r.platform.length ? ` — ${r.platform.join(", ")}` : "") +
-                (r.imdbRating ? ` — IMDb ${r.imdbRating}` : ""),
-                1900
-              ),
-            },
-          }],
-        },
-      })),
+      ...draft.hiddenGems.flatMap(r => {
+        const bullet = {
+          object: "block" as const,
+          type: "bulleted_list_item" as const,
+          bulleted_list_item: {
+            rich_text: [{
+              text: {
+                content: truncate(
+                  `${r.title} (${r.language})` +
+                  (r.platform.length ? ` — ${r.platform.join(", ")}` : "") +
+                  (r.imdbRating ? ` — IMDb ${r.imdbRating}` : ""),
+                  1900
+                ),
+              },
+            }],
+          },
+        };
+        const img = cardImgByReleaseTitle.get(r.title);
+        return img ? [externalImageBlock(img), bullet] : [bullet];
+      }),
       {
         object: "block",
         type: "heading_2",
@@ -447,6 +473,16 @@ export interface SatVerdictImageUrls {
  * for consistency; Wed Drop is fixed at 4 release slides by design contract.
  */
 export interface WedDropImageUrls {
+  cover?: string;
+  [cardKey: string]: string | undefined;
+}
+
+/**
+ * Cover + per-slide card images (card1..card5). Mon Movement is fixed at 5
+ * body slides by design contract — variants mixed (NEW + GEM). cardK index
+ * tracks LLM slide order, not Notion section order.
+ */
+export interface MovementImageUrls {
   cover?: string;
   [cardKey: string]: string | undefined;
 }

@@ -70,6 +70,13 @@ ${arrivalsBlock}
 HIDDEN GEMS WORTH SURFACING:
 ${gemsBlock}
 
+CARD COUNT + MIX — quality over coverage:
+- Pick EXACTLY 5 films for the body cards — a mix of NEW ARRIVALS (type "arrival") and HIDDEN GEMS (type "gem").
+- REQUIRED: at least 1 of each variant. The pillar loses meaning if it's all NEW or all GEM.
+- LLM judges the split based on the week. Strong week of arrivals → lean arrival-heavy (e.g. 4 NEW + 1 GEM). Quiet week → lean gem-heavy (e.g. 1 NEW + 4 GEM). Balanced week → 3+2 or 2+3.
+- Title strings on arrival/gem slides MUST match the input title exactly so the renderer can map them to Release records.
+- If fewer than 5 worthwhile films exist across both buckets combined, return carouselSlides: [] (empty array) to skip the pillar rather than padding with weak picks.
+
 DELIVERABLES (respond as JSON):
 
 {
@@ -79,11 +86,12 @@ DELIVERABLES (respond as JSON):
   "carouselSlides": [
     { "slideNumber": 1, "type": "cover", "title": "<6-word headline based on weekHeadline>", "body": "<short subtext>" },
     { "slideNumber": 2, "type": "headline", "title": "This week in OTT", "body": "<the weekHeadline expanded to 2 sentences>" },
-    { "slideNumber": 3, "type": "arrival", "title": "<film title>", "body": "<one-line why this matters — platform, language, genre angle>" },
-    ...one slide per arrival up to 4 arrivals max...
-    { "slideNumber": N, "type": "gem", "title": "Hidden Gem: <film>", "body": "<why this is worth pulling up from your watch list>" },
-    ...up to 2 gem slides...
-    { "slideNumber": N+1, "type": "cta", "title": "<CTA>", "body": "Save. DM us. Which one are you starting?" }
+    { "slideNumber": 3, "type": "arrival", "title": "<exact film title>", "body": "<one-line why this matters — platform, language, genre angle>" },
+    { "slideNumber": 4, "type": "arrival|gem", "title": "<exact film title>", "body": "<...>" },
+    { "slideNumber": 5, "type": "arrival|gem", "title": "<exact film title>", "body": "<...>" },
+    { "slideNumber": 6, "type": "arrival|gem", "title": "<exact film title>", "body": "<...>" },
+    { "slideNumber": 7, "type": "gem", "title": "Hidden Gem: <exact film title>", "body": "<why this is worth pulling up from your watch list>" },
+    { "slideNumber": 8, "type": "cta", "title": "<CTA>", "body": "Save. DM us. Which one are you starting?" }
   ]
 }
 
@@ -93,11 +101,58 @@ IMPORTANT:
 - Hidden gems should feel like "you missed this and you shouldn't have" — not just "another good film."`;
   
   const output = await callClaudeJSON<LLMOutput>(prompt, "sonnet");
-  
+
+  // Runtime guard: design contract is exactly 5 body slides (arrival + gem types
+  // combined) with at least 1 of each variant. OR carouselSlides: [] (LLM judged
+  // the week not worth a pillar post). Anything else is a prompt regression.
+  const arrivalSlides = output.carouselSlides.filter(s => s.type === "arrival");
+  const gemSlides     = output.carouselSlides.filter(s => s.type === "gem");
+  const bodyCount     = arrivalSlides.length + gemSlides.length;
+
+  if (output.carouselSlides.length !== 0) {
+    if (bodyCount !== 5) {
+      throw new Error(
+        `Mon Movement LLM returned ${bodyCount} body slides ` +
+        `(${arrivalSlides.length} arrival + ${gemSlides.length} gem); expected exactly 5 or 0 (skip)`
+      );
+    }
+    if (arrivalSlides.length < 1 || gemSlides.length < 1) {
+      throw new Error(
+        `Mon Movement mix invalid: ${arrivalSlides.length} NEW + ${gemSlides.length} GEM ` +
+        `(need at least 1 of each variant)`
+      );
+    }
+  }
+
+  // Trim draft.newArrivals / draft.hiddenGems to the films the LLM actually
+  // picked. The cover's 2×2 grid is fed from these arrays (algorithmically,
+  // not from slides), so without trimming the cover could show films that
+  // never appear on the body cards. Mirrors the Wed Drop fix.
+  //
+  // Gem slide titles sometimes arrive prefixed with "Hidden Gem: " — strip
+  // that for matching, same as render-mon-movement.ts:normalizeSlideTitle.
+  const stripGemPrefix = (t: string) => t.replace(/^Hidden Gem:\s*/i, "").trim();
+  const pickedArrivalTitles = new Set(arrivalSlides.map(s => stripGemPrefix(s.title)));
+  const pickedGemTitles     = new Set(gemSlides.map(s => stripGemPrefix(s.title)));
+
+  const pickedArrivals = newArrivals.filter(r =>
+    pickedArrivalTitles.has(r.title) || pickedGemTitles.has(r.title)
+  );
+  const pickedGems = hiddenGems.filter(r =>
+    pickedGemTitles.has(r.title) || pickedArrivalTitles.has(r.title)
+  );
+
+  if (output.carouselSlides.length !== 0 && pickedArrivals.length + pickedGems.length !== 5) {
+    throw new Error(
+      `Mon Movement: LLM picked ${bodyCount} titles but only ${pickedArrivals.length + pickedGems.length} ` +
+      `matched a Release record. Check that title strings match the input exactly.`
+    );
+  }
+
   const carouselSlides = output.carouselSlides
     .map(s => `**Slide ${s.slideNumber}** (${s.type}): **${s.title}** — ${s.body}`)
     .join("\n\n");
-  
+
   return {
     pillar: "Mon Movement",
     weekLabel,
@@ -106,7 +161,7 @@ IMPORTANT:
     hashtags: output.hashtags.join(" "),
     slides: output.carouselSlides,
     carouselSlides,
-    newArrivals,
-    hiddenGems,
+    newArrivals: pickedArrivals,
+    hiddenGems: pickedGems,
   };
 }
