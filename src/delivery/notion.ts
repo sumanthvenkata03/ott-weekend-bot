@@ -442,6 +442,15 @@ export interface SatVerdictImageUrls {
   [cardKey: string]: string | undefined;
 }
 
+/**
+ * Cover + per-release card images (card1..card4). Same shape as Sat Verdict
+ * for consistency; Wed Drop is fixed at 4 release slides by design contract.
+ */
+export interface WedDropImageUrls {
+  cover?: string;
+  [cardKey: string]: string | undefined;
+}
+
 function externalImageBlock(url: string) {
   return {
     object: "block" as const,
@@ -615,7 +624,8 @@ export async function writeSundaySpotlightToNotion(
  * Returns the page URL so you can open it directly.
  */
 export async function writeWednesdayDropToNotion(
-  draft: WednesdayDropDraft
+  draft: WednesdayDropDraft,
+  imageUrls?: WedDropImageUrls
 ): Promise<string> {
   log.info("Writing Wednesday Drop draft to Notion...");
   
@@ -671,6 +681,7 @@ export async function writeWednesdayDropToNotion(
     },
     // Long-form content goes in the page body, not properties
     children: [
+      ...(imageUrls?.cover ? [externalImageBlock(imageUrls.cover)] : []),
       {
         object: "block",
         type: "heading_2",
@@ -720,22 +731,28 @@ export async function writeWednesdayDropToNotion(
           rich_text: [{ text: { content: `Featured releases (${draft.releases.length})` } }],
         },
       },
-      ...draft.releases.map(r => ({
-        object: "block" as const,
-        type: "bulleted_list_item" as const,
-        bulleted_list_item: {
-          rich_text: [{
-            text: {
-              content: truncate(
-                `${r.title} (${r.language}) — ${r.releaseDate}` +
-                (r.platform.length ? ` — ${r.platform.join(", ")}` : "") +
-                (r.imdbRating ? ` — IMDb ${r.imdbRating}` : ""),
-                1900
-              ),
-            },
-          }],
-        },
-      })),
+      // Interleave: per-release card image (if present) immediately above its bullet,
+      // so the Notion page reads cover → metadata → [image, bullet, image, bullet, ...].
+      ...draft.releases.flatMap((r, i) => {
+        const cardImg = imageUrls?.[`card${i + 1}`];
+        const bullet = {
+          object: "block" as const,
+          type: "bulleted_list_item" as const,
+          bulleted_list_item: {
+            rich_text: [{
+              text: {
+                content: truncate(
+                  `${r.title} (${r.language}) — ${r.releaseDate}` +
+                  (r.platform.length ? ` — ${r.platform.join(", ")}` : "") +
+                  (r.imdbRating ? ` — IMDb ${r.imdbRating}` : ""),
+                  1900
+                ),
+              },
+            }],
+          },
+        };
+        return cardImg ? [externalImageBlock(cardImg), bullet] : [bullet];
+      }),
     ],
   });
   

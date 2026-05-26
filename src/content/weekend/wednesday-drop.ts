@@ -83,6 +83,11 @@ THIS WEEKEND'S RELEASES (${releases.length} total):
 
 ${releaseBlocks}
 
+CARD COUNT — quality over coverage:
+- Pick EXACTLY 4 films from the slate above — the 4 most worth talking about for an OTT-decision audience.
+- Title strings on release slides must match the input title exactly (case + punctuation) so the renderer can match them to the Release records.
+- If fewer than 4 films are worth talking about this week, return carouselSlides: [] (empty array) to skip the pillar rather than padding with weak picks.
+
 DELIVERABLES (respond as JSON):
 
 {
@@ -91,28 +96,57 @@ DELIVERABLES (respond as JSON):
   "carouselSlides": [
     { "slideNumber": 1, "type": "cover", "title": "<6-word headline>", "body": "<10-word subtext>" },
     { "slideNumber": 2, "type": "index", "title": "This weekend", "body": "<quick visual list: Title (Language) → Platform>" },
-    { "slideNumber": 3, "type": "release", "title": "<film title>", "body": "<one-line WHY this matters — not a synopsis, a reason to care>" },
-    ...one slide per release up to slide 9...
-    { "slideNumber": N, "type": "cta", "title": "<short CTA>", "body": "<which one are you starting with?>" }
+    { "slideNumber": 3, "type": "release", "title": "<exact film title>", "body": "<one-line WHY this matters — not a synopsis, a reason to care>" },
+    { "slideNumber": 4, "type": "release", "title": "<exact film title>", "body": "<...>" },
+    { "slideNumber": 5, "type": "release", "title": "<exact film title>", "body": "<...>" },
+    { "slideNumber": 6, "type": "release", "title": "<exact film title>", "body": "<...>" },
+    { "slideNumber": 7, "type": "cta", "title": "<short CTA>", "body": "<which one are you starting with?>" }
   ]
 }
 
 Be specific. Take stands. Lean South-heavy where the films justify it.`;
   
   const output = await callClaudeJSON<LLMOutput>(prompt, "sonnet");
-  
+
+  // Runtime guard: design contract is exactly 4 release slides, OR all-empty
+  // (the "skip the pillar this week" branch). Anything else is a prompt regression.
+  const releaseSlideCount = output.carouselSlides.filter(s => s.type === "release").length;
+  if (output.carouselSlides.length !== 0 && releaseSlideCount !== 4) {
+    throw new Error(
+      `Wed Drop LLM returned ${releaseSlideCount} release slides; expected exactly 4 or 0 (skip)`
+    );
+  }
+
+  // Trim draft.releases to the films the LLM actually picked, keeping the
+  // slide order. This keeps the cover's 2x2 grid and the body cards aligned
+  // on the same 4 films (otherwise the cover would show the first 4 releases
+  // by ingestion order while the cards show the LLM's picks).
+  const pickedTitles = output.carouselSlides
+    .filter(s => s.type === "release")
+    .map(s => s.title);
+  const pickedReleases = pickedTitles
+    .map(t => releases.find(r => r.title === t))
+    .filter((r): r is Release => r !== undefined);
+
+  if (output.carouselSlides.length !== 0 && pickedReleases.length !== 4) {
+    throw new Error(
+      `Wed Drop: LLM picked ${releaseSlideCount} titles but only ${pickedReleases.length} matched a Release record. ` +
+      `Check that title strings match the input exactly.`
+    );
+  }
+
   // Render carousel slides as markdown for the Notion body
   const carouselSlides = output.carouselSlides
     .map(s => `**Slide ${s.slideNumber}** (${s.type}): **${s.title}** — ${s.body}`)
     .join("\n\n");
-  
+
   return {
-  pillar: "Wed Drop",
-  weekendDates,
-  caption: output.caption,
-  hashtags: output.hashtags.join(" "),
-  slides: output.carouselSlides,      // new: preserve structured data
-  carouselSlides,
-  releases,
-};
+    pillar: "Wed Drop",
+    weekendDates,
+    caption: output.caption,
+    hashtags: output.hashtags.join(" "),
+    slides: output.carouselSlides,
+    carouselSlides,
+    releases: pickedReleases,
+  };
 }

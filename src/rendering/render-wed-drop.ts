@@ -1,6 +1,7 @@
 // src/rendering/render-wed-drop.ts
 // Orchestrator: WednesdayDropDraft → 1 cover PNG + N body card PNGs
 
+import { promises as fs } from "node:fs";
 import { renderToPNG, closeBrowser } from "./renderer.js";
 import { format } from "date-fns";
 import { log } from "../shared/logger.js";
@@ -11,6 +12,24 @@ import type {
   WedDropCardContext,
   WedDropGridItem,
 } from "./types.js";
+
+/**
+ * Delete any stale wed-drop PNGs for this date before re-rendering, so an
+ * earlier run's orphan cards don't get picked up by `npm run thumbnails`
+ * or shipped to R2 on a subsequent invocation.
+ */
+async function cleanOldRenders(outputDir: string, datePrefix: string): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(outputDir);
+  } catch {
+    return;
+  }
+  const prefix = `wed-drop-${datePrefix}-`;
+  const stale = entries.filter(e => e.startsWith(prefix) && e.endsWith(".png"));
+  await Promise.all(stale.map(e => fs.unlink(`${outputDir}/${e}`)));
+  if (stale.length > 0) log.info(`  Cleaned ${stale.length} stale Wed Drop PNG(s)`);
+}
 
 const LANGUAGE_FALLBACK_COLORS: Record<string, string> = {
   "Hindi":     "#A33223",
@@ -66,6 +85,8 @@ export async function renderWedDrop(
     displayDate: format(today, "dd·MM·yy"),
     pillarLabel: "WED DROP" as const,
   };
+
+  await cleanOldRenders(outputDir, baseCtx.date);
 
   // 1. Cover: shows up to 4 films in a 2x2 grid + the LLM's cover headline
   const gridItems = draft.releases.slice(0, 4).map(buildGridItem);
