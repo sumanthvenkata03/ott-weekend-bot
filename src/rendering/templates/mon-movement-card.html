@@ -318,18 +318,41 @@
       <div class="meta-row-2">{% if hasCast %}with {{ release.leadCast | join(", ") }}{% endif %}{% if hasCast and hasMusic %}, {% endif %}{% if hasMusic %}music by {{ release.musicDirector }}{% endif %}</div>
       {% endif %}
 
-      {# Phase 5.6 — RELEASED section. Drops cleanly when neither date is present. #}
+      {# Phase 5.8 — RELEASED marquee. Brass rules above/below, vermillion
+         label + ink date pairs, brass divider between events when both present. #}
       {% if release.releaseDates and (release.releaseDates.theatrical or release.releaseDates.ott) %}
       <div class="released-section">
         <div class="section-label">★ RELEASED</div>
-        <div class="released-dates">
-          {% if release.releaseDates.theatrical and release.releaseDates.ott and release.releaseDates.theatrical != release.releaseDates.ott %}
-            Theatrical {{ release.releaseDates.theatrical | longDate }} — OTT {{ release.releaseDates.ott | longDate }}
-          {% elif release.releaseDates.ott %}
-            OTT {{ release.releaseDates.ott | longDate }}
-          {% elif release.releaseDates.theatrical %}
-            Theatrical {{ release.releaseDates.theatrical | longDate }}
-          {% endif %}
+        <div class="released-marquee">
+          <hr class="marquee-rule" />
+          <div class="marquee-content">
+            {% if release.releaseDates.theatrical and release.releaseDates.ott and release.releaseDates.theatrical != release.releaseDates.ott %}
+              <span class="marquee-event">
+                <span class="marquee-label">IN CINEMAS</span>
+                <span class="marquee-sep">·</span>
+                <span class="marquee-date">{{ release.releaseDates.theatrical | longDate | upper }}</span>
+              </span>
+              <span class="marquee-divider">│</span>
+              <span class="marquee-event">
+                <span class="marquee-label">OTT STREAMING</span>
+                <span class="marquee-sep">·</span>
+                <span class="marquee-date">{{ release.releaseDates.ott | longDate | upper }}</span>
+              </span>
+            {% elif release.releaseDates.ott %}
+              <span class="marquee-event">
+                <span class="marquee-label">OTT STREAMING</span>
+                <span class="marquee-sep">·</span>
+                <span class="marquee-date">{{ release.releaseDates.ott | longDate | upper }}</span>
+              </span>
+            {% elif release.releaseDates.theatrical %}
+              <span class="marquee-event">
+                <span class="marquee-label">IN CINEMAS</span>
+                <span class="marquee-sep">·</span>
+                <span class="marquee-date">{{ release.releaseDates.theatrical | longDate | upper }}</span>
+              </span>
+            {% endif %}
+          </div>
+          <hr class="marquee-rule" />
         </div>
       </div>
       {% endif %}

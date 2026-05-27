@@ -65,15 +65,57 @@
     margin-bottom: 8px;
     text-transform: uppercase;
   }
-  /* Phase 5.7 — date typography updated to Playfair italic per design pick.
-     Editorial voice; pairs with the italic Line 1 metadata directly above. */
-  .released-dates {
-    font-family: 'Playfair Display', serif;
-    font-style: italic;
-    font-size: 20px;
-    font-weight: 400;
+  /* Phase 5.8 marquee component — replaces the Phase 5.7 inline date line.
+     Newspaper-listing styling: brass horizontal rules above + below, vermillion
+     uppercase labels, ink bold mono dates, brass center divider for 2-event
+     case. Sat Verdict's mustard variants override the colors to ink (see the
+     sat-verdict-card.html inline style block). Sizes tuned to fit the
+     two-event marquee within the Phase 5.7 text column width (~488px). */
+  .released-marquee {
+    width: 100%;
+    margin-top: 8px;
+  }
+  .marquee-rule {
+    border: none;
+    border-top: 2px solid var(--brass);
+    margin: 0;
+    height: 0;
+  }
+  .marquee-content {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .marquee-event {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+  .marquee-label {
+    font-size: 12px;
+    color: var(--vermillion);
+    text-transform: uppercase;
+  }
+  .marquee-sep {
+    font-size: 12px;
     color: var(--ink);
-    opacity: 1;
+    opacity: 0.6;
+  }
+  .marquee-date {
+    font-size: 16px;
+    color: var(--ink);
+  }
+  .marquee-divider {
+    font-size: 22px;
+    color: var(--brass);
+    font-weight: 400;
+    line-height: 1;
   }
   .language-pills {
     display: flex;

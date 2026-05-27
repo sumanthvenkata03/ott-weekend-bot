@@ -302,6 +302,34 @@
     color: var(--brass);
   }
 
+  /* Phase 5.8 — marquee inversion for mustard-bg variants. Brass rules and
+     vermillion labels would clash on mustard; switch to ink across the
+     marquee. Skip-variant cards have cream bg and use the default brass
+     marquee from _design-tokens.html. */
+  body.must-watch .marquee-rule,
+  body.worth-a-try .marquee-rule {
+    border-top-color: var(--ink);
+  }
+  body.must-watch .marquee-label,
+  body.worth-a-try .marquee-label {
+    color: var(--ink);
+    opacity: 0.85;
+  }
+  body.must-watch .marquee-divider,
+  body.worth-a-try .marquee-divider {
+    color: var(--ink);
+  }
+
+  /* Phase 5.8 follow-up — section labels ("★ RELEASED", "★ AVAILABLE IN")
+     also need to flip to ink on mustard. Vermillion-on-mustard is too low
+     contrast to read at swipe distance. The existing "★ ADMIT ONE" label
+     uses its own .admit-one class with explicit ink already, so it's
+     unaffected by this override. */
+  body.must-watch .section-label,
+  body.worth-a-try .section-label {
+    color: var(--ink);
+  }
+
   /* Footer */
   .footer {
     position: absolute;
@@ -375,18 +403,42 @@
       <div class="lang-line-2">{% if hasCast %}with {{ card.leadCast | join(", ") }}{% endif %}{% if hasCast and hasMusic %}, {% endif %}{% if hasMusic %}music by {{ card.musicDirector }}{% endif %}</div>
       {% endif %}
 
-      {# Phase 5.6 — RELEASED section. #}
+      {# Phase 5.8 — RELEASED marquee. Sat Verdict's must-watch/worth-a-try
+         variants have a mustard body bg; the body.must-watch/worth-a-try
+         overrides in this template's <style> recolor rules/labels to ink. #}
       {% if card.releaseDates and (card.releaseDates.theatrical or card.releaseDates.ott) %}
       <div class="released-section">
         <div class="section-label">★ RELEASED</div>
-        <div class="released-dates">
-          {% if card.releaseDates.theatrical and card.releaseDates.ott and card.releaseDates.theatrical != card.releaseDates.ott %}
-            Theatrical {{ card.releaseDates.theatrical | longDate }} — OTT {{ card.releaseDates.ott | longDate }}
-          {% elif card.releaseDates.ott %}
-            OTT {{ card.releaseDates.ott | longDate }}
-          {% elif card.releaseDates.theatrical %}
-            Theatrical {{ card.releaseDates.theatrical | longDate }}
-          {% endif %}
+        <div class="released-marquee">
+          <hr class="marquee-rule" />
+          <div class="marquee-content">
+            {% if card.releaseDates.theatrical and card.releaseDates.ott and card.releaseDates.theatrical != card.releaseDates.ott %}
+              <span class="marquee-event">
+                <span class="marquee-label">IN CINEMAS</span>
+                <span class="marquee-sep">·</span>
+                <span class="marquee-date">{{ card.releaseDates.theatrical | longDate | upper }}</span>
+              </span>
+              <span class="marquee-divider">│</span>
+              <span class="marquee-event">
+                <span class="marquee-label">OTT STREAMING</span>
+                <span class="marquee-sep">·</span>
+                <span class="marquee-date">{{ card.releaseDates.ott | longDate | upper }}</span>
+              </span>
+            {% elif card.releaseDates.ott %}
+              <span class="marquee-event">
+                <span class="marquee-label">OTT STREAMING</span>
+                <span class="marquee-sep">·</span>
+                <span class="marquee-date">{{ card.releaseDates.ott | longDate | upper }}</span>
+              </span>
+            {% elif card.releaseDates.theatrical %}
+              <span class="marquee-event">
+                <span class="marquee-label">IN CINEMAS</span>
+                <span class="marquee-sep">·</span>
+                <span class="marquee-date">{{ card.releaseDates.theatrical | longDate | upper }}</span>
+              </span>
+            {% endif %}
+          </div>
+          <hr class="marquee-rule" />
         </div>
       </div>
       {% endif %}
