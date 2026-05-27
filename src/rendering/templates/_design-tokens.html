@@ -1,0 +1,40 @@
+{#
+  Shared design-token <style> block, included into every card template's
+  <head>. Owns all colors so we don't duplicate :root vars across templates.
+
+  TBSI palette is the core editorial brand. Platform colors are tactical —
+  added as needed for the platform-line callout, only for platforms with
+  matching logo files in src/assets/platform-logos/.
+
+  Phase 5.5 introduced this file as a single source of truth. Existing
+  template inline :root vars are being migrated to consume from here.
+#}
+<style>
+  :root {
+    /* === TBSI core palette (editorial brand) === */
+    --ink: #1A1614;
+    --cream: #F4ECDC;
+    --vermillion: #A33223;
+    --brass: #C49A3F;
+    --bottle: #2E5742;
+
+    /* === Platform brand colors (Phase 5.5) ===
+       Only platforms with logo files get a color token. Platforms without
+       a token fall back to --brass in the platform-line styling. */
+    --platform-netflix: #E50914;
+    --platform-prime-video: #00A8E1;
+    --platform-aha: #F7941E;
+    --platform-sony-liv: #D71921;
+    --platform-zee5: #8230C5;
+    --platform-apple-tv: #000000;
+    --platform-hulu: #1CE783;
+    --platform-etv-win: #E91E63;
+
+    /* JioHotstar is a gradient (Jio blue → vibrant pink), per the post-merger
+       brand identity. Spec author had the colors switched (claimed Jio is
+       magenta); corrected here against the JioStar brand guide.
+       Used via background-clip:text in the platform-line for JioHotstar only. */
+    --platform-jiohotstar-start: #005AAC;   /* Jio corporate blue */
+    --platform-jiohotstar-end:   #C8298C;   /* Hotstar-inherited pink */
+  }
+</style>

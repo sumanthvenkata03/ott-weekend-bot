@@ -10,6 +10,7 @@ import { format } from "date-fns";
 import { log } from "../shared/logger.js";
 import type { SundaySpotlightDraft } from "../delivery/notion.js";
 import type { SunSpotlightRenderContext } from "./types.js";
+import { getPlatformStyle, computeDensity, hasMetadataLine1, hasMetadataLine2 } from "./_shared.js";
 
 // Same per-language fallback color map used inline by the other pillar orchestrators.
 // (Kept inline here to match the established pattern — see render-mon-movement.ts.)
@@ -50,12 +51,29 @@ function buildContext(
 ): SunSpotlightRenderContext {
   const film = draft.film;
   const firstPlatform = film.platform[0];
+  const platformStyle = getPlatformStyle(firstPlatform);
+  // Phase 5.5 enrichment fields, lifted from the picked film
+  const enrichment = {
+    ...(film.leadCast && film.leadCast.length > 0 ? { leadCast: film.leadCast } : {}),
+    ...(film.musicDirector ? { musicDirector: film.musicDirector } : {}),
+    ...(draft.isMusicDirectorNotable ? { isMusicDirectorNotable: true } : {}),
+    ...(film.audioLanguages ? { audioLanguages: film.audioLanguages } : {}),
+  };
+  const density = computeDensity({
+    bodyLength: draft.reelScript.whyItWorks.length,
+    hasLine1: hasMetadataLine1(film),
+    hasLine2: hasMetadataLine2({
+      ...(film.leadCast && film.leadCast.length > 0 ? { leadCast: film.leadCast } : {}),
+      ...(film.musicDirector ? { musicDirector: film.musicDirector } : {}),
+      ...(draft.isMusicDirectorNotable ? { isMusicDirectorNotable: true } : {}),
+    }),
+  });
   return {
     filmTitle: film.title,
     language: film.language,
-    director: film.director,
-    runtime: film.runtime,
-    posterUrl: film.posterUrl,
+    ...(film.director ? { director: film.director } : {}),
+    ...(film.runtime ? { runtime: film.runtime } : {}),
+    ...(film.posterUrl ? { posterUrl: film.posterUrl } : {}),
     posterFallbackColor: LANGUAGE_FALLBACK_COLORS[film.language] ?? "#1A1614",
     hook: draft.reelScript.hook,
     issueNumber: String(issueNumber).padStart(3, "0"),
@@ -65,6 +83,9 @@ function buildContext(
     platformLogoStem: firstPlatform ? platformLogoStem(firstPlatform) : "",
     caseAgainstSkepticism: draft.caseAgainstSkepticism,
     ctaTagline: "The film paper of record.",
+    ...platformStyle,
+    density,
+    ...enrichment,
   };
 }
 
@@ -144,7 +165,7 @@ if (isMainModule) {
       // Intentionally broken URL — verifies onerror handler hides the <img>
       // cleanly so the Gallery fallback (bottle-green typographic panel) shows through.
       posterUrl: "https://image.tmdb.org/t/p/w500/this-file-does-not-exist.jpg",
-      audioLanguages: ["Malayalam"],
+      
       subtitleLanguages: ["English"],
       sources: ["TMDb"],
       fetchedAt: new Date().toISOString(),

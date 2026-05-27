@@ -3,14 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;0,800;1,400;1,700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+{% include "_design-tokens.html" %}
 <style>
-  :root {
-    --ink: #1A1614;
-    --cream: #F4ECDC;
-    --vermillion: #A33223;
-    --brass: #C49A3F;
-    --bottle: #2E5742;
-  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
     width: 1080px;
@@ -54,7 +48,11 @@
     height: 4px;
   }
 
-  /* Body: poster left, copy right */
+  /* Body: poster left, copy right.
+     Phase 5.5 — density modes shift the poster column width so light cards
+     give the poster more room and heavy cards give the text room.
+     Post-review bump: poster columns widened (+60px), gap tightened (50→30)
+     so the image dominates more of the card area. */
   .ticket-body {
     position: absolute;
     top: 150px;
@@ -62,9 +60,11 @@
     right: 60px;
     bottom: 160px;
     display: grid;
-    grid-template-columns: 400px 1fr;
-    gap: 50px;
+    grid-template-columns: 460px 1fr;   /* standard density */
+    gap: 30px;
   }
+  body.compact .ticket-body { grid-template-columns: 520px 1fr; }
+  body.dense   .ticket-body { grid-template-columns: 400px 1fr; }
 
   /* Poster window */
   .poster-window {
@@ -145,6 +145,17 @@
     font-size: 20px;
     color: var(--ink);
     opacity: 0.8;
+    margin-bottom: 8px;
+  }
+  /* Phase 5.5 — Line 2: cast + (optional) music director.
+     Sits directly under Line 1; lighter weight + slightly smaller. */
+  .meta-row-2 {
+    font-family: 'Inter', sans-serif;
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    color: var(--ink);
+    opacity: 0.7;
     margin-bottom: 24px;
   }
   .why-block {
@@ -166,33 +177,47 @@
     color: var(--ink);
     font-weight: 500;
   }
+  /* Platform line — Phase 5.5: color is set inline per card from {{ platformColor }}.
+     JioHotstar gets a gradient via .platform-line.is-gradient (background-clip:text).
+     Post-review: font + tracking reduced (26/4 → 22/3) so the line stays single-row
+     in the narrower text column that comes with wider posters. */
   .platform-line {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 12px;
     font-family: 'Inter', sans-serif;
-    font-size: 26px;
+    font-size: 22px;
     font-weight: 800;
-    letter-spacing: 4px;
+    letter-spacing: 3px;
     text-transform: uppercase;
-    color: #C49A3F;
     padding-bottom: 6px;
     margin-top: 12px;
     margin-bottom: 18px;
-    border-bottom: 2px solid #C49A3F;
+    border-bottom: 2px solid currentColor;
+    white-space: nowrap;
   }
-  .platform-line .star {
-    color: #A33223;
+  .platform-line.is-gradient {
+    background-image: linear-gradient(
+      90deg,
+      var(--platform-jiohotstar-start) 0%,
+      var(--platform-jiohotstar-end) 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    border-bottom-color: var(--platform-jiohotstar-end);
   }
+  /* Phase 5.5 — larger logo (40 → 60), white fill, thin ink border. */
   .logo-stamp {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 40px;
-    height: 40px;
-    padding: 5px;
-    border: 1.5px solid #C49A3F;
-    border-radius: 2px;
+    width: 60px;
+    height: 60px;
+    padding: 7px;
+    background: #FFFFFF;
+    border: 1px solid var(--ink);
+    border-radius: 4px;
     flex-shrink: 0;
     box-sizing: border-box;
   }
@@ -242,7 +267,7 @@
   .footer .meta { font-family: 'JetBrains Mono', monospace; font-size: 14px; letter-spacing: 1px; }
 </style>
 </head>
-<body>
+<body class="{{ density }}">
 <div class="canvas">
 
   <div class="masthead">
@@ -271,7 +296,7 @@
       {% else %}
       <div class="slot-tag">★ NEW ARRIVAL · {{ slotNumber }} / {{ totalSlots }} ★</div>
       {% endif %}
-      <div class="platform-line">
+      <div class="platform-line{% if platformIsGradient %} is-gradient{% endif %}" style="color: {{ platformColor }};">
         <span class="star">★</span>
         {% if release.platform and release.platform.length > 0 %}
           <span>NOW ON</span>
@@ -283,8 +308,19 @@
         {% endif %}
       </div>
       <div class="film-title">{{ title }}</div>
-      {% if release.runtime or release.director %}
-      <div class="meta-row">{{ release.language }}{% if release.runtime %} · {{ release.runtime }} min{% endif %}{% if release.director %} · dir. {{ release.director }}{% endif %}</div>
+      {# Phase 5.5 — Line 1 uses audioLanguages.original (the film's native track) when available,
+         appending "also in <dubbed>" when the film has other audio tracks. Falls back to
+         release.language for releases without Phase 5.5 enrichment.
+         Gate widened: render Line 1 if ANY of runtime / director / dubbed-list is present
+         (previously only runtime|director, which dropped the line for dub-only films like
+         Sathi Leelavathi). #}
+      {% if release.runtime or release.director or (release.audioLanguages and release.audioLanguages.dubbed and release.audioLanguages.dubbed.length > 0) %}
+      <div class="meta-row">{% if release.audioLanguages %}{{ release.audioLanguages.original }}{% if release.audioLanguages.dubbed and release.audioLanguages.dubbed.length > 0 %} · also in {{ release.audioLanguages.dubbed | join(", ") }}{% endif %}{% else %}{{ release.language }}{% endif %}{% if release.runtime %} · {{ release.runtime }} min{% endif %}{% if release.director %} · dir. {{ release.director }}{% endif %}</div>
+      {% endif %}
+      {% set hasCast = release.leadCast and release.leadCast.length > 0 %}
+      {% set hasMusic = release.isMusicDirectorNotable and release.musicDirector %}
+      {% if hasCast or hasMusic %}
+      <div class="meta-row-2">{% if hasCast %}with {{ release.leadCast | join(", ") }}{% endif %}{% if hasCast and hasMusic %}, {% endif %}{% if hasMusic %}music by {{ release.musicDirector }}{% endif %}</div>
       {% endif %}
       <div class="why-block">
         {% if slotKind == 'gem' %}

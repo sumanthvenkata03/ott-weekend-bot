@@ -4,6 +4,7 @@ import { callClaudeJSON } from "../claude.js";
 import { log } from "../../shared/logger.js";
 import type { Release } from "../../shared/types.js";
 import type { SundaySpotlightDraft } from "../../delivery/notion.js";
+import { notableComposersBlock } from "./_shared.js";
 
 interface LLMOutput {
   caption: string;
@@ -17,6 +18,7 @@ interface LLMOutput {
     visualDirection: string;
   };
   caseAgainstSkepticism: string;
+  isMusicDirectorNotable?: boolean;
 }
 
 export async function generateSundaySpotlight(
@@ -52,6 +54,8 @@ Genres: ${film.genre.join(", ") || "—"}
 Platform: ${film.platform.length ? film.platform.join(", ") : "TBA"}
 Director: ${film.director ?? "—"}
 Cast: ${film.cast.slice(0, 5).join(", ") || "—"}
+Lead cast (top-billed): ${film.leadCast && film.leadCast.length > 0 ? film.leadCast.join(", ") : "—"}
+Music director: ${film.musicDirector ?? "—"}
 Runtime: ${film.runtime ? `${film.runtime} min` : "—"}
 ${film.imdbRating ? `IMDb: ${film.imdbRating} (${film.imdbVotes ?? 0} votes)` : "IMDb: not yet rated"}
 Synopsis: ${film.synopsis}
@@ -69,8 +73,19 @@ DELIVERABLES (respond as JSON):
     "onScreenText": ["4 frames of bold text overlays, max 6 words each. e.g., 'PRIME VIDEO — NOW STREAMING', 'BETTER THAN BOLLYWOOD THIS YEAR', etc."],
     "visualDirection": "Shot list for the editor — what to show on screen during each beat. Use generic B-roll suggestions (Pexels-friendly): 'wide shot of city night skyline, cut to close-up of laptop with subtitles visible, ambient cafe shot, etc.' AVOID suggesting copyrighted film clips."
   },
-  "caseAgainstSkepticism": "Hard limit: 40-50 words. Maximum 60. This must read as a quotable epigram, not an essay. Reply template for IG comments like 'I don't watch ${film.language} films.' One specific reference (a film name, a director, a year, a number) is enough to defeat the skepticism. The card is a STAMP, not a paragraph."
+  "caseAgainstSkepticism": "Hard limit: 40-50 words. Maximum 60. This must read as a quotable epigram, not an essay. Reply template for IG comments like 'I don't watch ${film.language} films.' One specific reference (a film name, a director, a year, a number) is enough to defeat the skepticism. The card is a STAMP, not a paragraph.",
+  "isMusicDirectorNotable": false
 }
+
+${notableComposersBlock()}
+
+CAST OVERLAP RULE for body copy (caption, reelScript.whyItWorks,
+caseAgainstSkepticism) — whenever you name an actor, at least one of the
+actors you name MUST also appear in this film's "Lead cast (top-billed)"
+field above. Both that field and the broader "Cast:" field are available;
+reference whichever actor sells the spotlight best, but make sure one
+name overlaps with leadCast so the body and the card's metadata line stay
+aligned. If leadCast already contains the recognizable name, just use those.
 
 The film's language is ${film.language}. The audience you're persuading defaults to Hindi/English content. The CTA must feel like a dare, not a request.`;
   
@@ -84,5 +99,6 @@ The film's language is ${film.language}. The audience you're persuading defaults
     hashtags: output.hashtags.join(" "),
     reelScript: output.reelScript,
     caseAgainstSkepticism: output.caseAgainstSkepticism,
+    ...(output.isMusicDirectorNotable ? { isMusicDirectorNotable: true } : {}),
   };
 }

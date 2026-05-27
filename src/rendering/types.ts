@@ -21,8 +21,41 @@ export interface RenderBase {
   pillarLabel: string;
 }
 
+/**
+ * Phase 5.5 — fields a card template needs to style the platform-line in
+ * the platform's brand color (or skip the color-up entirely).
+ * Computed per-card in the orchestrator from the first platform of the
+ * release. Falls back to brass when the platform has no token.
+ */
+export interface PlatformStyle {
+  /** A CSS value: "var(--platform-netflix)" or "var(--brass)". Never empty. */
+  platformColor: string;
+  /** True only for JioHotstar — template renders gradient via background-clip:text. */
+  platformIsGradient: boolean;
+}
+
+/**
+ * Phase 5.5 — body-density tier for dynamic poster sizing.
+ * Computed per-card by the orchestrator: shorter body → bigger poster.
+ */
+export type CardDensity = "compact" | "standard" | "dense";
+
+/**
+ * Phase 5.5 — enrichment fields a body card may carry beyond core release data.
+ * All optional; templates use smart-fallback conditionals to drop empty lines.
+ */
+export interface CardEnrichment {
+  leadCast?: string[];               // top-2 billed actors from TMDb /credits
+  musicDirector?: string;            // composer from TMDb /credits crew
+  isMusicDirectorNotable?: boolean;  // LLM-judged; gates the "music by X" line
+  audioLanguages?: {                 // film master audio tracks (TMDb spoken_languages)
+    original: string;
+    dubbed?: string[];
+  };
+}
+
 /** A single film card on a Sat Verdict body slide */
-export interface SatVerdictCard {
+export interface SatVerdictCard extends CardEnrichment {
   filmTitle: string;
   language: string;
   platform: string[];
@@ -59,12 +92,14 @@ export interface SatVerdictPosterStripTile {
 }
 
 /** Full context for a Sat Verdict body card slide (1080x1080) */
-export interface SatVerdictCardContext extends RenderBase {
+export interface SatVerdictCardContext extends RenderBase, PlatformStyle {
   pillarLabel: "SAT VERDICT";
   card: SatVerdictCard;
   /** 1-indexed position in the carousel */
   slotNumber: number;
   totalSlots: number;
+  /** Phase 5.5 — body-density tier (compact/standard/dense) */
+  density: CardDensity;
 }
 
 // ============================================================
@@ -96,19 +131,21 @@ export interface WedDropCoverContext extends RenderBase {
 }
 
 /** Full context for a Wed Drop body card slide (1080x1080) */
-export interface WedDropCardContext extends RenderBase {
+export interface WedDropCardContext extends RenderBase, PlatformStyle {
   pillarLabel: "WED DROP";
   /** From LLM: title (= film title) + body (= why this matters) */
   title: string;
   body: string;
   /** Linked Release data for poster + metadata */
-  release: WedDropGridItem & {
+  release: WedDropGridItem & CardEnrichment & {
     director?: string;
     cast: string[];
     runtime?: number;
   };
   slotNumber: number;
   totalSlots: number;
+  /** Phase 5.5 — body-density tier (compact/standard/dense) */
+  density: CardDensity;
 }
 
 // ============================================================
@@ -138,11 +175,11 @@ export interface MonMovementCoverContext extends RenderBase {
 }
 
 /** Full context for a Mon Movement body card slide (1080x1080) */
-export interface MonMovementCardContext extends RenderBase {
+export interface MonMovementCardContext extends RenderBase, PlatformStyle {
   pillarLabel: "MON MOVEMENT";
   title: string;             // from slide.title
   body: string;              // from slide.body
-  release: MonMovementGridItem & {
+  release: MonMovementGridItem & CardEnrichment & {
     director?: string;
     cast: string[];
     runtime?: number;
@@ -150,6 +187,8 @@ export interface MonMovementCardContext extends RenderBase {
   slotKind: "arrival" | "gem";   // determines accent color + copy
   slotNumber: number;
   totalSlots: number;
+  /** Phase 5.5 — body-density tier (compact/standard/dense) */
+  density: CardDensity;
 }
 
 // ============================================================
@@ -158,7 +197,7 @@ export interface MonMovementCardContext extends RenderBase {
 // reel cover (1080x1920), card-why-it-works + card-case-against (1080x1080).
 // ============================================================
 
-export interface SunSpotlightRenderContext {
+export interface SunSpotlightRenderContext extends PlatformStyle, CardEnrichment {
   // Cover-level
   filmTitle: string;
   language: string;
@@ -178,4 +217,7 @@ export interface SunSpotlightRenderContext {
   // Card 2 (caseAgainstSkepticism)
   caseAgainstSkepticism: string;
   ctaTagline: string;
+
+  /** Phase 5.5 — body-density tier (compact/standard/dense), applies to card 1 only */
+  density: CardDensity;
 }

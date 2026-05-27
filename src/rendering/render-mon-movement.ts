@@ -12,6 +12,7 @@ import type {
   MonMovementCardContext,
   MonMovementGridItem,
 } from "./types.js";
+import { getPlatformStyle, computeDensity, hasMetadataLine1, hasMetadataLine2 } from "./_shared.js";
 
 /**
  * Delete any stale mon-movement PNGs for this date before re-rendering,
@@ -175,19 +176,33 @@ export async function renderMonMovement(
       continue;
     }
 
+    const enrichedRelease = {
+      ...buildGridItem(release, slotKind === "gem"),
+      ...(release.director ? { director: release.director } : {}),
+      cast: release.cast,
+      ...(release.runtime ? { runtime: release.runtime } : {}),
+      // Phase 5.5 enrichment
+      ...(release.leadCast && release.leadCast.length > 0 ? { leadCast: release.leadCast } : {}),
+      ...(release.musicDirector ? { musicDirector: release.musicDirector } : {}),
+      ...(slide.isMusicDirectorNotable ? { isMusicDirectorNotable: true } : {}),
+      ...(release.audioLanguages ? { audioLanguages: release.audioLanguages } : {}),
+    };
+    const platformStyle = getPlatformStyle(release.platform[0]);
+    const density = computeDensity({
+      bodyLength: slide.body.length,
+      hasLine1: hasMetadataLine1(enrichedRelease),
+      hasLine2: hasMetadataLine2(enrichedRelease),
+    });
     const cardCtx: MonMovementCardContext = {
       ...baseCtx,
       title: cleanTitle,
       body: slide.body,
-      release: {
-        ...buildGridItem(release, slotKind === "gem"),
-        director: release.director,
-        cast: release.cast,
-        runtime: release.runtime,
-      },
+      release: enrichedRelease,
       slotKind,
       slotNumber: i + 1,
       totalSlots: bodySlides.length,
+      ...platformStyle,
+      density,
     };
     const cardPath = `${outputDir}/mon-movement-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
     await renderToPNG({
@@ -231,7 +246,7 @@ if (isMainModule) {
         platform: ["Aha"], releaseDate: "2026-05-20", genre: ["Drama"], runtime: 92,
         director: "Mathew Thomas", cast: ["Parvathy Thiruvothu"],
         synopsis: "Siblings clean out their late mother's house.",
-        audioLanguages: ["Malayalam"], subtitleLanguages: ["English"],
+        subtitleLanguages: ["English"],
         sources: ["TMDb"], fetchedAt: new Date().toISOString(),
       },
       {
@@ -240,7 +255,7 @@ if (isMainModule) {
         director: "Rahul Sadasivan", cast: ["Mammootty"],
         synopsis: "17th-century black-and-white horror.",
         posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
-        audioLanguages: ["Malayalam"], subtitleLanguages: ["English"],
+        subtitleLanguages: ["English"],
         sources: ["TMDb"], fetchedAt: new Date().toISOString(),
       },
       {
@@ -248,7 +263,7 @@ if (isMainModule) {
         platform: ["Sun NXT"], releaseDate: "2026-05-22", genre: ["Thriller"], runtime: 110,
         director: "Karthik Subbaraj", cast: ["Vijay Sethupathi"],
         synopsis: "Small-town election thriller.",
-        audioLanguages: ["Tamil"], subtitleLanguages: ["English"],
+        subtitleLanguages: ["English"],
         sources: ["TMDb"], fetchedAt: new Date().toISOString(),
       },
     ],
@@ -259,7 +274,7 @@ if (isMainModule) {
         genre: ["Survival", "Thriller"], runtime: 135,
         director: "Chidambaram", cast: ["Soubin Shahir", "Sreenath Bhasi"],
         synopsis: "Friends trapped in caves during a Kodaikanal trip.",
-        audioLanguages: ["Malayalam"], subtitleLanguages: ["English"],
+        subtitleLanguages: ["English"],
         sources: ["TMDb"], fetchedAt: new Date().toISOString(),
       },
       {
@@ -268,7 +283,7 @@ if (isMainModule) {
         genre: ["Mystery", "Thriller"], runtime: 130,
         director: "Sujoy Ghosh", cast: ["Kareena Kapoor", "Jaideep Ahlawat"],
         synopsis: "A single mother in Kalimpong is drawn into a murder investigation.",
-        audioLanguages: ["Hindi"], subtitleLanguages: ["English"],
+        subtitleLanguages: ["English"],
         sources: ["TMDb"], fetchedAt: new Date().toISOString(),
       },
     ],

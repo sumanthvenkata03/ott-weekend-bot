@@ -4,6 +4,7 @@ import { callClaudeJSON } from "../claude.js";
 import { log } from "../../shared/logger.js";
 import type { Release } from "../../shared/types.js";
 import type { SaturdayVerdictDraft, VerdictSlide } from "../../delivery/notion.js";
+import { notableComposersBlock, enrichmentBlock } from "./_shared.js";
 
 interface LLMOutput {
   caption: string;
@@ -20,11 +21,12 @@ interface LLMOutput {
     whereItWins: string;
     whereItLoses: string;
     watchSetup: string;
+    isMusicDirectorNotable?: boolean;
   }[];
 }
 
 function releaseForPrompt(r: Release): string {
-  return [
+  const lines = [
     `Title: ${r.title}`,
     `Language: ${r.language}`,
     `Release date: ${r.releaseDate}`,
@@ -34,8 +36,11 @@ function releaseForPrompt(r: Release): string {
     `Cast: ${r.cast.slice(0, 3).join(", ") || "—"}`,
     `Runtime: ${r.runtime ? `${r.runtime} min` : "—"}`,
     r.imdbRating ? `IMDb: ${r.imdbRating} (${r.imdbVotes ?? 0} votes)` : "IMDb: not yet rated",
-    `Synopsis: ${r.synopsis}`,
-  ].join("\n");
+  ];
+  const enr = enrichmentBlock(r);
+  if (enr) lines.push(enr);
+  lines.push(`Synopsis: ${r.synopsis}`);
+  return lines.join("\n");
 }
 
 export async function generateSaturdayVerdict(
@@ -100,10 +105,22 @@ DELIVERABLES (respond as JSON):
       "skipIf": "Skip if you're tired of [Y]. Name the actual fatigue point.",
       "whereItWins": "Single specific strength. NOT 'great performances' — 'the second-act twist that recontextualizes the whole opening' kind of specific.",
       "whereItLoses": "Single honest weakness. Even on Must Watches, find the trade-off.",
-      "watchSetup": "When/how to watch. e.g., 'Saturday night, full attention, no phone' or 'Sunday afternoon, half-watching while doing laundry is fine.'"
+      "watchSetup": "When/how to watch. e.g., 'Saturday night, full attention, no phone' or 'Sunday afternoon, half-watching while doing laundry is fine.'",
+      "isMusicDirectorNotable": false
     }
   ]
 }
+
+${notableComposersBlock()}
+
+CAST OVERLAP RULE for verdict body copy — whenever you name an actor in a
+verdict's whereItWins, watchIf, or oneLineVerdict, at least one of the
+actors you name MUST also appear in that film's "Lead cast (top-billed)"
+line from the input. Both that line and the broader "Cast:" list are
+available; reference whichever actor sells the verdict best, but make sure
+one name overlaps with leadCast so the body and the card's metadata line
+stay aligned. If leadCast already contains the recognizable name, just use
+those — don't reach into the broader cast for a less-billed actor.
 
 CARD COUNT — quality over coverage:
 - Pick 3 to 5 films from the slate above. If only 3 are worth talking about, deliver 3. If 5 are, deliver 5.
@@ -137,6 +154,7 @@ OTHER:
     whereItWins: v.whereItWins,
     whereItLoses: v.whereItLoses,
     watchSetup: v.watchSetup,
+    ...(v.isMusicDirectorNotable ? { isMusicDirectorNotable: true } : {}),
   }));
   
   return {

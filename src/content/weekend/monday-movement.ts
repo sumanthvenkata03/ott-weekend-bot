@@ -4,6 +4,7 @@ import { callClaudeJSON } from "../claude.js";
 import { log } from "../../shared/logger.js";
 import type { Release } from "../../shared/types.js";
 import type { MovementDraft } from "../../delivery/notion.js";
+import { notableComposersBlock, enrichmentBlock } from "./_shared.js";
 
 interface LLMOutput {
   weekHeadline: string;
@@ -14,6 +15,7 @@ interface LLMOutput {
     type: "cover" | "headline" | "arrival" | "gem" | "cta";
     title: string;
     body: string;
+    isMusicDirectorNotable?: boolean;
   }[];
 }
 
@@ -26,6 +28,7 @@ function releaseForPrompt(r: Release, isArrival: boolean): string {
     `  Cast: ${r.cast.slice(0, 3).join(", ") || "—"}`,
     `  Genres: ${r.genre.join(", ") || "—"}`,
     r.imdbRating ? `  IMDb: ${r.imdbRating} (${r.imdbVotes ?? 0} votes)` : "",
+    enrichmentBlock(r),
     `  Synopsis: ${r.synopsis.slice(0, 200)}${r.synopsis.length > 200 ? "..." : ""}`,
   ].filter(Boolean).join("\n");
 }
@@ -86,19 +89,30 @@ DELIVERABLES (respond as JSON):
   "carouselSlides": [
     { "slideNumber": 1, "type": "cover", "title": "<6-word headline based on weekHeadline>", "body": "<short subtext>" },
     { "slideNumber": 2, "type": "headline", "title": "This week in OTT", "body": "<the weekHeadline expanded to 2 sentences>" },
-    { "slideNumber": 3, "type": "arrival", "title": "<exact film title>", "body": "<one-line why this matters — platform, language, genre angle>" },
-    { "slideNumber": 4, "type": "arrival|gem", "title": "<exact film title>", "body": "<...>" },
-    { "slideNumber": 5, "type": "arrival|gem", "title": "<exact film title>", "body": "<...>" },
-    { "slideNumber": 6, "type": "arrival|gem", "title": "<exact film title>", "body": "<...>" },
-    { "slideNumber": 7, "type": "gem", "title": "Hidden Gem: <exact film title>", "body": "<why this is worth pulling up from your watch list>" },
+    { "slideNumber": 3, "type": "arrival", "title": "<exact film title>", "body": "<one-line why this matters — platform, language, genre angle>", "isMusicDirectorNotable": false },
+    { "slideNumber": 4, "type": "arrival|gem", "title": "<exact film title>", "body": "<...>", "isMusicDirectorNotable": false },
+    { "slideNumber": 5, "type": "arrival|gem", "title": "<exact film title>", "body": "<...>", "isMusicDirectorNotable": false },
+    { "slideNumber": 6, "type": "arrival|gem", "title": "<exact film title>", "body": "<...>", "isMusicDirectorNotable": false },
+    { "slideNumber": 7, "type": "gem", "title": "Hidden Gem: <exact film title>", "body": "<why this is worth pulling up from your watch list>", "isMusicDirectorNotable": false },
     { "slideNumber": 8, "type": "cta", "title": "<CTA>", "body": "Save. DM us. Which one are you starting?" }
   ]
 }
+
+${notableComposersBlock()}
 
 IMPORTANT:
 - The weekHeadline is the most important line in the entire post. Make it specific, opinionated, and pattern-aware.
 - Don't dilute. If there's only 1 great arrival, lead with it and don't pad with weak ones.
 - Hidden gems should feel like "you missed this and you shouldn't have" — not just "another good film."
+
+CAST OVERLAP RULE for arrival/gem slide body copy — whenever you name an
+actor in a slide's body, at least one of the actors you name MUST also
+appear in that film's "Lead cast (top-billed)" line from the input. Both
+that line and the broader "Cast:" list are available; reference whichever
+actor sells the slide best, but make sure one name overlaps with leadCast
+so the body and the card's metadata line stay aligned. If leadCast already
+contains the recognizable name, just use those — don't reach into the
+broader cast for a less-billed actor.
 
 HEADLINE MIX RULE — the weekHeadline must acknowledge BOTH variants in this week's slate, the new arrivals (type "arrival") AND the hidden gems (type "gem"). Mon Movement always has ≥1 of each by design constraint, so this rule applies on every standard run. When the mix is heavily skewed (4 arrival + 1 gem, or 1 arrival + 4 gem), the lighter variant needs only a brief acknowledgment — a half-clause is enough — but it must appear.
 

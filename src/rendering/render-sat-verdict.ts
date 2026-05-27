@@ -12,6 +12,7 @@ import type {
   SatVerdictCoverContext,
   SatVerdictCardContext,
 } from "./types.js";
+import { getPlatformStyle, computeDensity, hasMetadataLine1, hasMetadataLine2 } from "./_shared.js";
 
 /**
  * Delete any stale sat-verdict PNGs for this date before re-rendering, so a
@@ -72,11 +73,16 @@ function buildCard(
     verdictKind: verdictKind(slide.verdict),
     oneLineVerdict: slide.oneLineVerdict,
     watchIf: slide.watchIf,
-    posterUrl: release?.posterUrl,
+    ...(release?.posterUrl ? { posterUrl: release.posterUrl } : {}),
     fallbackColor: LANGUAGE_FALLBACK_COLORS[slide.language] ?? "#1A1614",
-    runtime: release?.runtime,
-    director: release?.director,
+    ...(release?.runtime ? { runtime: release.runtime } : {}),
+    ...(release?.director ? { director: release.director } : {}),
     cast: release?.cast ?? [],
+    // Phase 5.5 enrichment
+    ...(release?.leadCast && release.leadCast.length > 0 ? { leadCast: release.leadCast } : {}),
+    ...(release?.musicDirector ? { musicDirector: release.musicDirector } : {}),
+    ...(slide.isMusicDirectorNotable ? { isMusicDirectorNotable: true } : {}),
+    ...(release?.audioLanguages ? { audioLanguages: release.audioLanguages } : {}),
   };
 }
 
@@ -141,11 +147,29 @@ export async function renderSatVerdict(
   // 2. Body cards
   const cardPaths: string[] = [];
   for (let i = 0; i < cards.length; i++) {
-    const card = cards[i];
+    const card = cards[i]!;
+    const platformStyle = getPlatformStyle(card.platform[0]);
+    // Sat Verdict variant-specific fix: must-watch and worth-a-try cards use a
+    // brass body background. When a card has no platform, getPlatformStyle's
+    // fallback (brass) goes invisible against the brass bg. Force cream so the
+    // "STREAMING TBA" platform line stays readable on those variants.
+    if (card.platform.length === 0 && card.verdictKind !== "skip") {
+      platformStyle.platformColor = "var(--cream)";
+    }
+    // Sat Verdict body length combines the one-line verdict with the watchIf rationale —
+    // those are what visually fill the right-hand text column.
+    const bodyLength = card.oneLineVerdict.length + card.watchIf.length;
+    const density = computeDensity({
+      bodyLength,
+      hasLine1: hasMetadataLine1(card),
+      hasLine2: hasMetadataLine2(card),
+    });
     const cardCtx: SatVerdictCardContext = {
       ...baseCtx,
       card,
       slotNumber: i + 1,
+      ...platformStyle,
+      density,
       totalSlots: cards.length,
     };
     const cardPath = `${outputDir}/sat-verdict-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
@@ -225,7 +249,7 @@ if (isMainModule) {
         cast: ["Parvathy Thiruvothu", "Tovino Thomas"],
         synopsis: "Two siblings return home to clean out their late mother's house.",
         posterUrl: undefined,
-        audioLanguages: ["Malayalam"],
+        
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
         fetchedAt: new Date().toISOString(),
@@ -244,7 +268,7 @@ if (isMainModule) {
         synopsis: "A 17th-century horror set in a forsaken mansion.",
         // Real verified TMDb poster URL — tests CDN fetch end-to-end
         posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
-        audioLanguages: ["Malayalam"],
+        
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
         fetchedAt: new Date().toISOString(),
@@ -262,7 +286,7 @@ if (isMainModule) {
         cast: ["Ayushmann Khurrana", "Tabu", "Wamiqa Gabbi"],
         synopsis: "The third installment of a franchise nobody asked for.",
         posterUrl: undefined,
-        audioLanguages: ["Hindi"],
+        
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
         fetchedAt: new Date().toISOString(),

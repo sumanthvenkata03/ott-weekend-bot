@@ -42,6 +42,8 @@ export interface SundaySpotlightDraft {
     visualDirection: string;     // shot list / B-roll notes
   };
   caseAgainstSkepticism: string; // reply template for "I don't watch X-language films"
+  /** Phase 5.5 — LLM judges whether the film's composer is notable enough to surface */
+  isMusicDirectorNotable?: boolean;
 }
 
 export interface VerdictSlide {
@@ -55,6 +57,8 @@ export interface VerdictSlide {
   whereItWins: string;
   whereItLoses: string;
   watchSetup: string;
+  /** Phase 5.5 — LLM judges whether the music director is notable enough to surface on the card */
+  isMusicDirectorNotable?: boolean;
 }
 
 export interface SaturdayVerdictDraft {
@@ -72,6 +76,8 @@ export interface WedDropSlide {
   type: "cover" | "index" | "release" | "cta";
   title: string;
   body: string;
+  /** Phase 5.5 — LLM judges notability for release-type slides only */
+  isMusicDirectorNotable?: boolean;
 }
 
 export interface WednesdayDropDraft {
@@ -89,6 +95,8 @@ export interface MovementSlide {
   type: "cover" | "headline" | "arrival" | "gem" | "cta";
   title: string;
   body: string;
+  /** Phase 5.5 — LLM judges notability for arrival/gem slides only */
+  isMusicDirectorNotable?: boolean;
 }
 
 export interface MovementDraft {

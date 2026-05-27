@@ -1,9 +1,35 @@
 // src/ingestion/releases/index.ts
 import { log } from "../../shared/logger.js";
 import type { Release } from "../../shared/types.js";
-import { discoverIndianReleases, getImdbId, getStreamingPlatforms } from "./tmdb.js";
+import {
+  discoverIndianReleases,
+  getImdbId,
+  getStreamingPlatforms,
+  getCreditsAndLanguages,
+} from "./tmdb.js";
 import { fetchOmdbByImdbId } from "./omdb.js";
 import { discoverIndianOTTArrivals } from "./tmdb.js";
+
+/**
+ * Phase 5.5 — apply credits + audio-language enrichment to a release list.
+ * Pulls top-2 billed cast, music composer, and { original, dubbed } language
+ * structure from TMDb in one helper call per film. Returns release records
+ * with leadCast/musicDirector/audioLanguages spread in when available.
+ */
+async function enrichWithCreditsAndLanguages(releases: Release[]): Promise<Release[]> {
+  return Promise.all(
+    releases.map(async r => {
+      if (!r.tmdbId) return r;
+      const data = await getCreditsAndLanguages(r.tmdbId);
+      return {
+        ...r,
+        ...(data.leadCast.length > 0 ? { leadCast: data.leadCast } : {}),
+        ...(data.musicDirector ? { musicDirector: data.musicDirector } : {}),
+        ...(data.audioLanguages ? { audioLanguages: data.audioLanguages } : {}),
+      };
+    })
+  );
+}
 
 export async function ingestReleases(
   startDate: string,
@@ -34,11 +60,17 @@ export async function ingestReleases(
     })
   );
   log.info(`  Streaming on at least 1 platform: ${withPlatforms.filter(r => r.platform.length > 0).length}/${releases.length}`);
-  
+
+  // 3.5. Phase 5.5 — enrich with TMDb credits + audio language structure
+  log.info(`Fetching credits + audio languages...`);
+  const withCredits = await enrichWithCreditsAndLanguages(withPlatforms);
+  const enrichedCount = withCredits.filter(r => r.leadCast || r.musicDirector || r.audioLanguages).length;
+  log.info(`  Credits/audio enrichment: ${enrichedCount}/${releases.length}`);
+
   // 4. Enrich with OMDb
   log.info(`Enriching with OMDb (IMDb ratings + RT)...`);
   const enriched = await Promise.all(
-    withPlatforms.map(async r => {
+    withCredits.map(async r => {
       if (!r.imdbId) return r;
       const omdb = await fetchOmdbByImdbId(r.imdbId);
       if (!omdb) return r;
@@ -93,10 +125,14 @@ export async function ingestOTTArrivals(
       return { ...r, platform: platforms };
     })
   );
-  
+
+  // Phase 5.5 — credits + audio languages
+  log.info(`Fetching credits + audio languages...`);
+  const withCredits = await enrichWithCreditsAndLanguages(withPlatforms);
+
   log.info(`Enriching with OMDb...`);
   const enriched = await Promise.all(
-    withPlatforms.map(async r => {
+    withCredits.map(async r => {
       if (!r.imdbId) return r;
       const omdb = await fetchOmdbByImdbId(r.imdbId);
       if (!omdb) return r;

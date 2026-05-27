@@ -48,6 +48,33 @@ const TMDbExternalIdsSchema = z.object({
   imdb_id: z.string().nullable().optional(),
 });
 
+// Movie details — for spoken_languages + original_language (Phase 5.5)
+const TMDbSpokenLanguageSchema = z.object({
+  iso_639_1: z.string(),
+  english_name: z.string().optional(),
+});
+const TMDbMovieDetailsSchema = z.object({
+  id: z.number(),
+  original_language: z.string(),
+  spoken_languages: z.array(TMDbSpokenLanguageSchema),
+});
+
+// Credits — for cast (by billing order) + crew (find composer) (Phase 5.5)
+const TMDbCastEntrySchema = z.object({
+  name: z.string(),
+  order: z.number(),
+});
+const TMDbCrewEntrySchema = z.object({
+  name: z.string(),
+  job: z.string(),
+  department: z.string().optional(),
+});
+const TMDbCreditsSchema = z.object({
+  id: z.number(),
+  cast: z.array(TMDbCastEntrySchema),
+  crew: z.array(TMDbCrewEntrySchema),
+});
+
 // Watch providers (JustWatch via TMDb)
 const TMDbProviderSchema = z.object({
   provider_id: z.number(),
@@ -162,7 +189,7 @@ export async function discoverIndianReleases(
           synopsis: m.overview,
           posterUrl: posterUrl(m.poster_path),
           backdropUrl: backdropUrl(m.backdrop_path),
-          audioLanguages: [m.original_language],
+          // audioLanguages populated later by getCreditsAndLanguages (Phase 5.5)
           subtitleLanguages: [],
           sources: ["tmdb"],
           fetchedAt: new Date().toISOString(),
@@ -230,7 +257,7 @@ export async function discoverIndianOTTArrivals(
           synopsis: m.overview,
           posterUrl: posterUrl(m.poster_path),
           backdropUrl: backdropUrl(m.backdrop_path),
-          audioLanguages: [m.original_language],
+          // audioLanguages populated later by getCreditsAndLanguages (Phase 5.5)
           subtitleLanguages: [],
           sources: ["tmdb-ott"],
           fetchedAt: new Date().toISOString(),
@@ -261,7 +288,89 @@ export async function getImdbId(tmdbId: number): Promise<string | null> {
   }
 }
 
-/** 
+// ISO 639-1 code → display name. Indian languages first; English-language
+// names for others. Used for audioLanguages display (Phase 5.5).
+const LANG_DISPLAY: Record<string, string> = {
+  hi: "Hindi", te: "Telugu", ta: "Tamil", ml: "Malayalam",
+  kn: "Kannada", mr: "Marathi", bn: "Bengali", pa: "Punjabi",
+  gu: "Gujarati", or: "Odia", as: "Assamese", ur: "Urdu",
+  en: "English", ja: "Japanese", ko: "Korean", zh: "Chinese",
+  es: "Spanish", fr: "French", de: "German", it: "Italian",
+  pt: "Portuguese", ru: "Russian", ar: "Arabic", th: "Thai",
+  id: "Indonesian", vi: "Vietnamese", ne: "Nepali", si: "Sinhala",
+};
+function isoToDisplay(iso: string): string {
+  return LANG_DISPLAY[iso.toLowerCase()] ?? iso.toUpperCase();
+}
+
+export interface CreditsAndLanguages {
+  leadCast: string[];
+  musicDirector?: string;
+  audioLanguages?: {
+    original: string;
+    dubbed?: string[];
+  };
+}
+
+/**
+ * Phase 5.5 — fetch top-2 billed cast, music composer, and audio language
+ * structure from TMDb in one shot.
+ *
+ * Calls /movie/{id} (for spoken_languages + original_language) and
+ * /movie/{id}/credits (for cast.order + crew.job) in parallel.
+ *
+ * Returns an empty leadCast on error — the caller treats this as "no
+ * Phase 5.5 enrichment available" and skips rendering the affected line.
+ */
+export async function getCreditsAndLanguages(tmdbId: number): Promise<CreditsAndLanguages> {
+  try {
+    const [movieRaw, creditsRaw] = await Promise.all([
+      tmdbFetchCached<unknown>(`/movie/${tmdbId}`, {}, 30 * 24 * 60 * 60),
+      tmdbFetchCached<unknown>(`/movie/${tmdbId}/credits`, {}, 30 * 24 * 60 * 60),
+    ]);
+    const details = TMDbMovieDetailsSchema.parse(movieRaw);
+    const credits = TMDbCreditsSchema.parse(creditsRaw);
+
+    // Top-2 billed cast (lowest `order` value wins; ties stable-sorted by name)
+    const leadCast = credits.cast
+      .slice()
+      .sort((a, b) => a.order - b.order)
+      .slice(0, 2)
+      .map(c => c.name);
+
+    // Composer: prefer "Original Music Composer" (TMDb canonical), fall back
+    // to "Music" which Indian-film credits often use instead.
+    const composer =
+      credits.crew.find(c => c.job === "Original Music Composer") ??
+      credits.crew.find(c => c.job === "Music");
+
+    // Audio language structure: original is the film's primary track;
+    // dubbed is everything else in spoken_languages.
+    const originalIso = details.original_language;
+    const dubbedIsos = details.spoken_languages
+      .map(l => l.iso_639_1)
+      .filter(iso => iso && iso !== originalIso);
+    const dubbedDisplay = Array.from(new Set(dubbedIsos.map(isoToDisplay)));
+
+    const result: CreditsAndLanguages = {
+      leadCast,
+      audioLanguages: {
+        original: isoToDisplay(originalIso),
+        ...(dubbedDisplay.length > 0 ? { dubbed: dubbedDisplay } : {}),
+      },
+    };
+    if (composer) result.musicDirector = composer.name;
+    return result;
+  } catch (err) {
+    log.warn(
+      `Credits+languages fetch failed for TMDb ${tmdbId}`,
+      err instanceof Error ? err.message : err
+    );
+    return { leadCast: [] };
+  }
+}
+
+/**
  * Fetch streaming platforms for a TMDb movie in India.
  * Uses JustWatch data via TMDb's /watch/providers endpoint.
  */

@@ -12,6 +12,7 @@ import type {
   WedDropCardContext,
   WedDropGridItem,
 } from "./types.js";
+import { getPlatformStyle, computeDensity, hasMetadataLine1, hasMetadataLine2 } from "./_shared.js";
 
 /**
  * Delete any stale wed-drop PNGs for this date before re-rendering, so an
@@ -116,18 +117,32 @@ export async function renderWedDrop(
       log.warn(`  ⚠ No Release for slide "${slide.title}" — skipping`);
       continue;
     }
+    const enrichedRelease = {
+      ...buildGridItem(release),
+      ...(release.director ? { director: release.director } : {}),
+      cast: release.cast,
+      ...(release.runtime ? { runtime: release.runtime } : {}),
+      // Phase 5.5 enrichment
+      ...(release.leadCast && release.leadCast.length > 0 ? { leadCast: release.leadCast } : {}),
+      ...(release.musicDirector ? { musicDirector: release.musicDirector } : {}),
+      ...(slide.isMusicDirectorNotable ? { isMusicDirectorNotable: true } : {}),
+      ...(release.audioLanguages ? { audioLanguages: release.audioLanguages } : {}),
+    };
+    const platformStyle = getPlatformStyle(release.platform[0]);
+    const density = computeDensity({
+      bodyLength: slide.body.length,
+      hasLine1: hasMetadataLine1(enrichedRelease),
+      hasLine2: hasMetadataLine2(enrichedRelease),
+    });
     const cardCtx: WedDropCardContext = {
       ...baseCtx,
       title: slide.title,
       body: slide.body,
-      release: {
-        ...buildGridItem(release),
-        director: release.director,
-        cast: release.cast,
-        runtime: release.runtime,
-      },
+      release: enrichedRelease,
       slotNumber: i + 1,
       totalSlots: releaseSlides.length,
+      ...platformStyle,
+      density,
     };
     const cardPath = `${outputDir}/wed-drop-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
     await renderToPNG({
@@ -168,26 +183,26 @@ if (isMainModule) {
         id: "sample-1", title: "Pennum Porattum", language: "Malayalam", isSeries: false,
         platform: ["Aha"], releaseDate: "2026-05-16", genre: ["Drama"], runtime: 92,
         director: "Mathew Thomas", cast: ["Parvathy Thiruvothu"], synopsis: "Siblings clean out their late mother's house.",
-        audioLanguages: ["Malayalam"], subtitleLanguages: ["English"], sources: ["TMDb"], fetchedAt: new Date().toISOString(),
+        subtitleLanguages: ["English"], sources: ["TMDb"], fetchedAt: new Date().toISOString(),
       },
       {
         id: "sample-2", title: "Bramayugam", language: "Malayalam", isSeries: false,
         platform: ["SonyLIV"], releaseDate: "2024-02-15", genre: ["Horror"], runtime: 138,
         director: "Rahul Sadasivan", cast: ["Mammootty"], synopsis: "17th-century horror.",
         posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
-        audioLanguages: ["Malayalam"], subtitleLanguages: ["English"], sources: ["TMDb"], fetchedAt: new Date().toISOString(),
+        subtitleLanguages: ["English"], sources: ["TMDb"], fetchedAt: new Date().toISOString(),
       },
       {
         id: "sample-3", title: "Pati Patni Aur Woh Do", language: "Hindi", isSeries: false,
         platform: ["JioHotstar"], releaseDate: "2026-05-16", genre: ["Romance"], runtime: 142,
         director: "Mudassar Aziz", cast: ["Ayushmann Khurrana", "Tabu"], synopsis: "Third installment.",
-        audioLanguages: ["Hindi"], subtitleLanguages: ["English"], sources: ["TMDb"], fetchedAt: new Date().toISOString(),
+        subtitleLanguages: ["English"], sources: ["TMDb"], fetchedAt: new Date().toISOString(),
       },
       {
         id: "sample-4", title: "Sattendru Maarudhu", language: "Tamil", isSeries: false,
         platform: ["Sun NXT"], releaseDate: "2026-05-17", genre: ["Thriller"], runtime: 110,
         director: "Karthik Subbaraj", cast: ["Vijay Sethupathi"], synopsis: "Small-town election thriller.",
-        audioLanguages: ["Tamil"], subtitleLanguages: ["English"], sources: ["TMDb"], fetchedAt: new Date().toISOString(),
+        subtitleLanguages: ["English"], sources: ["TMDb"], fetchedAt: new Date().toISOString(),
       },
     ],
   };

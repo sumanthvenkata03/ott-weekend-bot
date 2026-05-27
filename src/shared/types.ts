@@ -42,13 +42,22 @@ export interface Release {
   runtime?: number;              // minutes (for films)
   episodeCount?: number;         // for series
   director?: string;
-  cast: string[];                // top 3-5
+  cast: string[];                // top 3-5 (from OMDb Actors)
+  leadCast?: string[];           // top 2 by TMDb billing order (Phase 5.5)
+  musicDirector?: string;        // composer from TMDb /credits (Phase 5.5)
   synopsis: string;
   posterUrl?: string;
   backdropUrl?: string;
-  
-  // Localization
-  audioLanguages: string[];
+
+  // Localization (Phase 5.5: structured shape)
+  // original: display name of the film's primary audio language
+  // dubbed: other languages the film exists in (excludes original)
+  // Caveat: sourced from TMDb spoken_languages — tied to the film master,
+  // not to a specific OTT platform's copy.
+  audioLanguages?: {
+    original: string;
+    dubbed?: string[];
+  };
   subtitleLanguages: string[];
   
   // Ratings (populated by OMDb in later step)

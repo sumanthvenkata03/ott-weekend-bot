@@ -4,6 +4,7 @@ import { callClaudeJSON } from "../claude.js";
 import { log } from "../../shared/logger.js";
 import type { Release } from "../../shared/types.js";
 import type { WednesdayDropDraft } from "../../delivery/notion.js";
+import { notableComposersBlock, enrichmentBlock } from "./_shared.js";
 
 interface LLMOutput {
   caption: string;
@@ -13,6 +14,7 @@ interface LLMOutput {
     type: "cover" | "index" | "release" | "cta";
     title: string;
     body: string;
+    isMusicDirectorNotable?: boolean;
   }[];
 }
 
@@ -30,8 +32,10 @@ function releaseForPrompt(r: Release): string {
     `Cast: ${r.cast.slice(0, 3).join(", ") || "—"}`,
     `Runtime: ${r.runtime ? `${r.runtime} min` : "—"}`,
     r.imdbRating ? `IMDb: ${r.imdbRating} (${r.imdbVotes ?? 0} votes)` : "IMDb: not yet rated",
-    `Synopsis: ${r.synopsis}`,
   ];
+  const enr = enrichmentBlock(r);
+  if (enr) lines.push(enr);
+  lines.push(`Synopsis: ${r.synopsis}`);
   return lines.join("\n");
 }
 
@@ -96,13 +100,23 @@ DELIVERABLES (respond as JSON):
   "carouselSlides": [
     { "slideNumber": 1, "type": "cover", "title": "<6-word headline>", "body": "<10-word subtext>" },
     { "slideNumber": 2, "type": "index", "title": "This weekend", "body": "<quick visual list: Title (Language) → Platform>" },
-    { "slideNumber": 3, "type": "release", "title": "<exact film title>", "body": "<one-line WHY this matters — not a synopsis, a reason to care>" },
-    { "slideNumber": 4, "type": "release", "title": "<exact film title>", "body": "<...>" },
-    { "slideNumber": 5, "type": "release", "title": "<exact film title>", "body": "<...>" },
-    { "slideNumber": 6, "type": "release", "title": "<exact film title>", "body": "<...>" },
+    { "slideNumber": 3, "type": "release", "title": "<exact film title>", "body": "<one-line WHY this matters — not a synopsis, a reason to care>", "isMusicDirectorNotable": false },
+    { "slideNumber": 4, "type": "release", "title": "<exact film title>", "body": "<...>", "isMusicDirectorNotable": false },
+    { "slideNumber": 5, "type": "release", "title": "<exact film title>", "body": "<...>", "isMusicDirectorNotable": false },
+    { "slideNumber": 6, "type": "release", "title": "<exact film title>", "body": "<...>", "isMusicDirectorNotable": false },
     { "slideNumber": 7, "type": "cta", "title": "<short CTA>", "body": "<which one are you starting with?>" }
   ]
 }
+
+${notableComposersBlock()}
+
+CAST OVERLAP RULE for release slide body copy — whenever you name an actor
+in a slide's body, at least one of the actors you name MUST also appear in
+that film's "Lead cast (top-billed)" line from the input. Both that line
+and the broader "Cast:" list are available; reference whichever actor sells
+the slide best, but make sure one name overlaps with leadCast so the body
+and the card's metadata line stay aligned. If leadCast already contains the
+recognizable name, just use those.
 
 Be specific. Take stands. Lean South-heavy where the films justify it.`;
   
