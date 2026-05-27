@@ -34,8 +34,19 @@ export interface Release {
   
   // Release info
   platform: Platform[];          // can be on multiple
-  releaseDate: string;           // ISO date YYYY-MM-DD
+  releaseDate: string;           // ISO date YYYY-MM-DD — generic (TMDb primary)
   theatricalReleaseDate?: string;
+  /**
+   * Phase 5.6 — IN-region release dates from TMDb /movie/{id}/release_dates.
+   * theatrical: type 2 or 3 (limited or wide) for India
+   * ott: type 4 (digital) for India
+   * Either or both may be missing; the card template drops the "RELEASED"
+   * section if neither is present.
+   */
+  releaseDates?: {
+    theatrical?: string;  // ISO date YYYY-MM-DD
+    ott?: string;         // ISO date YYYY-MM-DD
+  };
   
   // Content
   genre: string[];

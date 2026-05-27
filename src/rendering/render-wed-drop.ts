@@ -12,7 +12,14 @@ import type {
   WedDropCardContext,
   WedDropGridItem,
 } from "./types.js";
-import { getPlatformStyle, computeDensity, hasMetadataLine1, hasMetadataLine2 } from "./_shared.js";
+import {
+  getPlatformStyle,
+  computeDensity,
+  hasMetadataLine1,
+  hasMetadataLine2,
+  hasReleasedSection,
+  hasLanguagesSection,
+} from "./_shared.js";
 
 /**
  * Delete any stale wed-drop PNGs for this date before re-rendering, so an
@@ -127,12 +134,16 @@ export async function renderWedDrop(
       ...(release.musicDirector ? { musicDirector: release.musicDirector } : {}),
       ...(slide.isMusicDirectorNotable ? { isMusicDirectorNotable: true } : {}),
       ...(release.audioLanguages ? { audioLanguages: release.audioLanguages } : {}),
+      // Phase 5.6 enrichment
+      ...(release.releaseDates ? { releaseDates: release.releaseDates } : {}),
     };
     const platformStyle = getPlatformStyle(release.platform[0]);
     const density = computeDensity({
       bodyLength: slide.body.length,
       hasLine1: hasMetadataLine1(enrichedRelease),
       hasLine2: hasMetadataLine2(enrichedRelease),
+      hasReleased: hasReleasedSection(enrichedRelease),
+      hasLanguages: hasLanguagesSection(enrichedRelease),
     });
     const cardCtx: WedDropCardContext = {
       ...baseCtx,

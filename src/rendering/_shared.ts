@@ -47,26 +47,33 @@ export function getPlatformStyle(platform: string | undefined): PlatformStyle {
  * Light cards → poster takes more room (compact).
  * Heavy cards → poster shrinks to give text room (dense).
  *
- * Line weights reflect the actual visual mass each line consumes on the
- * card:
- *   Line 1 ("Telugu · 142 min · dir. ...") — full Playfair italic at 20px,
+ * Line weights reflect the visual mass each section consumes on the card:
+ *   Line 1 ("Telugu · 142 min · dir. ...") — Playfair italic at 20px,
  *     usually fills the column → counts ~80 chars.
  *   Line 2 ("with X, Y, music by Z")      — Inter 14-15px at 0.7 opacity,
- *     visually quieter and often shorter → counts ~40 chars (half-weight).
+ *     visually quieter and often shorter → ~40 chars (half-weight).
+ *   RELEASED section ("★ RELEASED" + one date line)        → ~60 chars.
+ *   AVAILABLE IN section ("★ AVAILABLE IN" + pill row)     → ~50 chars.
  *
- * Thresholds tuned post-review so borderline cards land in the right tier:
- *   < 180 chars total → compact   (Sathi Leelavathi w/ no Line 1 lands here)
+ * Thresholds (kept from Phase 5.5 — may need retune as Phase 5.6 sections
+ * become common):
+ *   < 180 chars total → compact
  *   180–280          → standard
- *   > 280            → dense      (Bhishmar with full metadata + long body)
+ *   > 280            → dense
  */
 export function computeDensity(args: {
   bodyLength: number;
-  hasLine1: boolean;       // language · runtime · dir
-  hasLine2: boolean;       // with cast, music by …
+  hasLine1: boolean;        // language · runtime · dir
+  hasLine2: boolean;        // with cast, music by …
+  hasReleased?: boolean;    // ★ RELEASED section (Phase 5.6)
+  hasLanguages?: boolean;   // ★ AVAILABLE IN section (Phase 5.6)
 }): CardDensity {
-  const line1Chars = args.hasLine1 ? 80 : 0;
-  const line2Chars = args.hasLine2 ? 40 : 0;
-  const total = args.bodyLength + line1Chars + line2Chars;
+  const line1Chars     = args.hasLine1     ? 80 : 0;
+  const line2Chars     = args.hasLine2     ? 40 : 0;
+  const releasedChars  = args.hasReleased  ? 60 : 0;
+  const languagesChars = args.hasLanguages ? 50 : 0;
+  const total =
+    args.bodyLength + line1Chars + line2Chars + releasedChars + languagesChars;
   if (total < 180) return "compact";
   if (total > 280) return "dense";
   return "standard";
@@ -90,4 +97,24 @@ export function hasMetadataLine2(release: CardEnrichment): boolean {
   const hasCast = Boolean(release.leadCast && release.leadCast.length > 0);
   const hasMusic = Boolean(release.musicDirector && release.isMusicDirectorNotable);
   return hasCast || hasMusic;
+}
+
+/**
+ * Phase 5.6 helper — does the card have a "★ RELEASED" section to render?
+ * True when at least one of theatrical or OTT release date is present.
+ */
+export function hasReleasedSection(release: CardEnrichment): boolean {
+  return Boolean(
+    release.releaseDates &&
+      (release.releaseDates.theatrical || release.releaseDates.ott)
+  );
+}
+
+/**
+ * Phase 5.6 helper — does the card have an "★ AVAILABLE IN" pill row?
+ * True when audioLanguages has at least the original track (the row would
+ * be one filled pill even without dubs — still worth surfacing).
+ */
+export function hasLanguagesSection(release: CardEnrichment): boolean {
+  return Boolean(release.audioLanguages && release.audioLanguages.original);
 }

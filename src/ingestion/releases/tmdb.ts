@@ -75,6 +75,20 @@ const TMDbCreditsSchema = z.object({
   crew: z.array(TMDbCrewEntrySchema),
 });
 
+// Release dates — for IN-region theatrical (type 2 or 3) + OTT (type 4) (Phase 5.6)
+const TMDbReleaseDateEntrySchema = z.object({
+  release_date: z.string(),
+  type: z.number(),
+});
+const TMDbCountryReleaseDatesSchema = z.object({
+  iso_3166_1: z.string(),
+  release_dates: z.array(TMDbReleaseDateEntrySchema),
+});
+const TMDbReleaseDatesResponseSchema = z.object({
+  id: z.number(),
+  results: z.array(TMDbCountryReleaseDatesSchema),
+});
+
 // Watch providers (JustWatch via TMDb)
 const TMDbProviderSchema = z.object({
   provider_id: z.number(),
@@ -310,26 +324,33 @@ export interface CreditsAndLanguages {
     original: string;
     dubbed?: string[];
   };
+  releaseDates?: {                    // Phase 5.6
+    theatrical?: string;
+    ott?: string;
+  };
 }
 
 /**
- * Phase 5.5 — fetch top-2 billed cast, music composer, and audio language
- * structure from TMDb in one shot.
+ * Phase 5.5+5.6 — fetch top-2 billed cast, music composer, audio language
+ * structure, and IN-region release dates from TMDb in one shot.
  *
- * Calls /movie/{id} (for spoken_languages + original_language) and
- * /movie/{id}/credits (for cast.order + crew.job) in parallel.
+ * Calls /movie/{id} (for spoken_languages + original_language),
+ * /movie/{id}/credits (for cast.order + crew.job), and
+ * /movie/{id}/release_dates (for IN-region theatrical + OTT) in parallel.
  *
  * Returns an empty leadCast on error — the caller treats this as "no
- * Phase 5.5 enrichment available" and skips rendering the affected line.
+ * enrichment available" and skips rendering the affected sections.
  */
 export async function getCreditsAndLanguages(tmdbId: number): Promise<CreditsAndLanguages> {
   try {
-    const [movieRaw, creditsRaw] = await Promise.all([
+    const [movieRaw, creditsRaw, datesRaw] = await Promise.all([
       tmdbFetchCached<unknown>(`/movie/${tmdbId}`, {}, 30 * 24 * 60 * 60),
       tmdbFetchCached<unknown>(`/movie/${tmdbId}/credits`, {}, 30 * 24 * 60 * 60),
+      tmdbFetchCached<unknown>(`/movie/${tmdbId}/release_dates`, {}, 30 * 24 * 60 * 60),
     ]);
     const details = TMDbMovieDetailsSchema.parse(movieRaw);
     const credits = TMDbCreditsSchema.parse(creditsRaw);
+    const dates = TMDbReleaseDatesResponseSchema.parse(datesRaw);
 
     // Top-2 billed cast (lowest `order` value wins; ties stable-sorted by name)
     const leadCast = credits.cast
@@ -352,6 +373,24 @@ export async function getCreditsAndLanguages(tmdbId: number): Promise<CreditsAnd
       .filter(iso => iso && iso !== originalIso);
     const dubbedDisplay = Array.from(new Set(dubbedIsos.map(isoToDisplay)));
 
+    // IN-region release dates (Phase 5.6). type 2 (limited) or 3 (wide) for
+    // theatrical; type 4 for OTT/digital. We accept either 2 or 3 because
+    // TMDb's Indian theatrical data sometimes uses 2 even for wide releases.
+    const india = dates.results.find(r => r.iso_3166_1 === "IN");
+    const theatricalDate = india?.release_dates
+      .find(r => r.type === 3 || r.type === 2)
+      ?.release_date.slice(0, 10);
+    const ottDate = india?.release_dates
+      .find(r => r.type === 4)
+      ?.release_date.slice(0, 10);
+    const releaseDates =
+      theatricalDate || ottDate
+        ? {
+            ...(theatricalDate ? { theatrical: theatricalDate } : {}),
+            ...(ottDate ? { ott: ottDate } : {}),
+          }
+        : undefined;
+
     const result: CreditsAndLanguages = {
       leadCast,
       audioLanguages: {
@@ -360,6 +399,7 @@ export async function getCreditsAndLanguages(tmdbId: number): Promise<CreditsAnd
       },
     };
     if (composer) result.musicDirector = composer.name;
+    if (releaseDates) result.releaseDates = releaseDates;
     return result;
   } catch (err) {
     log.warn(

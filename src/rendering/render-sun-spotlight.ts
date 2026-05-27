@@ -10,7 +10,14 @@ import { format } from "date-fns";
 import { log } from "../shared/logger.js";
 import type { SundaySpotlightDraft } from "../delivery/notion.js";
 import type { SunSpotlightRenderContext } from "./types.js";
-import { getPlatformStyle, computeDensity, hasMetadataLine1, hasMetadataLine2 } from "./_shared.js";
+import {
+  getPlatformStyle,
+  computeDensity,
+  hasMetadataLine1,
+  hasMetadataLine2,
+  hasReleasedSection,
+  hasLanguagesSection,
+} from "./_shared.js";
 
 // Same per-language fallback color map used inline by the other pillar orchestrators.
 // (Kept inline here to match the established pattern — see render-mon-movement.ts.)
@@ -58,15 +65,15 @@ function buildContext(
     ...(film.musicDirector ? { musicDirector: film.musicDirector } : {}),
     ...(draft.isMusicDirectorNotable ? { isMusicDirectorNotable: true } : {}),
     ...(film.audioLanguages ? { audioLanguages: film.audioLanguages } : {}),
+    // Phase 5.6 enrichment
+    ...(film.releaseDates ? { releaseDates: film.releaseDates } : {}),
   };
   const density = computeDensity({
     bodyLength: draft.reelScript.whyItWorks.length,
     hasLine1: hasMetadataLine1(film),
-    hasLine2: hasMetadataLine2({
-      ...(film.leadCast && film.leadCast.length > 0 ? { leadCast: film.leadCast } : {}),
-      ...(film.musicDirector ? { musicDirector: film.musicDirector } : {}),
-      ...(draft.isMusicDirectorNotable ? { isMusicDirectorNotable: true } : {}),
-    }),
+    hasLine2: hasMetadataLine2(enrichment),
+    hasReleased: hasReleasedSection(enrichment),
+    hasLanguages: hasLanguagesSection(enrichment),
   });
   return {
     filmTitle: film.title,

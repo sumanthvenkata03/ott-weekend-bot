@@ -42,7 +42,8 @@ export type CardDensity = "compact" | "standard" | "dense";
 
 /**
  * Phase 5.5 — enrichment fields a body card may carry beyond core release data.
- * All optional; templates use smart-fallback conditionals to drop empty lines.
+ * Phase 5.6 — also carries releaseDates for the "RELEASED" section.
+ * All optional; templates use smart-fallback conditionals to drop empty sections.
  */
 export interface CardEnrichment {
   leadCast?: string[];               // top-2 billed actors from TMDb /credits
@@ -51,6 +52,10 @@ export interface CardEnrichment {
   audioLanguages?: {                 // film master audio tracks (TMDb spoken_languages)
     original: string;
     dubbed?: string[];
+  };
+  releaseDates?: {                   // IN-region dates from TMDb /release_dates
+    theatrical?: string;             // type 2 or 3
+    ott?: string;                    // type 4
   };
 }
 

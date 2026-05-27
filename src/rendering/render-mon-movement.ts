@@ -12,7 +12,14 @@ import type {
   MonMovementCardContext,
   MonMovementGridItem,
 } from "./types.js";
-import { getPlatformStyle, computeDensity, hasMetadataLine1, hasMetadataLine2 } from "./_shared.js";
+import {
+  getPlatformStyle,
+  computeDensity,
+  hasMetadataLine1,
+  hasMetadataLine2,
+  hasReleasedSection,
+  hasLanguagesSection,
+} from "./_shared.js";
 
 /**
  * Delete any stale mon-movement PNGs for this date before re-rendering,
@@ -186,12 +193,16 @@ export async function renderMonMovement(
       ...(release.musicDirector ? { musicDirector: release.musicDirector } : {}),
       ...(slide.isMusicDirectorNotable ? { isMusicDirectorNotable: true } : {}),
       ...(release.audioLanguages ? { audioLanguages: release.audioLanguages } : {}),
+      // Phase 5.6 enrichment
+      ...(release.releaseDates ? { releaseDates: release.releaseDates } : {}),
     };
     const platformStyle = getPlatformStyle(release.platform[0]);
     const density = computeDensity({
       bodyLength: slide.body.length,
       hasLine1: hasMetadataLine1(enrichedRelease),
       hasLine2: hasMetadataLine2(enrichedRelease),
+      hasReleased: hasReleasedSection(enrichedRelease),
+      hasLanguages: hasLanguagesSection(enrichedRelease),
     });
     const cardCtx: MonMovementCardContext = {
       ...baseCtx,

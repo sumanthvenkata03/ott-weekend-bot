@@ -12,7 +12,14 @@ import type {
   SatVerdictCoverContext,
   SatVerdictCardContext,
 } from "./types.js";
-import { getPlatformStyle, computeDensity, hasMetadataLine1, hasMetadataLine2 } from "./_shared.js";
+import {
+  getPlatformStyle,
+  computeDensity,
+  hasMetadataLine1,
+  hasMetadataLine2,
+  hasReleasedSection,
+  hasLanguagesSection,
+} from "./_shared.js";
 
 /**
  * Delete any stale sat-verdict PNGs for this date before re-rendering, so a
@@ -83,6 +90,8 @@ function buildCard(
     ...(release?.musicDirector ? { musicDirector: release.musicDirector } : {}),
     ...(slide.isMusicDirectorNotable ? { isMusicDirectorNotable: true } : {}),
     ...(release?.audioLanguages ? { audioLanguages: release.audioLanguages } : {}),
+    // Phase 5.6 enrichment
+    ...(release?.releaseDates ? { releaseDates: release.releaseDates } : {}),
   };
 }
 
@@ -163,6 +172,8 @@ export async function renderSatVerdict(
       bodyLength,
       hasLine1: hasMetadataLine1(card),
       hasLine2: hasMetadataLine2(card),
+      hasReleased: hasReleasedSection(card),
+      hasLanguages: hasLanguagesSection(card),
     });
     const cardCtx: SatVerdictCardContext = {
       ...baseCtx,

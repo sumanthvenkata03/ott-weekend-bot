@@ -16,6 +16,7 @@ const OmdbResponseSchema = z.object({
   Year: z.string().optional(),
   Runtime: z.string().optional(),
   Genre: z.string().optional(),
+  Language: z.string().optional(),     // Phase 5.7 — comma-separated dub list
   Director: z.string().optional(),
   Actors: z.string().optional(),
   Plot: z.string().optional(),
@@ -40,6 +41,10 @@ export interface OmdbData {
   director?: string;
   cast: string[];
   runtime?: number;
+  /** Phase 5.7 — raw OMDb Language field, split + trimmed.
+   *  E.g. "Telugu, Tamil, Hindi" → ["Telugu", "Tamil", "Hindi"].
+   *  Caller merges this with TMDb spoken_languages for the final audio list. */
+  languages: string[];
 }
 
 function parseNumberOrUndef(s: string | undefined): number | undefined {
@@ -109,10 +114,13 @@ export async function fetchOmdbByImdbId(imdbId: string): Promise<OmdbData | null
       rottenTomatoes: parseRtScore(parsed.Ratings),
       metacritic: parseMetacritic(parsed.Ratings),
       director: parsed.Director && parsed.Director !== "N/A" ? parsed.Director : undefined,
-      cast: parsed.Actors && parsed.Actors !== "N/A" 
+      cast: parsed.Actors && parsed.Actors !== "N/A"
         ? parsed.Actors.split(",").map(s => s.trim()).filter(Boolean)
         : [],
       runtime: parseRuntime(parsed.Runtime),
+      languages: parsed.Language && parsed.Language !== "N/A"
+        ? parsed.Language.split(",").map(s => s.trim()).filter(Boolean)
+        : [],
     };
   } catch (err) {
     log.warn(`OMDb fetch failed for ${imdbId}`, err instanceof Error ? err.message : err);

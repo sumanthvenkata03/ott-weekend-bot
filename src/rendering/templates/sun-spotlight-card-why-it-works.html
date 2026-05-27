@@ -282,7 +282,10 @@
   <div class="body-right">
     <div class="body-lang">{{ language | upper }}</div>
     <div class="body-title">{{ filmTitle }}</div>
-    {# Phase 5.5 — Line 1 gate widened to include dubbed-language case. #}
+    {# Phase 5.6 — Sun Spotlight WIW keeps its Phase 5.5 inline language treatment.
+       The Gallery aesthetic uses absolute positioning across body-right and doesn't
+       have a natural slot for Phase 5.6's pill-row + RELEASED sections without a
+       layout redesign. Mon/Wed/Sat get the new sections; Sun Spotlight stays minimal. #}
     {% if runtime or director or (audioLanguages and audioLanguages.dubbed and audioLanguages.dubbed.length > 0) %}
     <div class="body-meta">{% if audioLanguages %}{{ audioLanguages.original }}{% if audioLanguages.dubbed and audioLanguages.dubbed.length > 0 %} · also in {{ audioLanguages.dubbed | join(", ") }}{% endif %}{% else %}{{ language }}{% endif %}{% if runtime %} · {{ runtime }} min{% endif %}{% if director %} · dir. {{ director }}{% endif %}</div>
     {% endif %}

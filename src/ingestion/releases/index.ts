@@ -11,6 +11,51 @@ import { fetchOmdbByImdbId } from "./omdb.js";
 import { discoverIndianOTTArrivals } from "./tmdb.js";
 
 /**
+ * Phase 5.7 — merge OMDb Language (comma-separated dub list) into the
+ * existing TMDb-derived audioLanguages. Excludes the original language and
+ * filters "English" from the dub list (almost always subtitle-only on
+ * Indian films, treat as noise unless it's the original).
+ *
+ * Logs a one-liner when the two sources disagree, so dry-run monitoring
+ * can spot films where one source is missing dubs the other found.
+ */
+function mergeAudioLanguages(
+  current: { original: string; dubbed?: string[] } | undefined,
+  omdbLanguages: string[],
+  filmTitle: string
+): { original: string; dubbed?: string[] } | undefined {
+  if (!current) return undefined;
+  const tmdbDubs = current.dubbed ?? [];
+
+  const allDubs = new Set<string>([...tmdbDubs, ...omdbLanguages]);
+  allDubs.delete(current.original);
+  if (current.original !== "English") allDubs.delete("English");
+
+  // Disagreement detection: did OMDb know a dub TMDb didn't, or vice versa?
+  const tmdbSet = new Set(tmdbDubs);
+  const omdbDubsForCompare = new Set(omdbLanguages);
+  omdbDubsForCompare.delete(current.original);
+  if (current.original !== "English") omdbDubsForCompare.delete("English");
+  const onlyInTmdb = tmdbDubs.filter(x => !omdbDubsForCompare.has(x));
+  const onlyInOmdb = Array.from(omdbDubsForCompare).filter(x => !tmdbSet.has(x));
+  if (onlyInTmdb.length > 0 || onlyInOmdb.length > 0) {
+    const merged = Array.from(allDubs).sort();
+    log.info(
+      `  [lang-merge] ${filmTitle}: ` +
+      `TMDb=[${tmdbDubs.join(",") || "—"}] ` +
+      `OMDb=[${omdbLanguages.join(",") || "—"}] ` +
+      `→ merged=[${merged.join(",") || "—"}]`
+    );
+  }
+
+  const merged = Array.from(allDubs).sort();
+  return {
+    original: current.original,
+    ...(merged.length > 0 ? { dubbed: merged } : {}),
+  };
+}
+
+/**
  * Phase 5.5 — apply credits + audio-language enrichment to a release list.
  * Pulls top-2 billed cast, music composer, and { original, dubbed } language
  * structure from TMDb in one helper call per film. Returns release records
@@ -26,6 +71,7 @@ async function enrichWithCreditsAndLanguages(releases: Release[]): Promise<Relea
         ...(data.leadCast.length > 0 ? { leadCast: data.leadCast } : {}),
         ...(data.musicDirector ? { musicDirector: data.musicDirector } : {}),
         ...(data.audioLanguages ? { audioLanguages: data.audioLanguages } : {}),
+        ...(data.releaseDates ? { releaseDates: data.releaseDates } : {}),
       };
     })
   );
@@ -67,13 +113,14 @@ export async function ingestReleases(
   const enrichedCount = withCredits.filter(r => r.leadCast || r.musicDirector || r.audioLanguages).length;
   log.info(`  Credits/audio enrichment: ${enrichedCount}/${releases.length}`);
 
-  // 4. Enrich with OMDb
+  // 4. Enrich with OMDb (+ Phase 5.7 audio-language union merge)
   log.info(`Enriching with OMDb (IMDb ratings + RT)...`);
   const enriched = await Promise.all(
     withCredits.map(async r => {
       if (!r.imdbId) return r;
       const omdb = await fetchOmdbByImdbId(r.imdbId);
       if (!omdb) return r;
+      const mergedAudio = mergeAudioLanguages(r.audioLanguages, omdb.languages, r.title);
       return {
         ...r,
         imdbRating: omdb.imdbRating,
@@ -82,17 +129,18 @@ export async function ingestReleases(
         director: omdb.director ?? r.director,
         cast: omdb.cast.length > 0 ? omdb.cast : r.cast,
         runtime: omdb.runtime ?? r.runtime,
+        ...(mergedAudio ? { audioLanguages: mergedAudio } : {}),
         sources: Array.from(new Set([...r.sources, "omdb"])),
       };
     })
   );
-  
+
   const ratedCount = enriched.filter(r => r.imdbRating !== undefined).length;
   log.success(
     `Pipeline complete — ${enriched.length} releases ` +
     `(${ratedCount} rated, ${enriched.filter(r => r.platform.length > 0).length} on a platform)`
   );
-  
+
   return enriched;
 }
 
@@ -136,6 +184,7 @@ export async function ingestOTTArrivals(
       if (!r.imdbId) return r;
       const omdb = await fetchOmdbByImdbId(r.imdbId);
       if (!omdb) return r;
+      const mergedAudio = mergeAudioLanguages(r.audioLanguages, omdb.languages, r.title);
       return {
         ...r,
         imdbRating: omdb.imdbRating,
@@ -144,6 +193,7 @@ export async function ingestOTTArrivals(
         director: omdb.director ?? r.director,
         cast: omdb.cast.length > 0 ? omdb.cast : r.cast,
         runtime: omdb.runtime ?? r.runtime,
+        ...(mergedAudio ? { audioLanguages: mergedAudio } : {}),
         sources: Array.from(new Set([...r.sources, "omdb"])),
       };
     })

@@ -20,8 +20,8 @@
   .masthead {
     position: absolute;
     top: 50px;
-    left: 60px;
-    right: 60px;
+    left: 24px;
+    right: 24px;
     display: flex;
     justify-content: space-between;
     align-items: baseline;
@@ -41,30 +41,29 @@
   .masthead-rule {
     position: absolute;
     top: 95px;
-    left: 60px;
-    right: 60px;
+    left: 24px;
+    right: 24px;
     border-top: 2px solid var(--ink);
     border-bottom: 0.5px solid var(--ink);
     height: 4px;
   }
 
   /* Body: poster left, copy right.
-     Phase 5.5 — density modes shift the poster column width so light cards
-     give the poster more room and heavy cards give the text room.
-     Post-review bump: poster columns widened (+60px), gap tightened (50→30)
-     so the image dominates more of the card area. */
+     Phase 5.7 — outer padding tightened 60→24, gap tightened 30→24, columns
+     bumped proportionally to fill the freed space. The image dominates more
+     of the card area; text column stays wide enough for 2-line metadata. */
   .ticket-body {
     position: absolute;
     top: 150px;
-    left: 60px;
-    right: 60px;
+    left: 24px;
+    right: 24px;
     bottom: 160px;
     display: grid;
-    grid-template-columns: 460px 1fr;   /* standard density */
-    gap: 30px;
+    grid-template-columns: 520px 1fr;   /* standard density */
+    gap: 24px;
   }
-  body.compact .ticket-body { grid-template-columns: 520px 1fr; }
-  body.dense   .ticket-body { grid-template-columns: 400px 1fr; }
+  body.compact .ticket-body { grid-template-columns: 580px 1fr; }
+  body.dense   .ticket-body { grid-template-columns: 460px 1fr; }
 
   /* Poster window */
   .poster-window {
@@ -253,8 +252,8 @@
   .footer {
     position: absolute;
     bottom: 50px;
-    left: 60px;
-    right: 60px;
+    left: 24px;
+    right: 24px;
     border-top: 2px solid var(--ink);
     padding-top: 14px;
     display: flex;
@@ -308,20 +307,46 @@
         {% endif %}
       </div>
       <div class="film-title">{{ title }}</div>
-      {# Phase 5.5 — Line 1 uses audioLanguages.original (the film's native track) when available,
-         appending "also in <dubbed>" when the film has other audio tracks. Falls back to
-         release.language for releases without Phase 5.5 enrichment.
-         Gate widened: render Line 1 if ANY of runtime / director / dubbed-list is present
-         (previously only runtime|director, which dropped the line for dub-only films like
-         Sathi Leelavathi). #}
-      {% if release.runtime or release.director or (release.audioLanguages and release.audioLanguages.dubbed and release.audioLanguages.dubbed.length > 0) %}
-      <div class="meta-row">{% if release.audioLanguages %}{{ release.audioLanguages.original }}{% if release.audioLanguages.dubbed and release.audioLanguages.dubbed.length > 0 %} · also in {{ release.audioLanguages.dubbed | join(", ") }}{% endif %}{% else %}{{ release.language }}{% endif %}{% if release.runtime %} · {{ release.runtime }} min{% endif %}{% if release.director %} · dir. {{ release.director }}{% endif %}</div>
+      {# Phase 5.6 — audio languages moved out of Line 1 into their own
+         AVAILABLE IN section below. Line 1 now only carries runtime + director. #}
+      {% if release.runtime or release.director %}
+      <div class="meta-row">{% if release.runtime %}{{ release.runtime }} min{% endif %}{% if release.runtime and release.director %} · {% endif %}{% if release.director %}dir. {{ release.director }}{% endif %}</div>
       {% endif %}
       {% set hasCast = release.leadCast and release.leadCast.length > 0 %}
       {% set hasMusic = release.isMusicDirectorNotable and release.musicDirector %}
       {% if hasCast or hasMusic %}
       <div class="meta-row-2">{% if hasCast %}with {{ release.leadCast | join(", ") }}{% endif %}{% if hasCast and hasMusic %}, {% endif %}{% if hasMusic %}music by {{ release.musicDirector }}{% endif %}</div>
       {% endif %}
+
+      {# Phase 5.6 — RELEASED section. Drops cleanly when neither date is present. #}
+      {% if release.releaseDates and (release.releaseDates.theatrical or release.releaseDates.ott) %}
+      <div class="released-section">
+        <div class="section-label">★ RELEASED</div>
+        <div class="released-dates">
+          {% if release.releaseDates.theatrical and release.releaseDates.ott and release.releaseDates.theatrical != release.releaseDates.ott %}
+            Theatrical {{ release.releaseDates.theatrical | longDate }} — OTT {{ release.releaseDates.ott | longDate }}
+          {% elif release.releaseDates.ott %}
+            OTT {{ release.releaseDates.ott | longDate }}
+          {% elif release.releaseDates.theatrical %}
+            Theatrical {{ release.releaseDates.theatrical | longDate }}
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      {# Phase 5.6 — AVAILABLE IN pill row. Original filled, dubs outlined. #}
+      {% if release.audioLanguages and release.audioLanguages.original %}
+      <div class="languages-section">
+        <div class="section-label">★ AVAILABLE IN</div>
+        <div class="language-pills">
+          <span class="pill pill-filled">{{ release.audioLanguages.original | upper }}</span>
+          {% for lang in release.audioLanguages.dubbed %}
+          <span class="pill pill-outlined">{{ lang }}</span>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
       <div class="why-block">
         {% if slotKind == 'gem' %}
         <div class="why-label is-gem">★ WHY YOU MISSED IT</div>

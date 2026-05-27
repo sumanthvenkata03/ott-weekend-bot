@@ -39,6 +39,19 @@ env.addFilter("date", (input: string, fmt: string) => {
   }
 });
 
+// Long-form date filter for the Phase 5.6 "RELEASED" section.
+// "2026-06-03" → "3 June 2026" (no leading zero on day, full month name).
+env.addFilter("longDate", (input: unknown) => {
+  if (!input || typeof input !== "string") return "";
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return "";
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  return `${d.getUTCDate()} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+});
+
 // Smart truncate: cuts at word boundaries, never mid-word
 env.addFilter("truncate", (s: unknown, max = 80) => {
   const str = String(s ?? "").trim();

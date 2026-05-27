@@ -26,8 +26,8 @@
   .masthead {
     position: absolute;
     top: 50px;
-    left: 60px;
-    right: 60px;
+    left: 24px;
+    right: 24px;
     display: flex;
     justify-content: space-between;
     align-items: baseline;
@@ -73,17 +73,16 @@
   .ticket-body {
     position: absolute;
     top: 180px;
-    left: 60px;
-    right: 60px;
+    left: 24px;
+    right: 24px;
     bottom: 180px;
     display: grid;
-    grid-template-columns: 440px 1fr;
-    gap: 30px;
+    grid-template-columns: 500px 1fr;
+    gap: 24px;
   }
-  /* Phase 5.5 — density modes shift the poster column width.
-     Post-review bump: poster columns widened (+60px), gap tightened (50→30). */
-  body.compact .ticket-body { grid-template-columns: 500px 1fr; }
-  body.dense   .ticket-body { grid-template-columns: 380px 1fr; }
+  /* Phase 5.7 — outer padding 60→24, gap 30→24, columns bumped. */
+  body.compact .ticket-body { grid-template-columns: 560px 1fr; }
+  body.dense   .ticket-body { grid-template-columns: 440px 1fr; }
 
   /* Poster window: image overlay on a colored fallback */
   .poster-window {
@@ -253,7 +252,7 @@
   .verdict-stamp {
     position: absolute;
     bottom: 130px;
-    right: 60px;
+    right: 24px;
     transform: rotate(-6deg);
     padding: 12px 20px;
     z-index: 10;
@@ -293,12 +292,22 @@
     letter-spacing: 8px;
   }
 
+  /* Phase 5.6 — must-watch and worth-a-try variants have a brass body bg,
+     so the default filled-brass pill goes invisible against it. Invert to
+     ink bg + brass text for these variants so the pill shape stays visible.
+     Skip-variant cards have a cream bg and use the default brass pill. */
+  body.must-watch .pill-filled,
+  body.worth-a-try .pill-filled {
+    background: var(--ink);
+    color: var(--brass);
+  }
+
   /* Footer */
   .footer {
     position: absolute;
     bottom: 50px;
-    left: 60px;
-    right: 60px;
+    left: 24px;
+    right: 24px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -356,14 +365,45 @@
         {% endif %}
       </div>
       <div class="film-title">{{ card.filmTitle }}</div>
+      {# Phase 5.6 — audio languages moved to AVAILABLE IN section below. #}
       {% if card.runtime %}
-      <div class="lang-line">{% if card.audioLanguages %}{{ card.audioLanguages.original }}{% if card.audioLanguages.dubbed and card.audioLanguages.dubbed.length > 0 %} · also in {{ card.audioLanguages.dubbed | join(", ") }}{% endif %}{% else %}{{ card.language }}{% endif %} · {{ card.runtime }} min</div>
+      <div class="lang-line">{{ card.runtime }} min</div>
       {% endif %}
       {% set hasCast = card.leadCast and card.leadCast.length > 0 %}
       {% set hasMusic = card.isMusicDirectorNotable and card.musicDirector %}
       {% if hasCast or hasMusic %}
       <div class="lang-line-2">{% if hasCast %}with {{ card.leadCast | join(", ") }}{% endif %}{% if hasCast and hasMusic %}, {% endif %}{% if hasMusic %}music by {{ card.musicDirector }}{% endif %}</div>
       {% endif %}
+
+      {# Phase 5.6 — RELEASED section. #}
+      {% if card.releaseDates and (card.releaseDates.theatrical or card.releaseDates.ott) %}
+      <div class="released-section">
+        <div class="section-label">★ RELEASED</div>
+        <div class="released-dates">
+          {% if card.releaseDates.theatrical and card.releaseDates.ott and card.releaseDates.theatrical != card.releaseDates.ott %}
+            Theatrical {{ card.releaseDates.theatrical | longDate }} — OTT {{ card.releaseDates.ott | longDate }}
+          {% elif card.releaseDates.ott %}
+            OTT {{ card.releaseDates.ott | longDate }}
+          {% elif card.releaseDates.theatrical %}
+            Theatrical {{ card.releaseDates.theatrical | longDate }}
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      {# Phase 5.6 — AVAILABLE IN pill row. #}
+      {% if card.audioLanguages and card.audioLanguages.original %}
+      <div class="languages-section">
+        <div class="section-label">★ AVAILABLE IN</div>
+        <div class="language-pills">
+          <span class="pill pill-filled">{{ card.audioLanguages.original | upper }}</span>
+          {% for lang in card.audioLanguages.dubbed %}
+          <span class="pill pill-outlined">{{ lang }}</span>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
       <div class="one-line">{{ card.oneLineVerdict }}</div>
       <div class="watch-if">
         <div class="label">★ WATCH IF</div>

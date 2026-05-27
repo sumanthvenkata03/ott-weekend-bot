@@ -36,5 +36,71 @@
        Used via background-clip:text in the platform-line for JioHotstar only. */
     --platform-jiohotstar-start: #005AAC;   /* Jio corporate blue */
     --platform-jiohotstar-end:   #C8298C;   /* Hotstar-inherited pink */
+
+    /* === Language pill styles (Phase 5.6) ===
+       Original audio: filled brass background, ink text — dominant signal.
+       Dubbed audio: outlined bottle green — secondary, lighter visual weight. */
+    --pill-bg-filled:        var(--brass);
+    --pill-text-filled:      var(--ink);
+    --pill-bg-outlined:      transparent;
+    --pill-text-outlined:    var(--bottle);
+    --pill-border-outlined:  var(--bottle);
+    --pill-border-radius:    6px;
+    --pill-padding:          4px 10px;
+    --pill-font:             'JetBrains Mono', monospace;
+    --pill-font-size:        16px;
+    --pill-letter-spacing:   0.05em;
+    --pill-gap:              8px;
+  }
+
+  /* === Reusable card-section primitives (Phase 5.6) ===
+     "★ RELEASED" and "★ AVAILABLE IN" use the same label treatment as the
+     existing "★ WHAT TO KNOW" / "★ WHY YOU MISSED IT" headers. Defining once
+     here so all 4 card templates share the styling. */
+  .section-label {
+    font-family: 'Playfair Display', serif;
+    font-size: 14px;
+    letter-spacing: 3px;
+    color: var(--vermillion);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+  }
+  /* Phase 5.7 — date typography updated to Playfair italic per design pick.
+     Editorial voice; pairs with the italic Line 1 metadata directly above. */
+  .released-dates {
+    font-family: 'Playfair Display', serif;
+    font-style: italic;
+    font-size: 20px;
+    font-weight: 400;
+    color: var(--ink);
+    opacity: 1;
+  }
+  .language-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--pill-gap);
+  }
+  .pill {
+    display: inline-block;
+    padding: var(--pill-padding);
+    border-radius: var(--pill-border-radius);
+    font-family: var(--pill-font);
+    font-size: var(--pill-font-size);
+    font-weight: 600;
+    letter-spacing: var(--pill-letter-spacing);
+    line-height: 1.2;
+  }
+  .pill-filled {
+    background: var(--pill-bg-filled);
+    color: var(--pill-text-filled);
+  }
+  .pill-outlined {
+    background: var(--pill-bg-outlined);
+    color: var(--pill-text-outlined);
+    border: 1px solid var(--pill-border-outlined);
+  }
+  .released-section,
+  .languages-section {
+    margin-top: 14px;
   }
 </style>
