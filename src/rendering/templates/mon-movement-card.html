@@ -176,61 +176,127 @@
     color: var(--ink);
     font-weight: 500;
   }
-  /* Platform line — Phase 5.5: color is set inline per card from {{ platformColor }}.
-     JioHotstar gets a gradient via .platform-line.is-gradient (background-clip:text).
-     Post-review: font + tracking reduced (26/4 → 22/3) so the line stays single-row
-     in the narrower text column that comes with wider posters. */
-  .platform-line {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-family: 'Inter', sans-serif;
-    font-size: 22px;
-    font-weight: 800;
-    letter-spacing: 3px;
+  /* Mon Movement prototype — compact info bar.
+     Replaces the Phase 5.8 RELEASED marquee + Phase 5.6 AVAILABLE IN pills.
+     Row 1: THEATRES + OTT side-by-side. Row 2: LANGUAGES full width.
+     Brass borders for new arrivals; bottle green for hidden gems. */
+  .info-bar {
+    border: 2px solid var(--brass);
+    border-radius: 2px;
+    margin: 24px 0;
+    overflow: hidden;
+  }
+  .info-row-dates {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-bottom: 2px solid var(--brass);
+  }
+  .info-row-dates .info-cell:first-child {
+    border-right: 2px solid var(--brass);
+  }
+  .info-cell {
+    padding: 14px 18px;
+  }
+  .info-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    color: var(--vermillion);
+    margin-bottom: 6px;
     text-transform: uppercase;
-    padding-bottom: 6px;
-    margin-top: 12px;
-    margin-bottom: 18px;
-    border-bottom: 2px solid currentColor;
+  }
+  .info-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: 0.04em;
+    color: var(--ink);
     white-space: nowrap;
   }
-  .platform-line.is-gradient {
-    background-image: linear-gradient(
-      90deg,
-      var(--platform-jiohotstar-start) 0%,
-      var(--platform-jiohotstar-end) 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    color: transparent;
-    -webkit-text-fill-color: transparent;
-    border-bottom-color: var(--platform-jiohotstar-end);
+  .info-value-langs {
+    white-space: normal;
   }
-  /* Phase 5.5 — larger logo (40 → 60), white fill, thin ink border. */
-  .logo-stamp {
+  .lang-original { color: var(--brass); }
+  .lang-dubbed { color: var(--ink); }
+  .lang-sep { color: var(--ink); opacity: 0.4; }
+  .card-hidden-gem .info-bar { border-color: var(--bottle); }
+  .card-hidden-gem .info-row-dates { border-bottom-color: var(--bottle); }
+  .card-hidden-gem .info-row-dates .info-cell:first-child { border-right-color: var(--bottle); }
+  .card-hidden-gem .lang-original { color: var(--bottle); }
+
+  /* "NOW STREAMING ON" platforms strip — prominent logos centered between
+     brass rules, ampersand separator for multi-platform releases. */
+  .streaming-section { margin: 24px 0; }
+  .streaming-heading {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .streaming-rule {
+    flex: 1;
+    border: none;
+    border-top: 2px solid var(--brass);
+    margin: 0;
+    height: 0;
+  }
+  .streaming-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    color: var(--ink);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .streaming-platforms {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    padding: 8px 0;
+  }
+  .streaming-logo {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 60px;
-    height: 60px;
-    padding: 7px;
-    background: #FFFFFF;
-    border: 1px solid var(--ink);
-    border-radius: 4px;
-    flex-shrink: 0;
-    box-sizing: border-box;
+    height: 64px;
+    max-width: 200px;
   }
-  .logo-stamp svg {
-    width: 100%;
+  .streaming-logo svg {
     height: 100%;
+    width: auto;
+    max-width: 200px;
     display: block;
   }
+  .streaming-name {
+    font-family: 'Inter', sans-serif;
+    font-weight: 800;
+    font-size: 26px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--ink);
+    line-height: 1;
+  }
+  .streaming-amp {
+    font-family: 'Playfair Display', serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 32px;
+    color: var(--ink);
+    line-height: 1;
+  }
+  .card-hidden-gem .streaming-rule { border-top-color: var(--bottle); }
 
-  /* Stamp — tilted, bottom-right of copy block */
+  /* Stamp — tilted, right-aligned in the flow, sits after .why-block.
+     Was absolute (bottom: 70px / right: 30px) but the 2-row info bar pushed
+     .why-body down into the stamp's zone. In-flow placement guarantees the
+     stamp can never overlap body text regardless of info-bar or body height. */
   .stamp {
-    position: absolute;
-    bottom: 70px;
-    right: 30px;
+    align-self: flex-end;
+    margin-top: 16px;
+    margin-right: 6px;     /* keeps the rotated chip clear of the card edge */
     transform: rotate(-6deg);
     font-family: 'JetBrains Mono', monospace;
     font-size: 16px;
@@ -266,7 +332,7 @@
   .footer .meta { font-family: 'JetBrains Mono', monospace; font-size: 14px; letter-spacing: 1px; }
 </style>
 </head>
-<body class="{{ density }}">
+<body class="{{ density }}{% if slotKind == 'gem' %} card-hidden-gem{% endif %}">
 <div class="canvas">
 
   <div class="masthead">
@@ -295,20 +361,7 @@
       {% else %}
       <div class="slot-tag">★ NEW ARRIVAL · {{ slotNumber }} / {{ totalSlots }} ★</div>
       {% endif %}
-      <div class="platform-line{% if platformIsGradient %} is-gradient{% endif %}" style="color: {{ platformColor }};">
-        <span class="star">★</span>
-        {% if release.platform and release.platform.length > 0 %}
-          <span>NOW ON</span>
-          <span>{{ release.platform[0] | upper }}</span>
-          {% set stem = release.platformLogos[0] %}
-          {% if stem %}<span class="logo-stamp">{{ stem | platformLogoSvg | safe }}</span>{% endif %}
-        {% else %}
-          <span>STREAMING TBA</span>
-        {% endif %}
-      </div>
       <div class="film-title">{{ title }}</div>
-      {# Phase 5.6 — audio languages moved out of Line 1 into their own
-         AVAILABLE IN section below. Line 1 now only carries runtime + director. #}
       {% if release.runtime or release.director %}
       <div class="meta-row">{% if release.runtime %}{{ release.runtime }} min{% endif %}{% if release.runtime and release.director %} · {% endif %}{% if release.director %}dir. {{ release.director }}{% endif %}</div>
       {% endif %}
@@ -318,57 +371,59 @@
       <div class="meta-row-2">{% if hasCast %}with {{ release.leadCast | join(", ") }}{% endif %}{% if hasCast and hasMusic %}, {% endif %}{% if hasMusic %}music by {{ release.musicDirector }}{% endif %}</div>
       {% endif %}
 
-      {# Phase 5.8 — RELEASED marquee. Brass rules above/below, vermillion
-         label + ink date pairs, brass divider between events when both present. #}
-      {% if release.releaseDates and (release.releaseDates.theatrical or release.releaseDates.ott) %}
-      <div class="released-section">
-        <div class="section-label">★ RELEASED</div>
-        <div class="released-marquee">
-          <hr class="marquee-rule" />
-          <div class="marquee-content">
-            {% if release.releaseDates.theatrical and release.releaseDates.ott and release.releaseDates.theatrical != release.releaseDates.ott %}
-              <span class="marquee-event">
-                <span class="marquee-label">IN CINEMAS</span>
-                <span class="marquee-sep">·</span>
-                <span class="marquee-date">{{ release.releaseDates.theatrical | longDate | upper }}</span>
-              </span>
-              <span class="marquee-divider">│</span>
-              <span class="marquee-event">
-                <span class="marquee-label">OTT STREAMING</span>
-                <span class="marquee-sep">·</span>
-                <span class="marquee-date">{{ release.releaseDates.ott | longDate | upper }}</span>
-              </span>
-            {% elif release.releaseDates.ott %}
-              <span class="marquee-event">
-                <span class="marquee-label">OTT STREAMING</span>
-                <span class="marquee-sep">·</span>
-                <span class="marquee-date">{{ release.releaseDates.ott | longDate | upper }}</span>
-              </span>
-            {% elif release.releaseDates.theatrical %}
-              <span class="marquee-event">
-                <span class="marquee-label">IN CINEMAS</span>
-                <span class="marquee-sep">·</span>
-                <span class="marquee-date">{{ release.releaseDates.theatrical | longDate | upper }}</span>
-              </span>
+      {# Prototype — compact info bar.
+         Row 1: THEATRES + OTT side-by-side. Row 2: LANGUAGES full width. #}
+      <div class="info-bar">
+        <div class="info-row-dates">
+          <div class="info-cell">
+            <div class="info-label">THEATRES</div>
+            <div class="info-value">{% if release.releaseDates and release.releaseDates.theatrical %}{{ release.releaseDates.theatrical | shortDate | upper }}{% else %}—{% endif %}</div>
+          </div>
+          <div class="info-cell">
+            <div class="info-label">OTT</div>
+            <div class="info-value">{% if release.releaseDates and release.releaseDates.ott %}{{ release.releaseDates.ott | shortDate | upper }}{% else %}—{% endif %}</div>
+          </div>
+        </div>
+        <div class="info-cell info-cell-full">
+          <div class="info-label">LANGUAGES</div>
+          <div class="info-value info-value-langs">
+            {% if release.audioLanguages and release.audioLanguages.original %}
+              <span class="lang-original">{{ release.audioLanguages.original | upper }}</span>
+              {% for lang in release.audioLanguages.dubbed %}
+                <span class="lang-sep">·</span>
+                <span class="lang-dubbed">{{ lang | upper }}</span>
+              {% endfor %}
+            {% else %}
+              <span>—</span>
             {% endif %}
           </div>
-          <hr class="marquee-rule" />
         </div>
       </div>
-      {% endif %}
 
-      {# Phase 5.6 — AVAILABLE IN pill row. Original filled, dubs outlined. #}
-      {% if release.audioLanguages and release.audioLanguages.original %}
-      <div class="languages-section">
-        <div class="section-label">★ AVAILABLE IN</div>
-        <div class="language-pills">
-          <span class="pill pill-filled">{{ release.audioLanguages.original | upper }}</span>
-          {% for lang in release.audioLanguages.dubbed %}
-          <span class="pill pill-outlined">{{ lang }}</span>
-          {% endfor %}
+      {# Prototype — NOW STREAMING ON strip. Replaces the top platform header. #}
+      <div class="streaming-section">
+        <div class="streaming-heading">
+          <hr class="streaming-rule" />
+          <span class="streaming-label">NOW STREAMING ON</span>
+          <hr class="streaming-rule" />
+        </div>
+        <div class="streaming-platforms">
+          {% if release.platform and release.platform.length > 0 %}
+            {% for name in release.platform %}
+              {% if loop.index0 > 0 %}<span class="streaming-amp">&</span>{% endif %}
+              {% set stem = release.platformLogos[loop.index0] %}
+              {% set svg = stem | platformLogoSvg %}
+              {% if svg %}
+                <span class="streaming-logo">{{ svg | safe }}</span>
+              {% else %}
+                <span class="streaming-name">{{ name | upper }}</span>
+              {% endif %}
+            {% endfor %}
+          {% else %}
+            <span class="streaming-name">STREAMING TBA</span>
+          {% endif %}
         </div>
       </div>
-      {% endif %}
 
       <div class="why-block">
         {% if slotKind == 'gem' %}

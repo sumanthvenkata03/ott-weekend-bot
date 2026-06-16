@@ -234,6 +234,13 @@ const isMainModule = import.meta.url.endsWith(
 );
 
 if (isMainModule) {
+  console.warn(
+    "\n╔══════════════════════════════════════════════════════════════════╗\n" +
+    "║  ⚠  STANDALONE SMOKE TEST — using hardcoded sample data.         ║\n" +
+    "║  This is NOT a production render. For real Notion/TMDb-backed   ║\n" +
+    "║  output, run: npm run job:monday                                 ║\n" +
+    "╚══════════════════════════════════════════════════════════════════╝\n"
+  );
   const sampleDraft: MovementDraft = {
     pillar: "Mon Movement",
     weekLabel: "Week of May 18 — May 24, 2026",
@@ -256,6 +263,9 @@ if (isMainModule) {
         id: "arr-1", title: "Pennum Porattum", language: "Malayalam", isSeries: false,
         platform: ["Aha"], releaseDate: "2026-05-20", genre: ["Drama"], runtime: 92,
         director: "Mathew Thomas", cast: ["Parvathy Thiruvothu"],
+        leadCast: ["Parvathy Thiruvothu", "Soubin Shahir"],
+        audioLanguages: { original: "Malayalam", dubbed: ["Tamil", "Telugu"] },
+        releaseDates: { theatrical: "2026-05-10", ott: "2026-05-20" },
         synopsis: "Siblings clean out their late mother's house.",
         subtitleLanguages: ["English"],
         sources: ["TMDb"], fetchedAt: new Date().toISOString(),
@@ -264,6 +274,9 @@ if (isMainModule) {
         id: "arr-2", title: "Bramayugam", language: "Malayalam", isSeries: false,
         platform: ["SonyLIV"], releaseDate: "2024-02-15", genre: ["Horror"], runtime: 138,
         director: "Rahul Sadasivan", cast: ["Mammootty"],
+        leadCast: ["Mammootty", "Arjun Ashokan"],
+        audioLanguages: { original: "Malayalam", dubbed: ["Hindi", "Tamil", "Telugu"] },
+        releaseDates: { theatrical: "2024-02-15", ott: "2024-03-29" },
         synopsis: "17th-century black-and-white horror.",
         posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
         subtitleLanguages: ["English"],
@@ -273,6 +286,9 @@ if (isMainModule) {
         id: "arr-3", title: "Sattendru Maarudhu", language: "Tamil", isSeries: false,
         platform: ["Sun NXT"], releaseDate: "2026-05-22", genre: ["Thriller"], runtime: 110,
         director: "Karthik Subbaraj", cast: ["Vijay Sethupathi"],
+        leadCast: ["Vijay Sethupathi", "Aishwarya Rajesh"],
+        audioLanguages: { original: "Tamil", dubbed: ["Telugu"] },
+        releaseDates: { ott: "2026-05-22" },
         synopsis: "Small-town election thriller.",
         subtitleLanguages: ["English"],
         sources: ["TMDb"], fetchedAt: new Date().toISOString(),
@@ -284,6 +300,9 @@ if (isMainModule) {
         platform: ["SonyLIV"], releaseDate: "2024-02-22",
         genre: ["Survival", "Thriller"], runtime: 135,
         director: "Chidambaram", cast: ["Soubin Shahir", "Sreenath Bhasi"],
+        leadCast: ["Soubin Shahir", "Sreenath Bhasi"],
+        audioLanguages: { original: "Malayalam", dubbed: ["Tamil", "Telugu", "Hindi"] },
+        releaseDates: { theatrical: "2024-02-22", ott: "2024-04-05" },
         synopsis: "Friends trapped in caves during a Kodaikanal trip.",
         subtitleLanguages: ["English"],
         sources: ["TMDb"], fetchedAt: new Date().toISOString(),
@@ -293,6 +312,9 @@ if (isMainModule) {
         platform: ["Netflix"], releaseDate: "2023-09-21",
         genre: ["Mystery", "Thriller"], runtime: 130,
         director: "Sujoy Ghosh", cast: ["Kareena Kapoor", "Jaideep Ahlawat"],
+        leadCast: ["Kareena Kapoor", "Jaideep Ahlawat"],
+        audioLanguages: { original: "Hindi" },
+        releaseDates: { ott: "2023-09-21" },
         synopsis: "A single mother in Kalimpong is drawn into a murder investigation.",
         subtitleLanguages: ["English"],
         sources: ["TMDb"], fetchedAt: new Date().toISOString(),
@@ -301,7 +323,8 @@ if (isMainModule) {
   };
 
   try {
-    const result = await renderMonMovement(sampleDraft, 47);
+    const { getIssueNumberForToday } = await import("../shared/issue-number.js");
+    const result = await renderMonMovement(sampleDraft, getIssueNumberForToday());
     log.success(`\n✓ Render complete:`);
     log.success(`   Cover : ${result.coverPath}`);
     log.success(`   Cards : ${result.cardPaths.length}`);

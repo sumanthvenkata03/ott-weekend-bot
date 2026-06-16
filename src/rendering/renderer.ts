@@ -52,6 +52,20 @@ env.addFilter("longDate", (input: unknown) => {
   return `${d.getUTCDate()} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 });
 
+// Short-form date filter for the Mon Movement prototype info bar.
+// "2024-02-15" → "15 Feb 2024" (3-letter month, no leading zero on day).
+// Used with `| upper` to match the brass/ink mono treatment in .info-bar cells.
+env.addFilter("shortDate", (input: unknown) => {
+  if (!input || typeof input !== "string") return "";
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return "";
+  const months = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  return `${d.getUTCDate()} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+});
+
 // Smart truncate: cuts at word boundaries, never mid-word
 env.addFilter("truncate", (s: unknown, max = 80) => {
   const str = String(s ?? "").trim();
