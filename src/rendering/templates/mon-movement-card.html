@@ -189,9 +189,20 @@
   .info-row-dates {
     display: grid;
     grid-template-columns: 1fr 1fr;
+  }
+  /* Single-cell date row (only THEATRES or only OTT present): collapse to one
+     column. The :not(:last-child) rules below then draw no divider/border. */
+  .info-row-dates--single {
+    grid-template-columns: 1fr;
+  }
+  /* Bottom border only when a LANGUAGES cell follows the dates row — a lone
+     dates row (no languages) is :last-child and stays borderless. */
+  .info-bar .info-row-dates:not(:last-child) {
     border-bottom: 2px solid var(--brass);
   }
-  .info-row-dates .info-cell:first-child {
+  /* Vertical divider only between two date cells — a lone cell is also
+     :last-child, so it gets no right border. */
+  .info-row-dates .info-cell:not(:last-child) {
     border-right: 2px solid var(--brass);
   }
   .info-cell {
@@ -221,8 +232,8 @@
   .lang-dubbed { color: var(--ink); }
   .lang-sep { color: var(--ink); opacity: 0.4; }
   .card-hidden-gem .info-bar { border-color: var(--bottle); }
-  .card-hidden-gem .info-row-dates { border-bottom-color: var(--bottle); }
-  .card-hidden-gem .info-row-dates .info-cell:first-child { border-right-color: var(--bottle); }
+  .card-hidden-gem .info-bar .info-row-dates:not(:last-child) { border-bottom-color: var(--bottle); }
+  .card-hidden-gem .info-row-dates .info-cell:not(:last-child) { border-right-color: var(--bottle); }
   .card-hidden-gem .lang-original { color: var(--bottle); }
 
   /* "NOW STREAMING ON" platforms strip — prominent logos centered between
@@ -371,34 +382,45 @@
       <div class="meta-row-2">{% if hasCast %}with {{ release.leadCast | join(", ") }}{% endif %}{% if hasCast and hasMusic %}, {% endif %}{% if hasMusic %}music by {{ release.musicDirector }}{% endif %}</div>
       {% endif %}
 
-      {# Prototype — compact info bar.
-         Row 1: THEATRES + OTT side-by-side. Row 2: LANGUAGES full width. #}
+      {# Prototype — compact info bar. Fields collapse structurally when absent
+         (never a dash): a lone date cell goes full-width with no divider; an
+         empty dates row or empty languages cell is omitted; if every field is
+         absent the whole bar is skipped. Row 1: THEATRES + OTT. Row 2: LANGUAGES. #}
+      {% set hasTheatrical = release.releaseDates and release.releaseDates.theatrical %}
+      {% set hasOtt = release.releaseDates and release.releaseDates.ott %}
+      {% set hasLangs = release.audioLanguages and release.audioLanguages.original %}
+      {% if hasTheatrical or hasOtt or hasLangs %}
       <div class="info-bar">
-        <div class="info-row-dates">
+        {% if hasTheatrical or hasOtt %}
+        <div class="info-row-dates{% if not (hasTheatrical and hasOtt) %} info-row-dates--single{% endif %}">
+          {% if hasTheatrical %}
           <div class="info-cell">
             <div class="info-label">THEATRES</div>
-            <div class="info-value">{% if release.releaseDates and release.releaseDates.theatrical %}{{ release.releaseDates.theatrical | shortDate | upper }}{% else %}—{% endif %}</div>
+            <div class="info-value">{{ release.releaseDates.theatrical | shortDate | upper }}</div>
           </div>
+          {% endif %}
+          {% if hasOtt %}
           <div class="info-cell">
             <div class="info-label">OTT</div>
-            <div class="info-value">{% if release.releaseDates and release.releaseDates.ott %}{{ release.releaseDates.ott | shortDate | upper }}{% else %}—{% endif %}</div>
+            <div class="info-value">{{ release.releaseDates.ott | shortDate | upper }}</div>
           </div>
+          {% endif %}
         </div>
+        {% endif %}
+        {% if hasLangs %}
         <div class="info-cell info-cell-full">
           <div class="info-label">LANGUAGES</div>
           <div class="info-value info-value-langs">
-            {% if release.audioLanguages and release.audioLanguages.original %}
-              <span class="lang-original">{{ release.audioLanguages.original | upper }}</span>
-              {% for lang in release.audioLanguages.dubbed %}
-                <span class="lang-sep">·</span>
-                <span class="lang-dubbed">{{ lang | upper }}</span>
-              {% endfor %}
-            {% else %}
-              <span>—</span>
-            {% endif %}
+            <span class="lang-original">{{ release.audioLanguages.original | upper }}</span>
+            {% for lang in release.audioLanguages.dubbed %}
+              <span class="lang-sep">·</span>
+              <span class="lang-dubbed">{{ lang | upper }}</span>
+            {% endfor %}
           </div>
         </div>
+        {% endif %}
       </div>
+      {% endif %}
 
       {# Prototype — NOW STREAMING ON strip. Replaces the top platform header. #}
       <div class="streaming-section">
