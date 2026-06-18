@@ -19,6 +19,7 @@ import {
   hasMetadataLine2,
   hasReleasedSection,
   hasLanguagesSection,
+  buildTbsiRingText,
 } from "./_shared.js";
 
 /**
@@ -175,6 +176,12 @@ export async function renderSatVerdict(
       hasReleased: hasReleasedSection(card),
       hasLanguages: hasLanguagesSection(card),
     });
+    // TBSI stamp (display-only) — only when the linked release carries a score.
+    // tbsiScore formatted to 1 decimal; ring text lists only present sources.
+    const release = draft.releases.find(r => r.title === card.filmTitle);
+    const tbsiCtx = release?.tbsiScore !== undefined
+      ? { tbsiScore: release.tbsiScore.toFixed(1), tbsiRingText: buildTbsiRingText(release) }
+      : {};
     const cardCtx: SatVerdictCardContext = {
       ...baseCtx,
       card,
@@ -182,6 +189,7 @@ export async function renderSatVerdict(
       ...platformStyle,
       density,
       totalSlots: cards.length,
+      ...tbsiCtx,
     };
     const cardPath = `${outputDir}/sat-verdict-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
     await renderToPNG({
@@ -260,7 +268,9 @@ if (isMainModule) {
         cast: ["Parvathy Thiruvothu", "Tovino Thomas"],
         synopsis: "Two siblings return home to clean out their late mother's house.",
         posterUrl: undefined,
-        
+        // Sample ratings — 4-source stamp (tbsiScore 8.2)
+        tbsiScore: 8.2, tbsiSourceCount: 4,
+        imdbRating: 8.8, rottenTomatoes: 87, metacritic: 74, letterboxd: 4.2,
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
         fetchedAt: new Date().toISOString(),
@@ -279,7 +289,9 @@ if (isMainModule) {
         synopsis: "A 17th-century horror set in a forsaken mansion.",
         // Real verified TMDb poster URL — tests CDN fetch end-to-end
         posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
-        
+        // Sample ratings — 3-source stamp (tbsiScore 7.4, no Letterboxd)
+        tbsiScore: 7.4, tbsiSourceCount: 3,
+        imdbRating: 7.0, rottenTomatoes: 88, metacritic: 72,
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
         fetchedAt: new Date().toISOString(),

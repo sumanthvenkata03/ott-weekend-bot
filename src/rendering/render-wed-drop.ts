@@ -19,6 +19,7 @@ import {
   hasMetadataLine2,
   hasReleasedSection,
   hasLanguagesSection,
+  buildTbsiRingText,
 } from "./_shared.js";
 
 /**
@@ -145,6 +146,11 @@ export async function renderWedDrop(
       hasReleased: hasReleasedSection(enrichedRelease),
       hasLanguages: hasLanguagesSection(enrichedRelease),
     });
+    // TBSI stamp (display-only) — only when the release carries a score.
+    // tbsiScore formatted to 1 decimal; ring text lists only present sources.
+    const tbsiCtx = release.tbsiScore !== undefined
+      ? { tbsiScore: release.tbsiScore.toFixed(1), tbsiRingText: buildTbsiRingText(release) }
+      : {};
     const cardCtx: WedDropCardContext = {
       ...baseCtx,
       title: slide.title,
@@ -154,6 +160,7 @@ export async function renderWedDrop(
       totalSlots: releaseSlides.length,
       ...platformStyle,
       density,
+      ...tbsiCtx,
     };
     const cardPath = `${outputDir}/wed-drop-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
     await renderToPNG({
@@ -194,6 +201,9 @@ if (isMainModule) {
         id: "sample-1", title: "Pennum Porattum", language: "Malayalam", isSeries: false,
         platform: ["Aha"], releaseDate: "2026-05-16", genre: ["Drama"], runtime: 92,
         director: "Mathew Thomas", cast: ["Parvathy Thiruvothu"], synopsis: "Siblings clean out their late mother's house.",
+        // Sample ratings — 4-source stamp (tbsiScore 8.2)
+        tbsiScore: 8.2, tbsiSourceCount: 4,
+        imdbRating: 8.8, rottenTomatoes: 87, metacritic: 74, letterboxd: 4.2,
         subtitleLanguages: ["English"], sources: ["TMDb"], fetchedAt: new Date().toISOString(),
       },
       {
@@ -213,6 +223,8 @@ if (isMainModule) {
         id: "sample-4", title: "Sattendru Maarudhu", language: "Tamil", isSeries: false,
         platform: ["Sun NXT"], releaseDate: "2026-05-17", genre: ["Thriller"], runtime: 110,
         director: "Karthik Subbaraj", cast: ["Vijay Sethupathi"], synopsis: "Small-town election thriller.",
+        // Sample ratings — 1-source stamp (tbsiScore 6.9, IMDb only)
+        tbsiScore: 6.9, tbsiSourceCount: 1, imdbRating: 6.9,
         subtitleLanguages: ["English"], sources: ["TMDb"], fetchedAt: new Date().toISOString(),
       },
     ],

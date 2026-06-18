@@ -256,6 +256,22 @@
     color: var(--ink);
     opacity: 0.55;
   }
+
+  /* TBSI stamp — the Gallery layout has no copy-column top-right slot (the
+     body-right title is full-width and the blurb fills below it), so Sun seats
+     the seal in the clean whitespace BELOW the poster frame (poster bottom
+     y≈640). Centered under the 360px std poster; stays under the poster band in
+     compact/dense too. Shared visual CSS in _design-tokens.html. */
+  .tbsi-stamp-wrap {
+    position: absolute;
+    top: 690px;
+    left: 185px;
+    width: 150px;
+    height: 150px;
+    transform: rotate(-6deg);
+    pointer-events: none;
+    z-index: 5;
+  }
 </style>
 </head>
 <body class="{{ density }}">
@@ -307,6 +323,8 @@
       {% endif %}
     </div>
   </div>
+
+  {% include "_tbsi-stamp.html" %}
 
   <div class="footer-left">★ THE BIG SCREEN INDEX ★</div>
   <div class="footer-right">VOL. 01 · ISSUE {{ issueNumber }}</div>

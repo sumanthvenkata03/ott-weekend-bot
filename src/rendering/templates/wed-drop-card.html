@@ -167,6 +167,10 @@
     color: var(--ink);
     font-weight: 500;
   }
+  /* Reserve the bottom-right corner for the TBSI seal: wrap the blurb before
+     the stamp's left edge (x≈858) so no text runs under it. Only applied when a
+     seal is present (tbsiScore set) so rating-less cards keep a full-width blurb. */
+  .why-body.has-seal { margin-right: 170px; }
   /* Phase 5.5 — platform color set inline; .is-gradient handles JioHotstar.
      Post-review: font + tracking reduced (26/4 → 22/3) to stay single-row in
      the narrower text column that came with wider posters. */
@@ -231,6 +235,22 @@
     color: var(--ink);
   }
   .footer .meta { font-family: 'JetBrains Mono', monospace; font-size: 14px; letter-spacing: 1px; }
+
+  /* TBSI stamp — Wed Drop seats the seal in the copy column's BOTTOM-RIGHT
+     whitespace (below the WHY THIS WEEKEND blurb). The copy column's top-right
+     is occupied by the .platform-line (NOW ON <platform> + logo), so the seal
+     drops to the lower corner. Shared visual CSS lives in _design-tokens.html;
+     the blurb is reserved away from it via .why-body margin-right above. */
+  .tbsi-stamp-wrap {
+    position: absolute;
+    bottom: 175px;
+    right: 48px;
+    width: 150px;
+    height: 150px;
+    transform: rotate(-6deg);
+    pointer-events: none;
+    z-index: 5;
+  }
 </style>
 </head>
 <body class="{{ density }}">
@@ -333,11 +353,13 @@
 
       <div class="why-block">
         <div class="why-label">★ WHY THIS WEEKEND</div>
-        <div class="why-body">{{ body | truncate(180) }}</div>
+        <div class="why-body{% if tbsiScore %} has-seal{% endif %}">{{ body | truncate(180) }}</div>
       </div>
     </div>
 
   </div>
+
+  {% include "_tbsi-stamp.html" %}
 
   <div class="footer">
     <span>★ THE BIG SCREEN INDEX ★</span>

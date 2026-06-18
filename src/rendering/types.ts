@@ -105,6 +105,11 @@ export interface SatVerdictCardContext extends RenderBase, PlatformStyle {
   totalSlots: number;
   /** Phase 5.5 — body-density tier (compact/standard/dense) */
   density: CardDensity;
+  /** TBSI stamp (display-only). Present only when the linked release has a
+   *  tbsiScore. tbsiScore is pre-formatted to 1 decimal; tbsiRingText is the
+   *  " · "-joined source list. Both absent → the card renders no stamp. */
+  tbsiScore?: string;
+  tbsiRingText?: string;
 }
 
 // ============================================================
@@ -151,6 +156,11 @@ export interface WedDropCardContext extends RenderBase, PlatformStyle {
   totalSlots: number;
   /** Phase 5.5 — body-density tier (compact/standard/dense) */
   density: CardDensity;
+  /** TBSI stamp (display-only). Present only when the release has a tbsiScore.
+   *  tbsiScore is pre-formatted to 1 decimal; tbsiRingText is the " · "-joined
+   *  bottom-arc source list. Both absent → the card renders no stamp. */
+  tbsiScore?: string;
+  tbsiRingText?: string;
 }
 
 // ============================================================
@@ -230,4 +240,9 @@ export interface SunSpotlightRenderContext extends PlatformStyle, CardEnrichment
 
   /** Phase 5.5 — body-density tier (compact/standard/dense), applies to card 1 only */
   density: CardDensity;
+  /** TBSI stamp (display-only). Present only when the spotlight film has a
+   *  tbsiScore. tbsiScore is pre-formatted to 1 decimal; tbsiRingText is the
+   *  " · "-joined source list. Rendered only on the why-it-works card. */
+  tbsiScore?: string;
+  tbsiRingText?: string;
 }

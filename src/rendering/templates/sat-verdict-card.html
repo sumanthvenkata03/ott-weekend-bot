@@ -347,6 +347,27 @@
     color: var(--ink);
   }
   .footer .meta { font-family: 'JetBrains Mono', monospace; font-size: 14px; letter-spacing: 1px; }
+
+  /* TBSI stamp — Sat Verdict seats the seal in the metadata column's MID-RIGHT
+     whitespace, above the existing verdict-stamp (bottom:130) and clear of the
+     top .platform-line. Shared visual CSS in _design-tokens.html. Note: on the
+     must-watch / worth-a-try mustard background the brass ring sits on brass —
+     the dark ink disc still reads, but contrast is softer than on cream. */
+  .tbsi-stamp-wrap {
+    position: absolute;
+    bottom: 250px;
+    right: 48px;
+    width: 150px;
+    height: 150px;
+    transform: rotate(-6deg);
+    pointer-events: none;
+    z-index: 5;
+  }
+  /* Reserve the seal's mid-right pocket: when a seal is present, wrap the lower
+     copy (verdict one-liner + WATCH IF) before its left edge so no text runs
+     under it. Gated on tbsiScore so rating-less cards keep full-width copy. */
+  .metadata.has-seal .one-line,
+  .metadata.has-seal .watch-if { margin-right: 170px; }
 </style>
 </head>
 <body class="{{ card.verdictKind }} {{ density }}">
@@ -379,7 +400,7 @@
     </div>
 
     <!-- Metadata -->
-    <div class="metadata">
+    <div class="metadata{% if tbsiScore %} has-seal{% endif %}">
       <div class="admit-one">★ ADMIT ONE ★</div>
       <div class="platform-line{% if platformIsGradient %} is-gradient{% endif %}" style="color: {{ platformColor }};">
         <span class="star">★</span>
@@ -464,6 +485,8 @@
     </div>
 
   </div>
+
+  {% include "_tbsi-stamp.html" %}
 
   <!-- Verdict stamp -->
   <div class="verdict-stamp verdict-{{ card.verdictKind }}">

@@ -17,6 +17,7 @@ import {
   hasMetadataLine2,
   hasReleasedSection,
   hasLanguagesSection,
+  buildTbsiRingText,
 } from "./_shared.js";
 
 // Same per-language fallback color map used inline by the other pillar orchestrators.
@@ -75,6 +76,12 @@ function buildContext(
     hasReleased: hasReleasedSection(enrichment),
     hasLanguages: hasLanguagesSection(enrichment),
   });
+  // TBSI stamp (display-only) — only when the spotlight film carries a score.
+  // tbsiScore formatted to 1 decimal; ring text lists only present sources.
+  // Shared by all 4 templates, but only the why-it-works card includes the stamp.
+  const tbsiCtx = film.tbsiScore !== undefined
+    ? { tbsiScore: film.tbsiScore.toFixed(1), tbsiRingText: buildTbsiRingText(film) }
+    : {};
   return {
     filmTitle: film.title,
     language: film.language,
@@ -93,6 +100,7 @@ function buildContext(
     ...platformStyle,
     density,
     ...enrichment,
+    ...tbsiCtx,
   };
 }
 
@@ -169,6 +177,11 @@ if (isMainModule) {
       director: "Chidambaram",
       cast: ["Soubin Shahir", "Sreenath Bhasi"],
       synopsis: "Friends trapped in caves during a Kodaikanal trip.",
+      // Sample ratings — 4-source stamp (tbsiScore 8.5). The guard ({% if
+      // tbsiScore %}) is the same shared mechanism proven rating-less on the
+      // other pillars; Sun renders a single film so one fixture demos placement.
+      tbsiScore: 8.5, tbsiSourceCount: 4,
+      imdbRating: 8.4, rottenTomatoes: 90, metacritic: 78, letterboxd: 4.3,
       // Intentionally broken URL — verifies onerror handler hides the <img>
       // cleanly so the Gallery fallback (bottle-green typographic panel) shows through.
       posterUrl: "https://image.tmdb.org/t/p/w500/this-file-does-not-exist.jpg",
