@@ -15,6 +15,7 @@ export interface DraftNotification {
   metadata?: Record<string, string>;  // extra context fields, shown as a list
   coverImageUrl?: string;             // primary cover image — inline preview
   bodyCardImageUrls?: string[];       // body card images — link buttons
+  hashtags?: string;                  // space-separated #tags — rendered copy-paste-ready
 }
 
 /**
@@ -85,7 +86,18 @@ export async function notifyDraftReady(payload: DraftNotification): Promise<void
       },
     ],
   });
-  
+
+  // Hashtags in a triple-backtick code block — one-tap copyable on mobile + desktop.
+  if (payload.hashtags && payload.hashtags.trim().length > 0) {
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*Hashtags*\n\`\`\`${payload.hashtags.trim()}\`\`\``,
+      },
+    });
+  }
+
   try {
     await ofetch(config.SLACK_WEBHOOK_URL, {
       method: "POST",

@@ -7,6 +7,7 @@ import { writeSundaySpotlightToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
 import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
+import { buildHashtags } from "../shared/hashtags.js";
 import { renderSunSpotlight } from "../rendering/render-sun-spotlight.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
@@ -75,6 +76,11 @@ async function main() {
     { localPath: renderResult.card2Path,     r2Key: `sun-spotlight/${dateStr}/card-02.png` },
   ]);
 
+  // Build richer factual hashtags from metadata + industry/platform umbrella
+  // tags, merging the LLM's thematic tags. Used for BOTH Notion and Slack.
+  const enrichedHashtags = buildHashtags([film], draft.hashtags);
+  draft.hashtags = enrichedHashtags;
+
   // Write to Notion. If this throws, the R2 uploads above are already written
   // (immutable, 1-year cache) — log the orphaned keys for traceability, then
   // re-throw so the job's catch still fires the Slack failure alert.
@@ -110,6 +116,7 @@ async function main() {
     },
     coverImageUrl: coverFeed.publicUrl,
     bodyCardImageUrls: [card1.publicUrl, card2.publicUrl],
+    hashtags: enrichedHashtags,
   });
 
   log.success(`\n✅ Sun Spotlight ${issueNumber} delivered`);

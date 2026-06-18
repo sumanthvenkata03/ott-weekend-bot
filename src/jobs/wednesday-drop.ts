@@ -6,6 +6,7 @@ import { writeWednesdayDropToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
 import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
+import { buildHashtags } from "../shared/hashtags.js";
 import { renderWedDrop } from "../rendering/render-wed-drop.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
@@ -82,6 +83,11 @@ async function main() {
     imageUrls[`card${i + 1}`] = upload.publicUrl;
   });
 
+  // Build richer factual hashtags from metadata + industry/platform umbrella
+  // tags, merging the LLM's thematic tags. Used for BOTH Notion and Slack.
+  const enrichedHashtags = buildHashtags(draft.releases, draft.hashtags);
+  draft.hashtags = enrichedHashtags;
+
   // 6. Write to Notion. If this throws, the R2 uploads above are already written
   // (immutable, 1-year cache) — log the orphaned keys for traceability, then
   // re-throw so the job's catch still fires the Slack failure alert.
@@ -112,6 +118,7 @@ async function main() {
     },
     coverImageUrl: cover.publicUrl,
     bodyCardImageUrls: cardUploads.map(u => u.publicUrl),
+    hashtags: enrichedHashtags,
   });
 
   log.success(`\n✅ Wed Drop PREVIEW delivered — Notion page: ${url}`);

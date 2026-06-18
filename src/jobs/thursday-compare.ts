@@ -7,6 +7,7 @@ import { writeCompareToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
 import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
+import { buildHashtags } from "../shared/hashtags.js";
 async function main() {
   log.info("⚔️  Thursday Compare job — starting");
   
@@ -43,6 +44,11 @@ const sunday = addDays(friday, 2);
   log.info(`Deciding line: "${draft.reelScript.decidingLine}"`);
   log.info(`Pinned hot take: "${draft.pinnedCommentSeed}"`);
   
+  // Build richer factual hashtags from metadata + industry/platform umbrella
+  // tags, merging the LLM's thematic tags. Used for BOTH Notion and Slack.
+  const enrichedHashtags = buildHashtags([filmA, filmB], draft.hashtags);
+  draft.hashtags = enrichedHashtags;
+
   const url = await writeCompareToNotion(draft);
   await notifyDraftReady({
     pillar: "Thu Compare",
@@ -53,6 +59,7 @@ const sunday = addDays(friday, 2);
     metadata: {
       "Hot take": draft.pinnedCommentSeed.slice(0, 150),
     },
+    hashtags: enrichedHashtags,
   });
   log.success(`\n🎉 Thursday Compare draft is in Notion:\n   ${url}\n   Review and post manually.`);
 }
