@@ -1,13 +1,10 @@
-@"
 node_modules
 dist
 .env
-data/*.sqlite
-data/cache
+data/
 *.log
 .DS_Store
 .claude
 claude
 Thumbs.db
 output
-"@ | Out-File -Encoding utf8 .gitignore
