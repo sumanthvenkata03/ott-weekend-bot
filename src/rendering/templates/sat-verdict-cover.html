@@ -270,6 +270,100 @@
     letter-spacing: 1px;
     color: var(--brass);
   }
+
+  /* ── Swipe affordances (additive) ── */
+
+  /* A — centered swipe cue. Sat's strip sits flush above the footer, so the
+     cue lives in the gap between the title block and the poster strip (top:1080). */
+  .swipe-cue {
+    position: absolute;
+    left: 70px;
+    right: 70px;
+    bottom: 280px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+  }
+  .swipe-cue-rule {
+    width: 64px;
+    height: 1px;
+    background: var(--vermillion);
+  }
+  .swipe-cue-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--vermillion);
+    white-space: nowrap;
+  }
+
+  /* B — page-turn dog-ear, pinned to the cover's true bottom-right corner */
+  .page-turn {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    z-index: 11;
+    pointer-events: none;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+  }
+  .page-turn-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--vermillion);
+    margin-bottom: 8px;
+  }
+  .page-turn-svg .tri { fill: var(--brass); }
+  .page-turn-svg .fold-line { stroke: var(--ink); stroke-width: 1; }
+  .page-turn-svg .turn-arrow {
+    fill: var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+  }
+
+  /* D — chevron-trail gutter. No 2x2 grid here: pin to the canvas right edge,
+     a ~200px band vertically centered over the hero (clear of corner-stamp,
+     title block, strip + page-turn). z-index above the dark overlay (5). */
+  .swipe-gutter {
+    position: absolute;
+    top: 426px;
+    right: 0;
+    height: 200px;
+    width: 19%;
+    z-index: 9;
+    pointer-events: none;
+    background: rgba(26, 22, 20, 0.40);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .swipe-gutter .chev { display: block; }
+  .swipe-gutter .chev-1 { opacity: 0.6; }
+  .swipe-gutter .chev-2 { opacity: 0.8; }
+  .swipe-gutter .chev-3 { opacity: 1.0; }
+  .swipe-gutter .chev path {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  /* dark underlay halo — legibility over bright posters; does NOT touch the veil */
+  .swipe-gutter .chev .chev-halo {
+    stroke: #1A1614;
+    stroke-width: 13;
+    opacity: 0.45;
+  }
+  .swipe-gutter .chev .chev-line {
+    stroke: #F4ECDC;
+    stroke-width: 9;
+  }
 </style>
 </head>
 <body>
@@ -293,6 +387,22 @@
   <!-- DARK GRADIENT OVERLAY -->
   <div class="overlay"></div>
 
+  <!-- D — chevron-trail gutter: translucent veil over the hero's right edge -->
+  <div class="swipe-gutter">
+    <svg class="chev chev-1" viewBox="0 0 36 72" width="36" height="72" aria-hidden="true">
+      <path class="chev-halo" d="M11 14 L27 36 L11 58" />
+      <path class="chev-line" d="M11 14 L27 36 L11 58" />
+    </svg>
+    <svg class="chev chev-2" viewBox="0 0 36 72" width="36" height="72" aria-hidden="true">
+      <path class="chev-halo" d="M11 14 L27 36 L11 58" />
+      <path class="chev-line" d="M11 14 L27 36 L11 58" />
+    </svg>
+    <svg class="chev chev-3" viewBox="0 0 36 72" width="36" height="72" aria-hidden="true">
+      <path class="chev-halo" d="M11 14 L27 36 L11 58" />
+      <path class="chev-line" d="M11 14 L27 36 L11 58" />
+    </svg>
+  </div>
+
   <!-- MASTHEAD -->
   <div class="masthead">
     <span class="label">★ THE BIG SCREEN INDEX</span>
@@ -310,6 +420,13 @@
     <div class="kicker">★ THE WEEKEND'S RULING ★</div>
     <div class="headline">{{ hero.oneLineVerdict }}</div>
     <div class="hot-take">{{ hotTake | truncate(140) }}</div>
+  </div>
+
+  <!-- A — centered swipe cue, in the gap above the poster strip -->
+  <div class="swipe-cue">
+    <span class="swipe-cue-rule"></span>
+    <span class="swipe-cue-text">{% if filmCount >= 2 %}SWIPE FOR ALL {{ filmCount }} →{% else %}SWIPE  →{% endif %}</span>
+    <span class="swipe-cue-rule"></span>
   </div>
 
   <!-- POSTER STRIP — 3 inset tiles representing each verdict film -->
@@ -331,6 +448,16 @@
   <div class="footer">
     <span class="brand">★ SAT VERDICT · VOL. {{ vol }}</span>
     <span class="meta">{{ filmCount }} {{ "FILM" | pluralize(filmCount, "FILMS") }} · {{ weekendDates }}</span>
+  </div>
+
+  <!-- B — page-turn dog-ear, true bottom-right corner of the cover -->
+  <div class="page-turn">
+    <span class="page-turn-label">TURN</span>
+    <svg class="page-turn-svg" width="64" height="64" viewBox="0 0 64 64" aria-hidden="true">
+      <path class="tri" d="M64 0 L64 64 L0 64 Z" />
+      <line class="fold-line" x1="64" y1="0" x2="0" y2="64" />
+      <text class="turn-arrow" x="46" y="52" text-anchor="middle">&#8594;</text>
+    </svg>
   </div>
 
 </div>

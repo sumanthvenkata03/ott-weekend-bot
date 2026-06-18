@@ -208,6 +208,55 @@
     color: var(--ink);
     opacity: 0.55;
   }
+
+  /* ── Swipe affordances (additive) ── */
+
+  /* A — centered swipe cue, in the gap between the hook tagline and the footer row.
+     Single-film cover: fixed copy, no count. */
+  .swipe-cue {
+    position: absolute;
+    left: 40px;
+    right: 40px;
+    top: 1285px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+  }
+  .swipe-cue-rule {
+    width: 64px;
+    height: 1px;
+    background: var(--vermillion);
+  }
+  .swipe-cue-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--vermillion);
+    white-space: nowrap;
+  }
+
+  /* B — page-turn dog-ear, pinned to the cover's true bottom-right corner.
+     The "TURN" label is intentionally omitted here: the footer-right text sits
+     in this corner, so only the bare dog-ear fits without overlapping it. */
+  .page-turn {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    z-index: 6;
+    pointer-events: none;
+    display: flex;
+    align-items: flex-end;
+  }
+  .page-turn-svg .tri { fill: var(--brass); }
+  .page-turn-svg .fold-line { stroke: var(--ink); stroke-width: 1; }
+  .page-turn-svg .turn-arrow {
+    fill: var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+  }
 </style>
 </head>
 <body>
@@ -238,8 +287,25 @@
   <div class="bottom-rule"></div>
   <div class="hook-tagline">{{ hook }}</div>
 
+  <!-- A — centered swipe cue, in the gap above the footer row -->
+  <div class="swipe-cue">
+    <span class="swipe-cue-rule"></span>
+    <span class="swipe-cue-text">SWIPE FOR THE FULL STORY →</span>
+    <span class="swipe-cue-rule"></span>
+  </div>
+
   <div class="footer-left">★ THE BIG SCREEN INDEX ★</div>
   <div class="footer-right">VOL. 01 · ISSUE {{ issueNumber }}</div>
+
+  <!-- B — page-turn dog-ear, true bottom-right corner (no TURN label; 48px so it
+       clears the footer-right "VOL. 01 · ISSUE NNN" that occupies this corner) -->
+  <div class="page-turn">
+    <svg class="page-turn-svg" width="48" height="48" viewBox="0 0 64 64" aria-hidden="true">
+      <path class="tri" d="M64 0 L64 64 L0 64 Z" />
+      <line class="fold-line" x1="64" y1="0" x2="0" y2="64" />
+      <text class="turn-arrow" x="46" y="52" text-anchor="middle">&#8594;</text>
+    </svg>
+  </div>
 
 </div>
 </body>
