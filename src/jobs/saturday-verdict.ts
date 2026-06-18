@@ -5,7 +5,7 @@ import { generateSaturdayVerdict } from "../content/weekend/saturday-verdict.js"
 import { writeSaturdayVerdictToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
-import { notifyDraftReady } from "../delivery/slack.js";
+import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
 import { renderSatVerdict } from "../rendering/render-sat-verdict.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
@@ -121,8 +121,9 @@ async function main() {
 }
 
 main()
-  .catch(err => {
+  .catch(async (err) => {
     log.error("Saturday Verdict job failed", err);
+    await notifyJobFailure("Sat Verdict", err instanceof Error ? err.message : String(err));
     process.exit(1);
   })
   .finally(async () => {

@@ -6,7 +6,7 @@ import { generateThursdayCompare } from "../content/weekend/thursday-compare.js"
 import { writeCompareToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
-import { notifyDraftReady } from "../delivery/slack.js";
+import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
 async function main() {
   log.info("⚔️  Thursday Compare job — starting");
   
@@ -57,7 +57,8 @@ const sunday = addDays(friday, 2);
   log.success(`\n🎉 Thursday Compare draft is in Notion:\n   ${url}\n   Review and post manually.`);
 }
 
-main().catch(err => {
+main().catch(async (err) => {
   log.error("Thursday Compare job failed", err);
+  await notifyJobFailure("Thu Compare", err instanceof Error ? err.message : String(err));
   process.exit(1);
 });

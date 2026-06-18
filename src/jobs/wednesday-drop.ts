@@ -5,7 +5,7 @@ import { generateWednesdayDrop } from "../content/weekend/wednesday-drop.js";
 import { writeWednesdayDropToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
-import { notifyDraftReady } from "../delivery/slack.js";
+import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
 import { renderWedDrop } from "../rendering/render-wed-drop.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
@@ -108,8 +108,9 @@ async function main() {
 }
 
 main()
-  .catch(err => {
+  .catch(async (err) => {
     log.error("Wednesday Drop job failed", err);
+    await notifyJobFailure("Wed Drop", err instanceof Error ? err.message : String(err));
     process.exit(1);
   })
   .finally(async () => {

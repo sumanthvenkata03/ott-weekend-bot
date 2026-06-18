@@ -6,7 +6,7 @@ import { generateMondayMovement } from "../content/weekend/monday-movement.js";
 import { writeMovementToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
-import { notifyDraftReady } from "../delivery/slack.js";
+import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
 import { renderMonMovement } from "../rendering/render-mon-movement.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
@@ -129,8 +129,9 @@ async function main() {
 }
 
 main()
-  .catch(err => {
+  .catch(async (err) => {
     log.error("Monday Movement job failed", err);
+    await notifyJobFailure("Mon Movement", err instanceof Error ? err.message : String(err));
     process.exit(1);
   })
   .finally(async () => {

@@ -6,7 +6,7 @@ import { generateSundaySpotlight } from "../content/weekend/sunday-spotlight.js"
 import { writeSundaySpotlightToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
-import { notifyDraftReady } from "../delivery/slack.js";
+import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
 import { renderSunSpotlight } from "../rendering/render-sun-spotlight.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
@@ -106,8 +106,9 @@ async function main() {
 }
 
 main()
-  .catch(err => {
+  .catch(async (err) => {
     log.error("Sunday Spotlight job failed", err);
+    await notifyJobFailure("Sun Spotlight", err instanceof Error ? err.message : String(err));
     process.exit(1);
   })
   .finally(async () => {
