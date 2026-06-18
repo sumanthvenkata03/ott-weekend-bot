@@ -205,6 +205,9 @@ export async function discoverIndianReleases(
           backdropUrl: backdropUrl(m.backdrop_path),
           // audioLanguages populated later by getCreditsAndLanguages (Phase 5.5)
           subtitleLanguages: [],
+          tmdbPopularity: m.popularity,
+          tmdbVoteAverage: m.vote_average,
+          tmdbVoteCount: m.vote_count,
           sources: ["tmdb"],
           fetchedAt: new Date().toISOString(),
         });
@@ -273,6 +276,9 @@ export async function discoverIndianOTTArrivals(
           backdropUrl: backdropUrl(m.backdrop_path),
           // audioLanguages populated later by getCreditsAndLanguages (Phase 5.5)
           subtitleLanguages: [],
+          tmdbPopularity: m.popularity,
+          tmdbVoteAverage: m.vote_average,
+          tmdbVoteCount: m.vote_count,
           sources: ["tmdb-ott"],
           fetchedAt: new Date().toISOString(),
         });

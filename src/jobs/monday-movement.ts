@@ -7,6 +7,7 @@ import { writeMovementToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
 import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
+import { buildHashtags } from "../shared/hashtags.js";
 import { renderMonMovement } from "../rendering/render-mon-movement.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
@@ -38,7 +39,7 @@ async function main() {
 
   // Exclude arrivals from gem candidates (don't double-feature)
   const arrivalIds = new Set(arrivals.map(r => r.id));
-  const gems = pickHiddenGems(gemPool, 3, arrivalIds);
+  const gems = pickHiddenGems(gemPool, 7, arrivalIds);
 
   log.info(`Top hidden gems picked:`);
   for (const g of gems) {
@@ -48,8 +49,8 @@ async function main() {
     );
   }
 
-  // Cap arrivals at 4 (carousel real-estate); LLM will pick exactly 5 across both buckets.
-  const featuredArrivals = arrivals.slice(0, 4);
+  // Cap arrivals at 10 (carousel real-estate); LLM picks the best UP TO 10 across both buckets.
+  const featuredArrivals = arrivals.slice(0, 10);
 
   if (featuredArrivals.length === 0 && gems.length === 0) {
     log.warn("No films to feature — aborting");
@@ -77,10 +78,10 @@ async function main() {
   log.info(`Rendering PNGs (Issue ${issueNumber})...`);
   const renderResult = await renderMonMovement(draft, issueNumber, "output/posts");
 
-  // Strict guard — Mon Movement's design contract is exactly 5 body cards
-  if (renderResult.cardPaths.length !== 5) {
+  // Strict guard — Mon Movement's design contract is 4–10 body cards (up to 10).
+  if (renderResult.cardPaths.length < 4 || renderResult.cardPaths.length > 10) {
     throw new Error(
-      `Mon Movement produced ${renderResult.cardPaths.length} cards; expected exactly 5. ` +
+      `Mon Movement produced ${renderResult.cardPaths.length} cards; expected 4–10. ` +
       `Check the prompt or rerun.`
     );
   }
@@ -97,11 +98,16 @@ async function main() {
   const cover = uploads[0]!;
   const cardUploads = uploads.slice(1);
 
-  // Build imageUrls keyed card1..card5 dynamically (slide order, not bucket order)
+  // Build imageUrls keyed card1..cardN dynamically (sorted body-slide order, up to 10)
   const imageUrls: { cover: string; [k: string]: string } = { cover: cover.publicUrl };
   cardUploads.forEach((upload, i) => {
     imageUrls[`card${i + 1}`] = upload.publicUrl;
   });
+
+  // Build richer factual hashtags from metadata + industry/platform umbrella
+  // tags, merging the LLM's thematic tags. Used for BOTH Notion and Slack.
+  const enrichedHashtags = buildHashtags([...draft.newArrivals, ...draft.hiddenGems], draft.hashtags);
+  draft.hashtags = enrichedHashtags;
 
   // Write to Notion. If this throws, the R2 uploads above are already written
   // (immutable, 1-year cache) — log the orphaned keys for traceability, then
@@ -118,7 +124,7 @@ async function main() {
     throw err;
   }
 
-  // Slack with cover preview + all 5 card previews
+  // Slack with cover preview + all body-card previews (up to 10)
   log.info("Sending Slack notification...");
   await notifyDraftReady({
     pillar: "Mon Movement",
@@ -133,6 +139,7 @@ async function main() {
     },
     coverImageUrl: cover.publicUrl,
     bodyCardImageUrls: cardUploads.map(u => u.publicUrl),
+    hashtags: enrichedHashtags,
   });
 
   log.success(`\n✅ Mon Movement PREVIEW delivered — Notion page: ${url}`);

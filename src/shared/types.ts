@@ -75,6 +75,12 @@ export interface Release {
   imdbRating?: number;
   imdbVotes?: number;
   rottenTomatoes?: number;
+
+  // TMDb buzz signals (from the discover result) — used to surface unrated
+  // brand-new arrivals by curiosity when no IMDb rating exists yet.
+  tmdbPopularity?: number;
+  tmdbVoteAverage?: number;
+  tmdbVoteCount?: number;
   
   // Tagging (populated by LLM later)
   mood?: Mood[];
