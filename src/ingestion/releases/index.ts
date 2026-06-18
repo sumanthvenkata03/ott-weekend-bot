@@ -8,6 +8,7 @@ import {
   getCreditsAndLanguages,
 } from "./tmdb.js";
 import { fetchOmdbByImdbId } from "./omdb.js";
+import { getMdblistRatings, mergeRatings, computeTbsiScore } from "../ratings/mdblist.js";
 import { discoverIndianOTTArrivals } from "./tmdb.js";
 
 /**
@@ -53,6 +54,63 @@ function mergeAudioLanguages(
     original: current.original,
     ...(merged.length > 0 ? { dubbed: merged } : {}),
   };
+}
+
+/**
+ * Enrich ratings: MDBList PRIMARY (richer, multi-source), OMDb fills the gaps,
+ * plus a coverage-aware TBSI Score. Both sources are fetched in parallel and
+ * keyed off the IMDb ID; either being absent (no key / miss / no IMDb ID)
+ * degrades gracefully. OMDb's language/cast/runtime enrichment role is UNCHANGED
+ * (applied exactly as before, only when OMDb responds).
+ *
+ * Merge precedence per field:
+ *   imdbRating     = mdblist.imdb      ?? omdb.imdbRating     ?? existing
+ *   rottenTomatoes = mdblist.rtCritic  ?? omdb.rottenTomatoes ?? existing
+ *   rtAudience     = mdblist.rtAudience ?? existing            (OMDb has none)
+ *   metacritic     = mdblist.metacritic ?? omdb.metacritic    ?? existing
+ *   letterboxd     = mdblist.letterboxd ?? existing            (OMDb has none)
+ */
+async function enrichWithRatings(releases: Release[]): Promise<Release[]> {
+  return Promise.all(
+    releases.map(async r => {
+      if (!r.imdbId) return r;
+      const [omdb, mdblist] = await Promise.all([
+        fetchOmdbByImdbId(r.imdbId),
+        getMdblistRatings(r.imdbId),
+      ]);
+      if (!omdb && !mdblist) return r;
+
+      const m = mergeRatings(r, omdb, mdblist);
+      const { tbsiScore, tbsiSourceCount } = computeTbsiScore(m);
+
+      // OMDb language/cast/runtime role — UNCHANGED, applied only when OMDb responded.
+      const mergedAudio = omdb ? mergeAudioLanguages(r.audioLanguages, omdb.languages, r.title) : undefined;
+
+      return {
+        ...r,
+        ...(omdb ? {
+          imdbVotes: omdb.imdbVotes,
+          director: omdb.director ?? r.director,
+          cast: omdb.cast.length > 0 ? omdb.cast : r.cast,
+          runtime: omdb.runtime ?? r.runtime,
+        } : {}),
+        ...(mergedAudio ? { audioLanguages: mergedAudio } : {}),
+        // Ratings — conditional spreads so we never write an explicit undefined.
+        ...(m.imdbRating !== undefined ? { imdbRating: m.imdbRating } : {}),
+        ...(m.rottenTomatoes !== undefined ? { rottenTomatoes: m.rottenTomatoes } : {}),
+        ...(m.rtAudience !== undefined ? { rtAudience: m.rtAudience } : {}),
+        ...(m.metacritic !== undefined ? { metacritic: m.metacritic } : {}),
+        ...(m.letterboxd !== undefined ? { letterboxd: m.letterboxd } : {}),
+        ...(tbsiScore !== undefined ? { tbsiScore } : {}),
+        ...(tbsiSourceCount !== undefined ? { tbsiSourceCount } : {}),
+        sources: Array.from(new Set([
+          ...r.sources,
+          ...(omdb ? ["omdb"] : []),
+          ...(mdblist ? ["mdblist"] : []),
+        ])),
+      };
+    })
+  );
 }
 
 /**
@@ -113,27 +171,9 @@ export async function ingestReleases(
   const enrichedCount = withCredits.filter(r => r.leadCast || r.musicDirector || r.audioLanguages).length;
   log.info(`  Credits/audio enrichment: ${enrichedCount}/${releases.length}`);
 
-  // 4. Enrich with OMDb (+ Phase 5.7 audio-language union merge)
-  log.info(`Enriching with OMDb (IMDb ratings + RT)...`);
-  const enriched = await Promise.all(
-    withCredits.map(async r => {
-      if (!r.imdbId) return r;
-      const omdb = await fetchOmdbByImdbId(r.imdbId);
-      if (!omdb) return r;
-      const mergedAudio = mergeAudioLanguages(r.audioLanguages, omdb.languages, r.title);
-      return {
-        ...r,
-        imdbRating: omdb.imdbRating,
-        imdbVotes: omdb.imdbVotes,
-        rottenTomatoes: omdb.rottenTomatoes,
-        director: omdb.director ?? r.director,
-        cast: omdb.cast.length > 0 ? omdb.cast : r.cast,
-        runtime: omdb.runtime ?? r.runtime,
-        ...(mergedAudio ? { audioLanguages: mergedAudio } : {}),
-        sources: Array.from(new Set([...r.sources, "omdb"])),
-      };
-    })
-  );
+  // 4. Enrich ratings — MDBList primary + OMDb gap-fill (+ Phase 5.7 audio merge)
+  log.info(`Enriching ratings with MDBList + OMDb...`);
+  const enriched = await enrichWithRatings(withCredits);
 
   const ratedCount = enriched.filter(r => r.imdbRating !== undefined).length;
   log.success(
@@ -178,26 +218,8 @@ export async function ingestOTTArrivals(
   log.info(`Fetching credits + audio languages...`);
   const withCredits = await enrichWithCreditsAndLanguages(withPlatforms);
 
-  log.info(`Enriching with OMDb...`);
-  const enriched = await Promise.all(
-    withCredits.map(async r => {
-      if (!r.imdbId) return r;
-      const omdb = await fetchOmdbByImdbId(r.imdbId);
-      if (!omdb) return r;
-      const mergedAudio = mergeAudioLanguages(r.audioLanguages, omdb.languages, r.title);
-      return {
-        ...r,
-        imdbRating: omdb.imdbRating,
-        imdbVotes: omdb.imdbVotes,
-        rottenTomatoes: omdb.rottenTomatoes,
-        director: omdb.director ?? r.director,
-        cast: omdb.cast.length > 0 ? omdb.cast : r.cast,
-        runtime: omdb.runtime ?? r.runtime,
-        ...(mergedAudio ? { audioLanguages: mergedAudio } : {}),
-        sources: Array.from(new Set([...r.sources, "omdb"])),
-      };
-    })
-  );
-  
+  log.info(`Enriching ratings with MDBList + OMDb...`);
+  const enriched = await enrichWithRatings(withCredits);
+
   return enriched;
 }

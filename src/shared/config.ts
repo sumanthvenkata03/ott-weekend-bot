@@ -8,6 +8,9 @@ const ConfigSchema = z.object({
   // Releases
   TMDB_API_KEY: z.string().min(1, "TMDB_API_KEY missing in .env"),
   OMDB_API_KEY: z.string().min(1, "OMDB_API_KEY missing in .env"),
+  // Optional richer ratings source — if unset, MDBList is skipped and OMDb
+  // supplies ratings. Must NOT hard-exit when missing.
+  MDBLIST_API_KEY: z.string().optional(),
   
   // News (later weeks, optional for now)
   YOUTUBE_API_KEY: z.string().optional(),

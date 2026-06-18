@@ -71,10 +71,16 @@ export interface Release {
   };
   subtitleLanguages: string[];
   
-  // Ratings (populated by OMDb in later step)
+  // Ratings (populated by MDBList primary + OMDb fallback in a later step)
   imdbRating?: number;
   imdbVotes?: number;
-  rottenTomatoes?: number;
+  rottenTomatoes?: number;       // RT critic % (kept name to avoid churn)
+  rtAudience?: number;           // RT audience % (MDBList "popcorn")
+  metacritic?: number;           // 0–100
+  letterboxd?: number;           // 0–5
+  /** Coverage-aware composite blended across available ratings (see mdblist.ts). */
+  tbsiScore?: number;            // 0–10, rounded to 1 decimal
+  tbsiSourceCount?: number;      // how many sources contributed to tbsiScore
 
   // TMDb buzz signals (from the discover result) — used to surface unrated
   // brand-new arrivals by curiosity when no IMDb rating exists yet.
