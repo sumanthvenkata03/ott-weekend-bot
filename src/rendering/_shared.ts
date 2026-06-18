@@ -133,9 +133,9 @@ export function buildTbsiRingText(release: {
   letterboxd?: number;
 }): string {
   const parts: string[] = [];
-  if (typeof release.imdbRating === "number") parts.push(`IMDb ${release.imdbRating}`);
+  if (typeof release.imdbRating === "number") parts.push(`IMDb ${release.imdbRating.toFixed(1)}`);
   if (typeof release.rottenTomatoes === "number") parts.push(`RT ${release.rottenTomatoes}%`);
   if (typeof release.metacritic === "number") parts.push(`MC ${release.metacritic}`);
-  if (typeof release.letterboxd === "number") parts.push(`LB ${release.letterboxd}`);
+  if (typeof release.letterboxd === "number") parts.push(`LB ${release.letterboxd.toFixed(1)}`);
   return parts.join(" · ");
 }
