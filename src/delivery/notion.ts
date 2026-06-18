@@ -6,6 +6,57 @@ import type { Release } from "../shared/types.js";
 
 const notion = new Client({ auth: config.NOTION_TOKEN });
 
+function notionErrMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Notion API errors carry a numeric HTTP `status`. 429 (rate limit) and 5xx are
+ * transient and worth a single retry; 4xx (validation) and everything else are
+ * not. Network/timeout errors carry no numeric status — we deliberately do NOT
+ * guess at those, so they fall through to the contextual log + re-throw rather
+ * than being retried on a fragile heuristic.
+ */
+function isTransientNotionError(err: unknown): boolean {
+  const status = (err as { status?: unknown }).status;
+  return status === 429 || (typeof status === "number" && status >= 500 && status <= 599);
+}
+
+/**
+ * Wrap the single `notion.pages.create` call each write function makes:
+ *  - On a transient error (429 / 5xx), wait briefly and retry ONCE.
+ *  - On any non-transient error, or a second failure, log the pillar context +
+ *    the Notion error message and RE-THROW.
+ * The point is a clear, contextual error (which pillar's Notion write failed and
+ * why), NOT suppression — the job's top-level catch must still fire the Slack
+ * failure alert.
+ */
+async function createNotionPage(
+  context: string,
+  args: Parameters<typeof notion.pages.create>[0]
+) {
+  try {
+    return await notion.pages.create(args);
+  } catch (err) {
+    if (isTransientNotionError(err)) {
+      log.warn(`Notion write for ${context} hit a transient error (${notionErrMsg(err)}); retrying once...`);
+      await sleep(1500);
+      try {
+        return await notion.pages.create(args);
+      } catch (retryErr) {
+        log.error(`Notion write for ${context} failed after retry: ${notionErrMsg(retryErr)}`);
+        throw retryErr;
+      }
+    }
+    log.error(`Notion write for ${context} failed: ${notionErrMsg(err)}`);
+    throw err;
+  }
+}
+
 export interface CompareDraft {
   pillar: "Thu Compare";
   weekendDates: string;
@@ -123,7 +174,7 @@ export async function writeCompareToNotion(draft: CompareDraft): Promise<string>
   const title = `Thu Compare — ${draft.filmA.title} vs ${draft.filmB.title}`;
   
   // Compare doesn't have a single verdict — leave Pending, the deciding line IS the verdict
-  const response = await notion.pages.create({
+  const response = await createNotionPage("Thu Compare", {
     parent: { database_id: config.NOTION_RELEASES_DB_ID },
     properties: {
       Name: { title: [{ text: { content: title } }] },
@@ -327,8 +378,8 @@ export async function writeMovementToNotion(
     });
 
   const title = `Mon Movement — ${draft.weekLabel}`;
-  
-  const response = await notion.pages.create({
+
+  const response = await createNotionPage("Mon Movement", {
     parent: { database_id: config.NOTION_RELEASES_DB_ID },
     properties: {
       Name: { title: [{ text: { content: title } }] },
@@ -517,7 +568,7 @@ export async function writeSundaySpotlightToNotion(
     ? Math.round(draft.film.imdbRating * 10)
     : null;
 
-  const response = await notion.pages.create({
+  const response = await createNotionPage("Sun Spotlight", {
     parent: { database_id: config.NOTION_RELEASES_DB_ID },
     properties: {
       Name: { title: [{ text: { content: title } }] },
@@ -691,8 +742,8 @@ export async function writeWednesdayDropToNotion(
     ? ratings.reduce((a, b) => a + b, 0) / ratings.length
     : null;
   const hypeScore = avgRating !== null ? Math.round(avgRating * 10) : null;
-  
-  const response = await notion.pages.create({
+
+  const response = await createNotionPage("Wed Drop", {
     parent: { database_id: config.NOTION_RELEASES_DB_ID },
     properties: {
       Name: {
@@ -922,8 +973,8 @@ export async function writeSaturdayVerdictToNotion(
       },
     },
   ]);
-  
-  const response = await notion.pages.create({
+
+  const response = await createNotionPage("Sat Verdict", {
     parent: { database_id: config.NOTION_RELEASES_DB_ID },
     properties: {
       Name: { title: [{ text: { content: title } }] },

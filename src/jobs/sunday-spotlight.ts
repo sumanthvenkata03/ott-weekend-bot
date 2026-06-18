@@ -75,13 +75,25 @@ async function main() {
     { localPath: renderResult.card2Path,     r2Key: `sun-spotlight/${dateStr}/card-02.png` },
   ]);
 
+  // Write to Notion. If this throws, the R2 uploads above are already written
+  // (immutable, 1-year cache) — log the orphaned keys for traceability, then
+  // re-throw so the job's catch still fires the Slack failure alert.
   log.info("Writing Notion draft...");
-  const url = await writeSundaySpotlightToNotion(draft, {
-    coverFeed: coverFeed.publicUrl,
-    coverReel: coverReel.publicUrl,
-    card1: card1.publicUrl,
-    card2: card2.publicUrl,
-  });
+  let url: string;
+  try {
+    url = await writeSundaySpotlightToNotion(draft, {
+      coverFeed: coverFeed.publicUrl,
+      coverReel: coverReel.publicUrl,
+      card1: card1.publicUrl,
+      card2: card2.publicUrl,
+    });
+  } catch (err) {
+    log.warn(
+      `Notion write failed after R2 upload — 4 orphaned R2 object(s) ` +
+      `(immutable, 1-year cache): ${[coverFeed, coverReel, card1, card2].map(u => u?.key).join(", ")}`
+    );
+    throw err;
+  }
 
   log.info("Sending Slack notification...");
   await notifyDraftReady({

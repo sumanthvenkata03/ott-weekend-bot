@@ -103,9 +103,20 @@ async function main() {
     imageUrls[`card${i + 1}`] = upload.publicUrl;
   });
 
-  // Write to Notion
+  // Write to Notion. If this throws, the R2 uploads above are already written
+  // (immutable, 1-year cache) — log the orphaned keys for traceability, then
+  // re-throw so the job's catch still fires the Slack failure alert.
   log.info("Writing Notion draft...");
-  const url = await writeMovementToNotion(draft, imageUrls);
+  let url: string;
+  try {
+    url = await writeMovementToNotion(draft, imageUrls);
+  } catch (err) {
+    log.warn(
+      `Notion write failed after R2 upload — ${uploads.length} orphaned R2 object(s) ` +
+      `(immutable, 1-year cache): ${uploads.map(u => u.key).join(", ")}`
+    );
+    throw err;
+  }
 
   // Slack with cover preview + all 5 card previews
   log.info("Sending Slack notification...");
