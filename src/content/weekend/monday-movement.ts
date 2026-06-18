@@ -1,23 +1,45 @@
 // src/content/weekend/monday-movement.ts
 import { format, parseISO } from "date-fns";
+import { z } from "zod";
 import { callClaudeJSON } from "../claude.js";
 import { log } from "../../shared/logger.js";
 import type { Release } from "../../shared/types.js";
 import type { MovementDraft } from "../../delivery/notion.js";
 import { notableComposersBlock, enrichmentBlock } from "./_shared.js";
 
-interface LLMOutput {
-  weekHeadline: string;
-  caption: string;
-  hashtags: string[];
-  carouselSlides: {
-    slideNumber: number;
-    type: "cover" | "headline" | "arrival" | "gem" | "cta";
-    title: string;
-    body: string;
-    isMusicDirectorNotable?: boolean;
-  }[];
-}
+const MovementSlideSchema = z.object({
+  slideNumber: z.number(),
+  type: z.enum(["cover", "headline", "arrival", "gem", "cta"]),
+  title: z.string(),
+  body: z.string(),
+  // .default(false) (not .optional()) so the inferred type is a required boolean,
+  // which stays assignable to MovementSlide's exact-optional isMusicDirectorNotable
+  // under exactOptionalPropertyTypes. Missing in the reply → coerced to false.
+  isMusicDirectorNotable: z.boolean().default(false),
+});
+
+// Mon's design contract — folded into the schema so a wrong count/mix triggers
+// the retry instead of a late throw: carouselSlides is empty (LLM judged the week
+// not worth a post) OR contains exactly 5 arrival/gem body slides with ≥1 of each
+// variant. The title↔Release matching guard below is cross-referential and stays
+// as a business guard (zod can't see the input film list).
+const MonMovementSchema = z.object({
+  weekHeadline: z.string(),
+  caption: z.string(),
+  hashtags: z.array(z.string()),
+  carouselSlides: z.array(MovementSlideSchema).refine(
+    slides => {
+      if (slides.length === 0) return true;
+      const body = slides.filter(s => s.type === "arrival" || s.type === "gem");
+      const arrivals = body.filter(s => s.type === "arrival").length;
+      const gems = body.filter(s => s.type === "gem").length;
+      return body.length === 5 && arrivals >= 1 && gems >= 1;
+    },
+    { message: "carouselSlides must be empty (skip) or have exactly 5 arrival/gem body slides with ≥1 of each variant" }
+  ),
+});
+
+type LLMOutput = z.infer<typeof MonMovementSchema>;
 
 function releaseForPrompt(r: Release, isArrival: boolean): string {
   return [
@@ -123,7 +145,7 @@ Acceptable headline shapes:
 
 Not acceptable: headline that only mentions arrivals when gems exist, or only mentions gems when arrivals exist.`;
   
-  const output = await callClaudeJSON<LLMOutput>(prompt, "sonnet");
+  const output = await callClaudeJSON(prompt, MonMovementSchema, "sonnet");
 
   // Runtime guard: design contract is exactly 5 body slides (arrival + gem types
   // combined) with at least 1 of each variant. OR carouselSlides: [] (LLM judged

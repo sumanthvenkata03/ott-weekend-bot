@@ -1,22 +1,35 @@
 // src/content/weekend/wednesday-drop.ts
 import { format, parseISO } from "date-fns";
+import { z } from "zod";
 import { callClaudeJSON } from "../claude.js";
 import { log } from "../../shared/logger.js";
 import type { Release } from "../../shared/types.js";
 import type { WednesdayDropDraft } from "../../delivery/notion.js";
 import { notableComposersBlock, enrichmentBlock } from "./_shared.js";
 
-interface LLMOutput {
-  caption: string;
-  hashtags: string[];
-  carouselSlides: {
-    slideNumber: number;
-    type: "cover" | "index" | "release" | "cta";
-    title: string;
-    body: string;
-    isMusicDirectorNotable?: boolean;
-  }[];
-}
+const WedDropSlideSchema = z.object({
+  slideNumber: z.number(),
+  type: z.enum(["cover", "index", "release", "cta"]),
+  title: z.string(),
+  body: z.string(),
+  // .default(false) (not .optional()) so the inferred type is a required boolean,
+  // assignable to WedDropSlide's exact-optional isMusicDirectorNotable.
+  isMusicDirectorNotable: z.boolean().default(false),
+});
+
+// Wed's design contract folded into the schema (wrong count → retry): empty
+// (skip the pillar) OR exactly 4 'release' slides. Title↔Release matching stays
+// a cross-referential business guard below.
+const WedDropSchema = z.object({
+  caption: z.string(),
+  hashtags: z.array(z.string()),
+  carouselSlides: z.array(WedDropSlideSchema).refine(
+    slides => slides.length === 0 || slides.filter(s => s.type === "release").length === 4,
+    { message: "carouselSlides must be empty (skip) or contain exactly 4 'release' slides" }
+  ),
+});
+
+type LLMOutput = z.infer<typeof WedDropSchema>;
 
 /**
  * Format a release for the LLM in a compact, structured way.
@@ -120,7 +133,7 @@ recognizable name, just use those.
 
 Be specific. Take stands. Lean South-heavy where the films justify it.`;
   
-  const output = await callClaudeJSON<LLMOutput>(prompt, "sonnet");
+  const output = await callClaudeJSON(prompt, WedDropSchema, "sonnet");
 
   // Runtime guard: design contract is exactly 4 release slides, OR all-empty
   // (the "skip the pillar this week" branch). Anything else is a prompt regression.

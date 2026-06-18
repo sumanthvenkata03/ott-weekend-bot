@@ -1,26 +1,32 @@
 // src/content/weekend/thursday-compare.ts
 import { format, parseISO } from "date-fns";
+import { z } from "zod";
 import { callClaudeJSON } from "../claude.js";
 import { log } from "../../shared/logger.js";
 import type { Release } from "../../shared/types.js";
 import type { CompareDraft } from "../../delivery/notion.js";
 
-interface LLMOutput {
-  caption: string;
-  hashtags: string[];
-  pinnedCommentSeed: string;
-  reelScript: {
-    hook: string;
-    filmABeats: string[];
-    filmBBeats: string[];
-    decidingLine: string;
-    cta: string;
-    onScreenText: string[];
-    visualDirection: string;
-    suggestedAudioMood: string;
-    coverFrameText: string;
-  };
-}
+// Compare reel: a fixed single-object shape (no array-count contract — the A/B
+// beat lists are soft-guided in the prompt, so they're validated as string arrays
+// without a strict length to avoid false retries). All fields required.
+const ThursdayCompareSchema = z.object({
+  caption: z.string(),
+  hashtags: z.array(z.string()),
+  pinnedCommentSeed: z.string(),
+  reelScript: z.object({
+    hook: z.string(),
+    filmABeats: z.array(z.string()),
+    filmBBeats: z.array(z.string()),
+    decidingLine: z.string(),
+    cta: z.string(),
+    onScreenText: z.array(z.string()),
+    visualDirection: z.string(),
+    suggestedAudioMood: z.string(),
+    coverFrameText: z.string(),
+  }),
+});
+
+type LLMOutput = z.infer<typeof ThursdayCompareSchema>;
 
 function releaseForPrompt(r: Release, label: "A" | "B"): string {
   return [
@@ -91,7 +97,7 @@ IMPORTANT:
 - The deciding line is the post's spine. Spend the most thinking budget there.
 - Pinned comment must take a side. Neutrality on a Thu Compare is content failure.`;
   
-  const output = await callClaudeJSON<LLMOutput>(prompt, "opus");
+  const output = await callClaudeJSON(prompt, ThursdayCompareSchema, "opus");
   
   return {
     pillar: "Thu Compare",

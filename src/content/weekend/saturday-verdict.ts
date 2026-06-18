@@ -1,29 +1,43 @@
 // src/content/weekend/saturday-verdict.ts
 import { format, parseISO } from "date-fns";
+import { z } from "zod";
 import { callClaudeJSON } from "../claude.js";
 import { log } from "../../shared/logger.js";
 import type { Release } from "../../shared/types.js";
 import type { SaturdayVerdictDraft, VerdictSlide } from "../../delivery/notion.js";
 import { notableComposersBlock, enrichmentBlock } from "./_shared.js";
 
-interface LLMOutput {
-  caption: string;
-  hashtags: string[];
-  hotTake: string;
-  verdicts: {
-    filmTitle: string;
-    language: string;
-    platform: string[];
-    verdict: "🔥 Must Watch" | "👀 Worth a Try" | "⏭️ Skip";
-    oneLineVerdict: string;
-    watchIf: string;
-    skipIf: string;
-    whereItWins: string;
-    whereItLoses: string;
-    watchSetup: string;
-    isMusicDirectorNotable?: boolean;
-  }[];
-}
+const VerdictSchema = z.object({
+  filmTitle: z.string(),
+  language: z.string(),
+  platform: z.array(z.string()),
+  verdict: z.enum(["🔥 Must Watch", "👀 Worth a Try", "⏭️ Skip"]),
+  oneLineVerdict: z.string(),
+  watchIf: z.string(),
+  skipIf: z.string(),
+  whereItWins: z.string(),
+  whereItLoses: z.string(),
+  watchSetup: z.string(),
+  // .optional() is fine here: this verdict array is mapped element-by-element
+  // (not assigned wholesale to an exact-optional target), and the flag is only
+  // read in a conditional — so boolean | undefined causes no drift.
+  isMusicDirectorNotable: z.boolean().optional(),
+});
+
+// Sat's card-count contract folded into the schema (wrong count → retry): empty
+// (skip the weekend) OR 3–5 verdicts. The filmTitle/language/platform-match-input
+// rule is prompt guidance the renderer tolerates, so it stays out of the schema.
+const SaturdayVerdictSchema = z.object({
+  caption: z.string(),
+  hashtags: z.array(z.string()),
+  hotTake: z.string(),
+  verdicts: z.array(VerdictSchema).refine(
+    v => v.length === 0 || (v.length >= 3 && v.length <= 5),
+    { message: "verdicts must be empty (skip) or contain 3–5 items" }
+  ),
+});
+
+type LLMOutput = z.infer<typeof SaturdayVerdictSchema>;
 
 function releaseForPrompt(r: Release): string {
   const lines = [
@@ -140,7 +154,7 @@ OTHER:
 - If a film has no IMDb rating yet (unreleased), make your call based on director track record, cast, genre, synopsis. Be specific about why.
 - The "filmTitle", "language", "platform" fields must match the input exactly.`;
   
-  const output = await callClaudeJSON<LLMOutput>(prompt, "opus");
+  const output = await callClaudeJSON(prompt, SaturdayVerdictSchema, "opus");
   
   // Map output to typed VerdictSlide[]
   const verdicts: VerdictSlide[] = output.verdicts.map(v => ({

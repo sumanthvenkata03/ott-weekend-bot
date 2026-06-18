@@ -1,25 +1,31 @@
 // src/content/weekend/sunday-spotlight.ts
 import { format, parseISO } from "date-fns";
+import { z } from "zod";
 import { callClaudeJSON } from "../claude.js";
 import { log } from "../../shared/logger.js";
 import type { Release } from "../../shared/types.js";
 import type { SundaySpotlightDraft } from "../../delivery/notion.js";
 import { notableComposersBlock } from "./_shared.js";
 
-interface LLMOutput {
-  caption: string;
-  hashtags: string[];
-  reelScript: {
-    hook: string;
-    whyItWorks: string;
-    watchNote: string;
-    cta: string;
-    onScreenText: string[];
-    visualDirection: string;
-  };
-  caseAgainstSkepticism: string;
-  isMusicDirectorNotable?: boolean;
-}
+// Single-film spotlight: no count constraint, just the required shape. reelScript
+// fields are all required (it's assigned wholesale to the draft), so z.infer keeps
+// them required; only the top-level flag is optional (read in a conditional).
+const SundaySpotlightSchema = z.object({
+  caption: z.string(),
+  hashtags: z.array(z.string()),
+  reelScript: z.object({
+    hook: z.string(),
+    whyItWorks: z.string(),
+    watchNote: z.string(),
+    cta: z.string(),
+    onScreenText: z.array(z.string()),
+    visualDirection: z.string(),
+  }),
+  caseAgainstSkepticism: z.string(),
+  isMusicDirectorNotable: z.boolean().optional(),
+});
+
+type LLMOutput = z.infer<typeof SundaySpotlightSchema>;
 
 export async function generateSundaySpotlight(
   film: Release,
@@ -89,7 +95,7 @@ aligned. If leadCast already contains the recognizable name, just use those.
 
 The film's language is ${film.language}. The audience you're persuading defaults to Hindi/English content. The CTA must feel like a dare, not a request.`;
   
-  const output = await callClaudeJSON<LLMOutput>(prompt, "opus");
+  const output = await callClaudeJSON(prompt, SundaySpotlightSchema, "opus");
   
   return {
     pillar: "Sun Spotlight",

@@ -1,6 +1,7 @@
 // src/content/claude.ts
 import Anthropic from "@anthropic-ai/sdk";
 import { spawn } from "node:child_process";
+import { z } from "zod";
 import { config } from "../shared/config.js";
 import { log } from "../shared/logger.js";
 
@@ -106,24 +107,64 @@ export async function callClaude(prompt: string, model: ModelChoice = "sonnet"):
 }
 
 /**
- * JSON variant. Same routing + model selection.
+ * JSON variant. Same routing + model selection, PLUS runtime validation.
+ *
+ * The caller supplies a zod schema describing the expected shape. The raw reply
+ * is fence-stripped, JSON.parsed, then schema-validated. If either step fails,
+ * we re-ask ONCE with a corrective nudge (same model) so a transient bad reply
+ * self-heals instead of throwing a TypeError deep inside a generator. If the
+ * retry also fails we throw a descriptive Error (zod issues + a raw snippet) so
+ * the job's Slack failure alert is actionable.
  */
-export async function callClaudeJSON<T>(prompt: string, model: ModelChoice = "sonnet"): Promise<T> {
-  const wrapped = `${prompt}
+export async function callClaudeJSON<T>(
+  prompt: string,
+  schema: z.ZodType<T>,
+  model: ModelChoice = "sonnet"
+): Promise<T> {
+  const baseInstruction = `
 
 CRITICAL: Respond with ONLY valid JSON. No prose before or after. No markdown code fences. Just the raw JSON object.`;
-  
-  const raw = await callClaude(wrapped, model);
-  
-  const cleaned = raw
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/```\s*$/i, "")
-    .trim();
-  
-  try {
-    return JSON.parse(cleaned) as T;
-  } catch (err) {
-    log.error("Claude returned non-JSON response", cleaned.slice(0, 500));
-    throw new Error(`Failed to parse Claude JSON: ${err instanceof Error ? err.message : err}`);
-  }
+
+  // One attempt: call Claude, strip fences, JSON.parse, schema.safeParse.
+  const attempt = async (
+    fullPrompt: string
+  ): Promise<{ ok: true; value: T } | { ok: false; reason: string; raw: string }> => {
+    const raw = await callClaude(fullPrompt, model);
+
+    const cleaned = raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .trim();
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (err) {
+      return { ok: false, raw: cleaned, reason: `invalid JSON (${err instanceof Error ? err.message : String(err)})` };
+    }
+
+    const result = schema.safeParse(parsed);
+    if (!result.success) {
+      return { ok: false, raw: cleaned, reason: `schema validation failed: ${JSON.stringify(result.error.issues).slice(0, 300)}` };
+    }
+    return { ok: true, value: result.data };
+  };
+
+  // Attempt 1
+  const first = await attempt(`${prompt}${baseInstruction}`);
+  if (first.ok) return first.value;
+
+  // Attempt 2 — re-ask once with a corrective nudge (same model)
+  log.warn(`callClaudeJSON: invalid output, retrying once (${first.reason})`);
+  const corrective = `${prompt}${baseInstruction}
+
+Your previous reply was invalid: ${first.reason}. Respond with ONLY valid JSON matching the required structure — no prose, no code fences.`;
+  const second = await attempt(corrective);
+  if (second.ok) return second.value;
+
+  throw new Error(
+    `callClaudeJSON failed after one retry. ` +
+    `Attempt 1: ${first.reason}. Attempt 2: ${second.reason}. ` +
+    `Raw response snippet: ${second.raw.slice(0, 300)}`
+  );
 }
