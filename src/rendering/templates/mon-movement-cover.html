@@ -191,6 +191,96 @@
     letter-spacing: 1px;
     color: var(--ink);
   }
+
+  /* ── Swipe affordances (additive) ── */
+
+  /* A — centered swipe cue, sits in the band above the footer rule */
+  .swipe-cue {
+    position: absolute;
+    left: 70px;
+    right: 70px;
+    bottom: 116px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+  }
+  .swipe-cue-rule {
+    width: 64px;
+    height: 1px;
+    background: var(--vermillion);
+  }
+  .swipe-cue-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--vermillion);
+    white-space: nowrap;
+  }
+
+  /* B — page-turn dog-ear, pinned to the cover's true bottom-right corner */
+  .page-turn {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    z-index: 6;
+    pointer-events: none;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+  }
+  .page-turn-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--vermillion);
+    margin-bottom: 8px;
+  }
+  .page-turn-svg .tri { fill: var(--brass); }
+  .page-turn-svg .fold-line { stroke: var(--ink); stroke-width: 1; }
+  .page-turn-svg .turn-arrow {
+    fill: var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+  }
+
+  /* D — chevron-trail gutter: translucent veil over the grid's right edge */
+  .swipe-gutter {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 19%;
+    z-index: 5;
+    pointer-events: none;
+    background: rgba(26, 22, 20, 0.40);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .swipe-gutter .chev { display: block; }
+  .swipe-gutter .chev-1 { opacity: 0.6; }
+  .swipe-gutter .chev-2 { opacity: 0.8; }
+  .swipe-gutter .chev-3 { opacity: 1.0; }
+  .swipe-gutter .chev path {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  /* dark underlay halo — legibility over bright posters; does NOT touch the veil */
+  .swipe-gutter .chev .chev-halo {
+    stroke: #1A1614;
+    stroke-width: 13;
+    opacity: 0.45;
+  }
+  .swipe-gutter .chev .chev-line {
+    stroke: #F4ECDC;
+    stroke-width: 9;
+  }
 </style>
 </head>
 <body>
@@ -223,11 +313,44 @@
       </div>
     </div>
     {% endif %}{% endfor %}
+
+    <!-- D — chevron-trail gutter: translucent veil over the grid's right edge -->
+    <div class="swipe-gutter">
+      <svg class="chev chev-1" viewBox="0 0 36 72" width="36" height="72" aria-hidden="true">
+        <path class="chev-halo" d="M11 14 L27 36 L11 58" />
+        <path class="chev-line" d="M11 14 L27 36 L11 58" />
+      </svg>
+      <svg class="chev chev-2" viewBox="0 0 36 72" width="36" height="72" aria-hidden="true">
+        <path class="chev-halo" d="M11 14 L27 36 L11 58" />
+        <path class="chev-line" d="M11 14 L27 36 L11 58" />
+      </svg>
+      <svg class="chev chev-3" viewBox="0 0 36 72" width="36" height="72" aria-hidden="true">
+        <path class="chev-halo" d="M11 14 L27 36 L11 58" />
+        <path class="chev-line" d="M11 14 L27 36 L11 58" />
+      </svg>
+    </div>
+  </div>
+
+  <!-- A — centered swipe cue, just above the footer rule -->
+  <div class="swipe-cue">
+    <span class="swipe-cue-rule"></span>
+    <span class="swipe-cue-text">{% if (arrivalCount + gemCount) >= 2 %}SWIPE FOR ALL {{ arrivalCount + gemCount }} →{% else %}SWIPE  →{% endif %}</span>
+    <span class="swipe-cue-rule"></span>
   </div>
 
   <div class="footer">
     <span class="brand">★ MON MOVEMENT · {{ arrivalCount }} NEW · {{ gemCount }} {{ "GEM" | pluralize(gemCount, "GEMS") }} ★</span>
     <span class="meta">{{ weekLabel }}</span>
+  </div>
+
+  <!-- B — page-turn dog-ear, true bottom-right corner of the cover -->
+  <div class="page-turn">
+    <span class="page-turn-label">TURN</span>
+    <svg class="page-turn-svg" width="64" height="64" viewBox="0 0 64 64" aria-hidden="true">
+      <path class="tri" d="M64 0 L64 64 L0 64 Z" />
+      <line class="fold-line" x1="64" y1="0" x2="0" y2="64" />
+      <text class="turn-arrow" x="46" y="52" text-anchor="middle">&#8594;</text>
+    </svg>
   </div>
 
 </div>
