@@ -102,15 +102,15 @@ export async function getMdblistRatings(imdbId: string): Promise<MdblistRatings 
 }
 
 // ─── TBSI Score (coverage-aware composite) ──────────────────────────────────
-// Included sources for the blend (TUNABLE). rtAudience is deliberately EXCLUDED
-// — it correlates with imdb/letterboxd audience sentiment and would double-count
-// — but it is still stored on the Release as data.
-//
-// Caveat: RT critic (rottenTomatoes) is %-positive (the share of positive
-// reviews), NOT a quality average, so this blend is deliberately rough. It is
-// coverage-aware — the mean of whatever included sources are AVAILABLE — and the
-// contributing source count is tracked alongside so the UI can show confidence.
-export const TBSI_INCLUDED_SOURCES = ["imdb", "rtCritic(rottenTomatoes)", "metacritic", "letterboxd"] as const;
+// Blended sources (TUNABLE): the AVERAGE-RATING magnitudes ONLY — imdb,
+// metacritic, letterboxd. RT critic (rottenTomatoes) and RT audience are
+// "% of critics/audience positive" CONSENSUS metrics, not quality magnitudes
+// (a 95% Tomatometer ≠ 9.5/10), so averaging them with magnitude ratings would
+// compare different constructs. They are kept as displayed data on the stamp but
+// EXCLUDED from the blend. Coverage-aware: the mean of whatever blended sources
+// are AVAILABLE, with the contributing source count tracked so the UI can show
+// confidence.
+export const TBSI_INCLUDED_SOURCES = ["imdb", "metacritic", "letterboxd"] as const;
 
 /**
  * Merge ratings with MDBList PRIMARY, OMDb filling gaps, and any existing value
@@ -132,23 +132,27 @@ export function mergeRatings(
 }
 
 /**
- * Compute the coverage-aware TBSI Score from already-merged ratings. Normalizes
- * each available included source to 0–10, averages them, rounds to 1 decimal,
- * and reports how many contributed. 0 included sources → both undefined.
+ * Compute the coverage-aware TBSI Score from already-merged ratings. Blends ONLY
+ * the average-rating magnitudes — imdb (0–10 as-is), metacritic/10, letterboxd*2
+ * — normalized to 0–10, averaged, rounded to 1 decimal, with a count of how many
+ * contributed. RT critic % is accepted (so callers can pass the full merged
+ * object) but deliberately NOT blended; RT audience isn't even a parameter. See
+ * the header comment for why % positive consensus metrics are excluded.
+ * 0 blended sources → both undefined.
  */
 export function computeTbsiScore(r: {
   // `| undefined` so callers can pass merged `number | undefined` locals directly
   // under exactOptionalPropertyTypes.
-  imdbRating?: number | undefined;      // 0–10
-  rottenTomatoes?: number | undefined;  // RT critic, 0–100
-  metacritic?: number | undefined;      // 0–100
-  letterboxd?: number | undefined;      // 0–5
+  imdbRating?: number | undefined;      // 0–10  (blended, as-is)
+  rottenTomatoes?: number | undefined;  // RT critic %, 0–100 — received but NOT blended
+  metacritic?: number | undefined;      // 0–100 (blended, /10)
+  letterboxd?: number | undefined;      // 0–5   (blended, *2)
 }): { tbsiScore?: number; tbsiSourceCount?: number } {
   const normalized: number[] = [];
-  if (typeof r.imdbRating === "number") normalized.push(r.imdbRating);             // already 0–10
-  if (typeof r.rottenTomatoes === "number") normalized.push(r.rottenTomatoes / 10); // 0–100 → 0–10
-  if (typeof r.metacritic === "number") normalized.push(r.metacritic / 10);         // 0–100 → 0–10
-  if (typeof r.letterboxd === "number") normalized.push(r.letterboxd * 2);          // 0–5  → 0–10
+  if (typeof r.imdbRating === "number") normalized.push(r.imdbRating);       // already 0–10
+  if (typeof r.metacritic === "number") normalized.push(r.metacritic / 10);  // 0–100 → 0–10
+  if (typeof r.letterboxd === "number") normalized.push(r.letterboxd * 2);   // 0–5  → 0–10
+  // rottenTomatoes (RT critic %) intentionally NOT pushed — % positive, not a magnitude.
 
   if (normalized.length === 0) return {};
   const mean = normalized.reduce((a, b) => a + b, 0) / normalized.length;
