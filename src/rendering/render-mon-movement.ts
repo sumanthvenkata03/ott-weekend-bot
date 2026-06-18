@@ -19,6 +19,7 @@ import {
   hasMetadataLine2,
   hasReleasedSection,
   hasLanguagesSection,
+  buildTbsiRingText,
 } from "./_shared.js";
 
 /**
@@ -204,6 +205,12 @@ export async function renderMonMovement(
       hasReleased: hasReleasedSection(enrichedRelease),
       hasLanguages: hasLanguagesSection(enrichedRelease),
     });
+    // TBSI stamp (display-only) — only when the release carries a score.
+    // tbsiScore formatted to 1 decimal; ring text lists only present sources.
+    const tbsiCtx = release.tbsiScore !== undefined
+      ? { tbsiScore: release.tbsiScore.toFixed(1), tbsiRingText: buildTbsiRingText(release) }
+      : {};
+
     const cardCtx: MonMovementCardContext = {
       ...baseCtx,
       title: cleanTitle,
@@ -214,6 +221,7 @@ export async function renderMonMovement(
       totalSlots: bodySlides.length,
       ...platformStyle,
       density,
+      ...tbsiCtx,
     };
     const cardPath = `${outputDir}/mon-movement-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
     await renderToPNG({
@@ -267,6 +275,9 @@ if (isMainModule) {
         audioLanguages: { original: "Malayalam", dubbed: ["Tamil", "Telugu"] },
         releaseDates: { theatrical: "2026-05-10", ott: "2026-05-20" },
         synopsis: "Siblings clean out their late mother's house.",
+        // Sample ratings — 4-source stamp (tbsiScore 8.2)
+        tbsiScore: 8.2, tbsiSourceCount: 4,
+        imdbRating: 8.8, rottenTomatoes: 87, metacritic: 74, letterboxd: 4.2,
         subtitleLanguages: ["English"],
         sources: ["TMDb"], fetchedAt: new Date().toISOString(),
       },
@@ -290,6 +301,8 @@ if (isMainModule) {
         audioLanguages: { original: "Tamil", dubbed: ["Telugu"] },
         releaseDates: { ott: "2026-05-22" },
         synopsis: "Small-town election thriller.",
+        // Sample ratings — 1-source stamp (tbsiScore 6.9, IMDb only)
+        tbsiScore: 6.9, tbsiSourceCount: 1, imdbRating: 6.9,
         subtitleLanguages: ["English"],
         sources: ["TMDb"], fetchedAt: new Date().toISOString(),
       },
@@ -304,6 +317,9 @@ if (isMainModule) {
         audioLanguages: { original: "Malayalam", dubbed: ["Tamil", "Telugu", "Hindi"] },
         releaseDates: { theatrical: "2024-02-22", ott: "2024-04-05" },
         synopsis: "Friends trapped in caves during a Kodaikanal trip.",
+        // Sample ratings — 4-source stamp on a GEM card (tbsiScore 8.5)
+        tbsiScore: 8.5, tbsiSourceCount: 4,
+        imdbRating: 8.4, rottenTomatoes: 90, metacritic: 78, letterboxd: 4.3,
         subtitleLanguages: ["English"],
         sources: ["TMDb"], fetchedAt: new Date().toISOString(),
       },

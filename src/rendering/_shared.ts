@@ -118,3 +118,24 @@ export function hasReleasedSection(release: CardEnrichment): boolean {
 export function hasLanguagesSection(release: CardEnrichment): boolean {
   return Boolean(release.audioLanguages && release.audioLanguages.original);
 }
+
+/**
+ * TBSI stamp — bottom-arc text: only the ratings that exist, joined by " · "
+ * in a fixed order (IMDb, RT%, MC, LB). Values are shown as-is (the tbsiScore
+ * itself is formatted to 1 decimal by the caller). Returns "" if none present.
+ *   4 sources → "IMDb 8.8 · RT 87% · MC 74 · LB 4.2"
+ *   1 source  → "IMDb 6.9"
+ */
+export function buildTbsiRingText(release: {
+  imdbRating?: number;
+  rottenTomatoes?: number;
+  metacritic?: number;
+  letterboxd?: number;
+}): string {
+  const parts: string[] = [];
+  if (typeof release.imdbRating === "number") parts.push(`IMDb ${release.imdbRating}`);
+  if (typeof release.rottenTomatoes === "number") parts.push(`RT ${release.rottenTomatoes}%`);
+  if (typeof release.metacritic === "number") parts.push(`MC ${release.metacritic}`);
+  if (typeof release.letterboxd === "number") parts.push(`LB ${release.letterboxd}`);
+  return parts.join(" · ");
+}
