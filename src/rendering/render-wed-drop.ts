@@ -7,6 +7,7 @@ import { format } from "date-fns";
 import { log } from "../shared/logger.js";
 import type { WednesdayDropDraft, WedDropSlide } from "../delivery/notion.js";
 import type { Release } from "../shared/types.js";
+import { EDITION_META, type WedDropEdition } from "../shared/wed-drop-edition.js";
 import type {
   WedDropCoverContext,
   WedDropCardContext,
@@ -19,7 +20,7 @@ import {
   hasMetadataLine2,
   hasReleasedSection,
   hasLanguagesSection,
-  buildTbsiRingText,
+  buildStampContext,
 } from "./_shared.js";
 
 /**
@@ -75,9 +76,11 @@ export interface RenderResult {
 export async function renderWedDrop(
   draft: WednesdayDropDraft,
   issueNumber: string | number,
+  edition: WedDropEdition,
   outputDir = "output/posts"
 ): Promise<RenderResult> {
-  log.info(`Rendering Wed Drop — Issue №${issueNumber}`);
+  const meta = EDITION_META[edition];
+  log.info(`Rendering Wed Drop [${edition}] — Issue №${issueNumber}`);
 
   // The LLM outputs slides typed cover / index / release / cta.
   // For rendering we care about: cover (slide 1) → headline, release slides → body cards.
@@ -93,13 +96,16 @@ export async function renderWedDrop(
     date: format(today, "yyyy-MM-dd"),
     displayDate: format(today, "dd·MM·yy"),
     pillarLabel: "WED DROP" as const,
+    editionLabel: meta.mastheadLabel,
   };
 
-  await cleanOldRenders(outputDir, baseCtx.date);
+  // Scope the stale-render sweep to THIS edition's files so the two editions
+  // (same date) don't delete each other's PNGs.
+  await cleanOldRenders(outputDir, `${meta.slug}-${baseCtx.date}`);
 
   // 1. Cover: shows up to 4 films in a 2x2 grid + the LLM's cover headline
   const gridItems = draft.releases.slice(0, 4).map(buildGridItem);
-  const coverPath = `${outputDir}/wed-drop-${baseCtx.date}-cover.png`;
+  const coverPath = `${outputDir}/wed-drop-${meta.slug}-${baseCtx.date}-cover.png`;
   const coverCtx: WedDropCoverContext = {
     ...baseCtx,
     weekendDates: draft.weekendDates,
@@ -146,11 +152,6 @@ export async function renderWedDrop(
       hasReleased: hasReleasedSection(enrichedRelease),
       hasLanguages: hasLanguagesSection(enrichedRelease),
     });
-    // TBSI stamp (display-only) — only when the release carries a score.
-    // tbsiScore formatted to 1 decimal; ring text lists only present sources.
-    const tbsiCtx = release.tbsiScore !== undefined
-      ? { tbsiScore: release.tbsiScore.toFixed(1), tbsiRingText: buildTbsiRingText(release) }
-      : {};
     const cardCtx: WedDropCardContext = {
       ...baseCtx,
       title: slide.title,
@@ -160,9 +161,9 @@ export async function renderWedDrop(
       totalSlots: releaseSlides.length,
       ...platformStyle,
       density,
-      ...tbsiCtx,
+      ...buildStampContext(release),
     };
-    const cardPath = `${outputDir}/wed-drop-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
+    const cardPath = `${outputDir}/wed-drop-${meta.slug}-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
     await renderToPNG({
       templateName: "wed-drop-card",
       data: cardCtx as unknown as Record<string, unknown>,
@@ -181,61 +182,117 @@ const isMainModule = import.meta.url.endsWith(
 );
 
 if (isMainModule) {
-  const sampleDraft: WednesdayDropDraft = {
+  // Standalone render check for BOTH editions (NO LLM, sample data only).
+  // Builds a theatrical-only sample and an OTT-only sample so the masthead
+  // labels (IN THEATERS vs NOW STREAMING), the RELEASED marquee, and the
+  // "SWIPE FOR ALL {n}" count can be eyeballed per edition. Also exercises the
+  // graceful <4-film cover and the 0-film skip guard.
+
+  // Compact Release factory — fills required fields; override per film.
+  const mk = (
+    over: Partial<Release> & { id: string; title: string; language: Release["language"] }
+  ): Release => ({
+    isSeries: false,
+    platform: [],
+    releaseDate: "2026-06-19",
+    genre: ["Drama"],
+    cast: [],
+    synopsis: "Sample synopsis for a standalone render check.",
+    subtitleLanguages: ["English"],
+    sources: ["TMDb"],
+    fetchedAt: new Date().toISOString(),
+    ...over,
+  });
+
+  // Assemble a draft from a cover + a list of { body, release } picks.
+  const draftOf = (
+    weekendDates: string,
+    cover: { title: string; body: string },
+    items: Array<{ body: string; release: Release }>
+  ): WednesdayDropDraft => ({
     pillar: "Wed Drop",
-    weekendDates: "May 16 — May 18, 2026",
-    caption: "Eight films. Five languages. Skip the Hindi blockbuster, watch the Malayalam grief drama.",
-    hashtags: "#OTTReleases #WeekendWatch",
+    weekendDates,
+    caption: `${cover.title} — ${cover.body}`,
+    hashtags: "#WeekendWatch #TBSI",
     carouselSlides: "(legacy markdown blob)",
     slides: [
-      { slideNumber: 1, type: "cover", title: "8 films. 5 languages.", body: "Your weekend, sorted." },
-      { slideNumber: 2, type: "index", title: "This weekend", body: "Pennum Porattum (Mal) · Bramayugam (Mal) · Pati Patni 2 (Hin) · Sattendru (Tam)" },
-      { slideNumber: 3, type: "release", title: "Pennum Porattum", body: "A quiet grief drama that earns every minute. The kind of film Mollywood does better than anyone right now." },
-      { slideNumber: 4, type: "release", title: "Bramayugam", body: "Mammootty's black-and-white horror is still the year's most atmospheric watch. Worth revisiting if you missed it." },
-      { slideNumber: 5, type: "release", title: "Pati Patni Aur Woh Do", body: "Third installment of a franchise nobody asked for. Tabu deserves better than this." },
-      { slideNumber: 6, type: "release", title: "Sattendru Maarudhu", body: "Tamil thriller about a small-town election going sideways. Tight 110 minutes, surprising end." },
-      { slideNumber: 7, type: "cta", title: "Which one are you starting?", body: "DM us. Save this. Tag a friend who needs the verdict." },
+      { slideNumber: 1, type: "cover", title: cover.title, body: cover.body },
+      ...items.map((it, i) => ({
+        slideNumber: i + 2,
+        type: "release" as const,
+        title: it.release.title,
+        body: it.body,
+      })),
+      { slideNumber: items.length + 2, type: "cta", title: "Which one?", body: "DM us. Save this." },
     ],
-    releases: [
-      {
-        id: "sample-1", title: "Pennum Porattum", language: "Malayalam", isSeries: false,
-        platform: ["Aha"], releaseDate: "2026-05-16", genre: ["Drama"], runtime: 92,
-        director: "Mathew Thomas", cast: ["Parvathy Thiruvothu"], synopsis: "Siblings clean out their late mother's house.",
-        // Sample ratings — 4-source stamp (tbsiScore 8.2)
-        tbsiScore: 8.2, tbsiSourceCount: 4,
-        imdbRating: 8.8, rottenTomatoes: 87, metacritic: 74, letterboxd: 4.2,
-        subtitleLanguages: ["English"], sources: ["TMDb"], fetchedAt: new Date().toISOString(),
-      },
-      {
-        id: "sample-2", title: "Bramayugam", language: "Malayalam", isSeries: false,
-        platform: ["SonyLIV"], releaseDate: "2024-02-15", genre: ["Horror"], runtime: 138,
-        director: "Rahul Sadasivan", cast: ["Mammootty"], synopsis: "17th-century horror.",
-        posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
-        subtitleLanguages: ["English"], sources: ["TMDb"], fetchedAt: new Date().toISOString(),
-      },
-      {
-        id: "sample-3", title: "Pati Patni Aur Woh Do", language: "Hindi", isSeries: false,
-        platform: ["JioHotstar"], releaseDate: "2026-05-16", genre: ["Romance"], runtime: 142,
-        director: "Mudassar Aziz", cast: ["Ayushmann Khurrana", "Tabu"], synopsis: "Third installment.",
-        subtitleLanguages: ["English"], sources: ["TMDb"], fetchedAt: new Date().toISOString(),
-      },
-      {
-        id: "sample-4", title: "Sattendru Maarudhu", language: "Tamil", isSeries: false,
-        platform: ["Sun NXT"], releaseDate: "2026-05-17", genre: ["Thriller"], runtime: 110,
-        director: "Karthik Subbaraj", cast: ["Vijay Sethupathi"], synopsis: "Small-town election thriller.",
-        // Sample ratings — 1-source stamp (tbsiScore 6.9, IMDb only)
-        tbsiScore: 6.9, tbsiSourceCount: 1, imdbRating: 6.9,
-        subtitleLanguages: ["English"], sources: ["TMDb"], fetchedAt: new Date().toISOString(),
-      },
-    ],
+    releases: items.map(it => it.release),
+  });
+
+  // ── THEATRICAL edition (In Theaters): all releaseDates.theatrical, cinema-bound ──
+  const theatricalDraft = draftOf(
+    "Jun 17 — Jun 21, 2026",
+    { title: "Five for the big screen.", body: "This weekend belongs in a theater." },
+    [
+      { body: "A glossy reboot that coasts on its leads. Fun, forgettable.", release: mk({ id: "t1", title: "Cocktail 2", language: "Hindi", genre: ["Romance"], releaseDates: { theatrical: "2026-06-19" }, director: "Homi Adajania", cast: ["Rashmika Mandanna", "Shahid Kapoor"], runtime: 138, tbsiScore: 5.4, tbsiSourceCount: 2, imdbRating: 5.5, rottenTomatoes: 48 }) },
+      { body: "A throwback romance that wears its sincerity well.", release: mk({ id: "t2", title: "Deewana", language: "Telugu", genre: ["Romance"], releaseDates: { theatrical: "2026-06-19" }, director: "Trivikram Srinivas", cast: ["Vijay Deverakonda"], runtime: 144, tbsiScore: 6.8, tbsiSourceCount: 3, imdbRating: 6.9, rottenTomatoes: 62, metacritic: 60 }) },
+      { body: "Devotional drama for a specific crowd — earnest if uneven.", release: mk({ id: "t3", title: "Nooru Sami", language: "Tamil", releaseDates: { theatrical: "2026-06-19" }, director: "Sasikumar", cast: ["Sasikumar"], runtime: 132 }) },
+      { body: "Bengali courtroom drama that builds to a real payoff.", release: mk({ id: "t4", title: "Abhhiman", language: "Bengali", releaseDates: { theatrical: "2026-06-19" }, director: "Raj Chakraborty", cast: ["Prosenjit Chatterjee"], runtime: 126 }) },
+      { body: "Bengali medical drama with a big heart, if a thin plot.", release: mk({ id: "t5", title: "Lifeline", language: "Bengali", releaseDates: { theatrical: "2026-06-21" }, director: "Atanu Ghosh", cast: ["Jaya Ahsan"], runtime: 118 }) },
+    ]
+  );
+
+  // ── OTT edition (Now Streaming): all releaseDates.ott + a platform ──
+  const ottDraft = draftOf(
+    "Jun 15 — Jun 21, 2026",
+    { title: "Five to stream this weekend.", body: "Couch sorted, all weekend long." },
+    [
+      { body: "The franchise everyone swore was over returns — and it still grips. Now on Prime Video.", release: mk({ id: "o1", title: "Drishyam 3", language: "Malayalam", genre: ["Thriller"], platform: ["Prime Video"], releaseDate: "2026-06-18", releaseDates: { ott: "2026-06-18" }, posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg", director: "Jeethu Joseph", cast: ["Mohanlal"], runtime: 151, tbsiScore: 8.0, tbsiSourceCount: 4, imdbRating: 8.1, rottenTomatoes: 85, metacritic: 73, letterboxd: 4.0 }) },
+      { body: "Lean Telugu thriller dropping straight to Netflix. A sharp 100 minutes.", release: mk({ id: "o2", title: "Razor", language: "Telugu", genre: ["Thriller"], platform: ["Netflix"], releaseDate: "2026-06-19", releaseDates: { ott: "2026-06-19" }, director: "Sailesh Kolanu", cast: ["Nani"], runtime: 104 }) },
+      { body: "A one-room chamber piece that quietly arrived on Aha. A real find.", release: mk({ id: "o3", title: "Sitting", language: "Telugu", platform: ["Aha"], releaseDate: "2026-06-20", releaseDates: { ott: "2026-06-20" }, director: "Praveen Kandregula", cast: ["Priyadarshi"], runtime: 96, tmdbVoteAverage: 6.5, tmdbVoteCount: 6 }) },
+      { body: "Slow-burn rural drama that finally hit SonyLIV this week. Worth the wait.", release: mk({ id: "o4", title: "Kenatha Kanom", language: "Tamil", platform: ["SonyLIV"], releaseDate: "2026-06-16", releaseDates: { ott: "2026-06-16" }, director: "Ameer", cast: ["Vikram Prabhu"], runtime: 128, tbsiScore: 7.5, tbsiSourceCount: 3, imdbRating: 7.6 }) },
+      { body: "Mass-y action that knows exactly what it is. Now on JioHotstar.", release: mk({ id: "o5", title: "Athiradi", language: "Malayalam", genre: ["Action"], platform: ["JioHotstar"], releaseDate: "2026-06-19", releaseDates: { ott: "2026-06-19" }, director: "Lal Jose", cast: ["Tovino Thomas"], runtime: 142, tbsiScore: 6.2, tbsiSourceCount: 2, imdbRating: 6.3 }) },
+    ]
+  );
+
+  // ── Graceful-degrade: a theatrical edition with only 2 films (cover 2x2 half-fills) ──
+  const miniDraft = draftOf(
+    "Jun 17 — Jun 21, 2026",
+    { title: "Two openings worth the trip.", body: "A quiet weekend at the movies." },
+    [
+      { body: "A glossy reboot that coasts on its leads.", release: mk({ id: "m1", title: "Cocktail 2", language: "Hindi", releaseDates: { theatrical: "2026-06-19" }, director: "Homi Adajania", cast: ["Rashmika Mandanna"], runtime: 138 }) },
+      { body: "A throwback romance that wears its sincerity well.", release: mk({ id: "m2", title: "Deewana", language: "Telugu", releaseDates: { theatrical: "2026-06-19" }, director: "Trivikram Srinivas", cast: ["Vijay Deverakonda"], runtime: 144 }) },
+    ]
+  );
+
+  // ── 0-film edition: the LLM declined (empty slides) → produceEdition skips it. ──
+  const emptyDraft: WednesdayDropDraft = {
+    pillar: "Wed Drop",
+    weekendDates: "Jun 17 — Jun 21, 2026",
+    caption: "",
+    hashtags: "",
+    carouselSlides: "",
+    slides: [],
+    releases: [],
+  };
+
+  // Mirror produceEdition's skip guard for this render check (the real guard
+  // lives in src/jobs/wednesday-drop.ts and runs BEFORE renderWedDrop).
+  const renderOrSkip = async (label: string, draft: WednesdayDropDraft, edition: WedDropEdition) => {
+    if (draft.slides.length === 0) {
+      log.info(`  [${label}] edition skipped — no films (no cover, no cards rendered)`);
+      return;
+    }
+    const result = await renderWedDrop(draft, 2, edition);
+    log.success(`  [${label}] cover: ${result.coverPath} | cards: ${result.cardPaths.length}`);
+    for (const p of result.cardPaths) log.info(`           ${p}`);
   };
 
   try {
-    const result = await renderWedDrop(sampleDraft, 43);
-    log.success(`\n✓ Render complete:`);
-    log.success(`   Cover : ${result.coverPath}`);
-    log.success(`   Cards : ${result.cardPaths.length}`);
-    for (const p of result.cardPaths) log.info(`           ${p}`);
+    await renderOrSkip("theatrical", theatricalDraft, "theatrical");
+    await renderOrSkip("ott", ottDraft, "ott");
+    await renderOrSkip("theatrical-mini (2 films)", miniDraft, "theatrical");
+    await renderOrSkip("theatrical-empty (0 films)", emptyDraft, "theatrical");
+    log.success("\n✓ Render complete for both editions.");
   } catch (err) {
     log.error("Render failed", err);
     process.exitCode = 1;

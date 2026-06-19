@@ -5,7 +5,16 @@ import { callClaudeJSON } from "../claude.js";
 import { log } from "../../shared/logger.js";
 import type { Release } from "../../shared/types.js";
 import type { WednesdayDropDraft } from "../../delivery/notion.js";
+import type { WedDropEdition } from "../../shared/wed-drop-edition.js";
 import { notableComposersBlock, enrichmentBlock } from "./_shared.js";
+
+/**
+ * Wed Drop is a variable-count post now that it spans both this weekend's
+ * theatrical premieres AND this week's OTT drops: the LLM returns 0 release
+ * slides (skip the pillar) OR 1..MAX_WED_DROP_FILMS, one body card per pick.
+ * Cover stays a curated top-4 preview; the swipe cue shows the full count.
+ */
+export const MAX_WED_DROP_FILMS = 15;
 
 const WedDropSlideSchema = z.object({
   slideNumber: z.number(),
@@ -18,14 +27,17 @@ const WedDropSlideSchema = z.object({
 });
 
 // Wed's design contract folded into the schema (wrong count → retry): empty
-// (skip the pillar) OR exactly 4 'release' slides. Title↔Release matching stays
-// a cross-referential business guard below.
+// (skip the pillar) OR 1..MAX_WED_DROP_FILMS 'release' slides. Title↔Release
+// matching stays a cross-referential business guard below.
 const WedDropSchema = z.object({
   caption: z.string(),
   hashtags: z.array(z.string()),
   carouselSlides: z.array(WedDropSlideSchema).refine(
-    slides => slides.length === 0 || slides.filter(s => s.type === "release").length === 4,
-    { message: "carouselSlides must be empty (skip) or contain exactly 4 'release' slides" }
+    slides => {
+      const n = slides.filter(s => s.type === "release").length;
+      return slides.length === 0 || (n >= 1 && n <= MAX_WED_DROP_FILMS);
+    },
+    { message: `carouselSlides must be empty (skip) or contain 1–${MAX_WED_DROP_FILMS} 'release' slides` }
   ),
 });
 
@@ -53,20 +65,50 @@ function releaseForPrompt(r: Release): string {
 }
 
 /**
- * Generate a Wednesday Drop draft from a list of releases.
+ * Per-edition LLM framing. The two Wed Drop editions are generated from
+ * SEPARATE pools and never merged, so each gets its own task line, slate
+ * header, pick instruction, cover brief, and per-film "why" angle. Everything
+ * else in the prompt (page identity, tone, output rules, the 0-or-1..MAX
+ * contract, the title-match + cast-overlap guards) is shared.
+ */
+function editionFraming(edition: WedDropEdition, weekendDates: string) {
+  if (edition === "theatrical") {
+    return {
+      task: `Generate a Wednesday "The Drop — In Theaters" Instagram carousel for the films OPENING IN CINEMAS this weekend (Wed–Sun).`,
+      slateHeader: `THESE FILMS OPEN IN THEATERS THIS WEEKEND (${weekendDates})`,
+      pick: `Pick UP TO ${MAX_WED_DROP_FILMS} films from the slate above genuinely worth SEEING IN CINEMAS this weekend.`,
+      cover: `Write a cinema-weekend cover headline (≤6 words) + subtitle (≤10 words) that makes people want to get out to the theater.`,
+      why: `For each pick, the body is a one-line "why see it in theaters this weekend" — a reason to buy a ticket, NOT a synopsis.`,
+    };
+  }
+  return {
+    task: `Generate a Wednesday "The Drop — Now Streaming" Instagram carousel for the films STREAMING this week (Mon–Sun).`,
+    slateHeader: `THESE FILMS ARE STREAMING THIS WEEK (${weekendDates}) — this week's digital arrivals, watchable all weekend`,
+    pick: `Pick UP TO ${MAX_WED_DROP_FILMS} films from the slate above genuinely worth STREAMING this weekend.`,
+    cover: `Write a streaming-weekend cover headline (≤6 words) + subtitle (≤10 words) that sells a great weekend on the couch.`,
+    why: `For each pick, NAME THE PLATFORM it streams on, and write a one-line "why stream it" — a reason to hit play, NOT a synopsis.`,
+  };
+}
+
+/**
+ * Generate a Wednesday Drop draft from a list of releases for a given edition
+ * ("theatrical" → In Theaters | "ott" → Now Streaming). Each edition is an
+ * independent draft built from its own pool.
  */
 export async function generateWednesdayDrop(
   releases: Release[],
+  edition: WedDropEdition,
   weekendStart: string,
   weekendEnd: string
 ): Promise<WednesdayDropDraft> {
   if (releases.length === 0) {
     throw new Error("Cannot generate Wednesday Drop with zero releases");
   }
-  
+
   const weekendDates = `${format(parseISO(weekendStart), "MMM d")} — ${format(parseISO(weekendEnd), "MMM d, yyyy")}`;
-  
-  log.info(`Generating Wednesday Drop for ${weekendDates} (${releases.length} releases)`);
+  const framing = editionFraming(edition, weekendDates);
+
+  log.info(`Generating Wednesday Drop [${edition}] for ${weekendDates} (${releases.length} releases)`);
   
   const releaseBlocks = releases.map((r, i) => `--- RELEASE ${i + 1} ---\n${releaseForPrompt(r)}`).join("\n\n");
   
@@ -92,18 +134,20 @@ OUTPUT RULES:
 - 10-12 hashtags mixing broad + niche + platform + language
 - South-Indian films get equal-or-greater attention than Hindi when they're stronger
 
-TASK: Generate a Wednesday "The Drop" Instagram carousel post for this weekend.
+TASK: ${framing.task}
 
 WEEKEND: ${weekendDates}
 
-THIS WEEKEND'S RELEASES (${releases.length} total):
+${framing.slateHeader} — ${releases.length} total:
 
 ${releaseBlocks}
 
 CARD COUNT — quality over coverage:
-- Pick EXACTLY 4 films from the slate above — the 4 most worth talking about for an OTT-decision audience.
+- ${framing.pick}
+- ${framing.cover}
+- ${framing.why}
+- Quality over coverage: if fewer are worthwhile, pick fewer; do NOT pad to ${MAX_WED_DROP_FILMS} with weak titles. If NONE are worth talking about, return carouselSlides: [] (empty array) to skip this edition.
 - Title strings on release slides must match the input title exactly (case + punctuation) so the renderer can match them to the Release records.
-- If fewer than 4 films are worth talking about this week, return carouselSlides: [] (empty array) to skip the pillar rather than padding with weak picks.
 
 DELIVERABLES (respond as JSON):
 
@@ -115,9 +159,8 @@ DELIVERABLES (respond as JSON):
     { "slideNumber": 2, "type": "index", "title": "This weekend", "body": "<quick visual list: Title (Language) → Platform>" },
     { "slideNumber": 3, "type": "release", "title": "<exact film title>", "body": "<one-line WHY this matters — not a synopsis, a reason to care>", "isMusicDirectorNotable": false },
     { "slideNumber": 4, "type": "release", "title": "<exact film title>", "body": "<...>", "isMusicDirectorNotable": false },
-    { "slideNumber": 5, "type": "release", "title": "<exact film title>", "body": "<...>", "isMusicDirectorNotable": false },
-    { "slideNumber": 6, "type": "release", "title": "<exact film title>", "body": "<...>", "isMusicDirectorNotable": false },
-    { "slideNumber": 7, "type": "cta", "title": "<short CTA>", "body": "<which one are you starting with?>" }
+    "… one 'release' slide per picked film — a VARIABLE count, up to ${MAX_WED_DROP_FILMS} total (not a fixed 4) …",
+    { "slideNumber": "<last>", "type": "cta", "title": "<short CTA>", "body": "<which one are you starting with?>" }
   ]
 }
 
@@ -135,19 +178,20 @@ Be specific. Take stands. Lean South-heavy where the films justify it.`;
   
   const output = await callClaudeJSON(prompt, WedDropSchema, "sonnet");
 
-  // Runtime guard: design contract is exactly 4 release slides, OR all-empty
-  // (the "skip the pillar this week" branch). Anything else is a prompt regression.
+  // Runtime guard: design contract is 1..MAX_WED_DROP_FILMS release slides, OR
+  // all-empty (the "skip the pillar this week" branch). Anything else is a
+  // prompt regression.
   const releaseSlideCount = output.carouselSlides.filter(s => s.type === "release").length;
-  if (output.carouselSlides.length !== 0 && releaseSlideCount !== 4) {
+  if (output.carouselSlides.length !== 0 && (releaseSlideCount < 1 || releaseSlideCount > MAX_WED_DROP_FILMS)) {
     throw new Error(
-      `Wed Drop LLM returned ${releaseSlideCount} release slides; expected exactly 4 or 0 (skip)`
+      `Wed Drop LLM returned ${releaseSlideCount} release slides; expected 0 (skip) or 1–${MAX_WED_DROP_FILMS}`
     );
   }
 
   // Trim draft.releases to the films the LLM actually picked, keeping the
-  // slide order. This keeps the cover's 2x2 grid and the body cards aligned
-  // on the same 4 films (otherwise the cover would show the first 4 releases
-  // by ingestion order while the cards show the LLM's picks).
+  // slide order. This keeps the cover's top-4 preview grid and the body cards
+  // aligned on the same films (otherwise the cover would show the first
+  // releases by ingestion order while the cards show the LLM's picks).
   const pickedTitles = output.carouselSlides
     .filter(s => s.type === "release")
     .map(s => s.title);
@@ -155,7 +199,8 @@ Be specific. Take stands. Lean South-heavy where the films justify it.`;
     .map(t => releases.find(r => r.title === t))
     .filter((r): r is Release => r !== undefined);
 
-  if (output.carouselSlides.length !== 0 && pickedReleases.length !== 4) {
+  // Every picked title must resolve to a Release record (exact title match).
+  if (output.carouselSlides.length !== 0 && pickedReleases.length !== releaseSlideCount) {
     throw new Error(
       `Wed Drop: LLM picked ${releaseSlideCount} titles but only ${pickedReleases.length} matched a Release record. ` +
       `Check that title strings match the input exactly.`

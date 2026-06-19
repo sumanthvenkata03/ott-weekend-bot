@@ -720,10 +720,11 @@ export async function writeSundaySpotlightToNotion(
  */
 export async function writeWednesdayDropToNotion(
   draft: WednesdayDropDraft,
-  imageUrls?: WedDropImageUrls
+  imageUrls?: WedDropImageUrls,
+  titlePrefix = "Wed Drop"
 ): Promise<string> {
-  log.info("Writing Wednesday Drop draft to Notion...");
-  
+  log.info(`Writing Wednesday Drop draft to Notion (${titlePrefix})...`);
+
   // Collect distinct platforms + languages across all featured releases
   const allPlatforms = Array.from(
     new Set(draft.releases.flatMap(r => r.platform))
@@ -731,8 +732,8 @@ export async function writeWednesdayDropToNotion(
   const allLanguages = Array.from(
     new Set(draft.releases.map(r => r.language))
   );
-  
-  const title = `Wed Drop — ${draft.weekendDates}`;
+
+  const title = `${titlePrefix} — ${draft.weekendDates}`;
   
   // Average hype across releases (Week 2 will populate this properly; for now use IMDb)
   const ratings = draft.releases

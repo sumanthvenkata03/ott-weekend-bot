@@ -161,4 +161,24 @@
   .tbsi-src   { font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; fill:var(--brass,#C49A3F); letter-spacing:1px; }
   .tbsi-label { font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700; fill:var(--brass,#C49A3F); letter-spacing:4px; }
   .tbsi-score { font-family:'Playfair Display',serif; font-size:48px; font-weight:800; fill:var(--brass,#C49A3F); }
+  /* Pending-state center word ("NEW" / "UNRATED") — replaces the score on the
+     "new" seal. Smaller than a real score so it never reads as one. */
+  .tbsi-pending { font-family:'Playfair Display',serif; font-size:26px; font-weight:700; fill:var(--brass,#C49A3F); letter-spacing:1px; }
+
+  /* === TBSI seal FALLBACK variants (display-only) — reuse locked tokens only ===
+     --tmdb: a TMDb community-average fallback. Same footprint, but the whole
+     seal is dimmed so it reads clearly SECONDARY — never the curated blend. */
+  .tbsi-stamp--tmdb .tbsi-ring-outer,
+  .tbsi-stamp--tmdb .tbsi-ring-inner,
+  .tbsi-stamp--tmdb .tbsi-dot,
+  .tbsi-stamp--tmdb .tbsi-divider,
+  .tbsi-stamp--tmdb .tbsi-brand,
+  .tbsi-stamp--tmdb .tbsi-src,
+  .tbsi-stamp--tmdb .tbsi-label,
+  .tbsi-stamp--tmdb .tbsi-score { opacity: 0.6; }
+
+  /* --new: no verdict yet. A dashed outer ring + a hollowed (faded) ink fill
+     read "awaiting", never "scored". Same footprint as the real seal. */
+  .tbsi-stamp--new .tbsi-fill { opacity: 0.4; }
+  .tbsi-stamp--new .tbsi-ring-outer { stroke-dasharray: 5 5; }
 </style>

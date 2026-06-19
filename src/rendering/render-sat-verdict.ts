@@ -19,7 +19,7 @@ import {
   hasMetadataLine2,
   hasReleasedSection,
   hasLanguagesSection,
-  buildTbsiRingText,
+  buildStampContext,
 } from "./_shared.js";
 
 /**
@@ -176,12 +176,9 @@ export async function renderSatVerdict(
       hasReleased: hasReleasedSection(card),
       hasLanguages: hasLanguagesSection(card),
     });
-    // TBSI stamp (display-only) — only when the linked release carries a score.
-    // tbsiScore formatted to 1 decimal; ring text lists only present sources.
+    // Seal state from the linked release (may be undefined → buildStampContext
+    // resolves it to the "new" pending state).
     const release = draft.releases.find(r => r.title === card.filmTitle);
-    const tbsiCtx = release?.tbsiScore !== undefined
-      ? { tbsiScore: release.tbsiScore.toFixed(1), tbsiRingText: buildTbsiRingText(release) }
-      : {};
     const cardCtx: SatVerdictCardContext = {
       ...baseCtx,
       card,
@@ -189,7 +186,7 @@ export async function renderSatVerdict(
       ...platformStyle,
       density,
       totalSlots: cards.length,
-      ...tbsiCtx,
+      ...buildStampContext(release),
     };
     const cardPath = `${outputDir}/sat-verdict-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
     await renderToPNG({

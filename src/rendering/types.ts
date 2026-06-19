@@ -59,6 +59,20 @@ export interface CardEnrichment {
   };
 }
 
+/**
+ * Display-only seal state, resolved once by buildStampContext() and spread into
+ * every body-card context. Three honest states so every card shows a seal:
+ *   "tbsi" — curated TBSI blend  | "tmdb" — community-average fallback (muted)
+ *   "new"  — no verdict yet (pending). stampLabel/stampScore/stampRingText drive
+ *   the SVG; score/label collapse per state. Does NOT change how tbsiScore is computed.
+ */
+export interface StampContext {
+  stampKind: "tbsi" | "tmdb" | "new";
+  stampLabel?: string;
+  stampScore?: string;
+  stampRingText?: string;
+}
+
 /** A single film card on a Sat Verdict body slide */
 export interface SatVerdictCard extends CardEnrichment {
   filmTitle: string;
@@ -105,11 +119,12 @@ export interface SatVerdictCardContext extends RenderBase, PlatformStyle {
   totalSlots: number;
   /** Phase 5.5 — body-density tier (compact/standard/dense) */
   density: CardDensity;
-  /** TBSI stamp (display-only). Present only when the linked release has a
-   *  tbsiScore. tbsiScore is pre-formatted to 1 decimal; tbsiRingText is the
-   *  " · "-joined source list. Both absent → the card renders no stamp. */
-  tbsiScore?: string;
-  tbsiRingText?: string;
+  /** Display-only seal — see StampContext. Resolved by buildStampContext() for
+   *  every card: "tbsi" (curated blend), "tmdb" (community-avg fallback), "new". */
+  stampKind: "tbsi" | "tmdb" | "new";
+  stampLabel?: string;
+  stampScore?: string;
+  stampRingText?: string;
 }
 
 // ============================================================
@@ -131,6 +146,8 @@ export interface WedDropGridItem {
 /** Full context for the Wed Drop cover slide (1080x1350) */
 export interface WedDropCoverContext extends RenderBase {
   pillarLabel: "WED DROP";
+  /** Edition masthead label: "IN THEATERS" | "NOW STREAMING" */
+  editionLabel: string;
   weekendDates: string;
   filmCount: number;
   /** From LLM: 6-word headline + subtext (slide 1 in carouselSlides) */
@@ -143,6 +160,8 @@ export interface WedDropCoverContext extends RenderBase {
 /** Full context for a Wed Drop body card slide (1080x1080) */
 export interface WedDropCardContext extends RenderBase, PlatformStyle {
   pillarLabel: "WED DROP";
+  /** Edition masthead label: "IN THEATERS" | "NOW STREAMING" */
+  editionLabel: string;
   /** From LLM: title (= film title) + body (= why this matters) */
   title: string;
   body: string;
@@ -156,11 +175,12 @@ export interface WedDropCardContext extends RenderBase, PlatformStyle {
   totalSlots: number;
   /** Phase 5.5 — body-density tier (compact/standard/dense) */
   density: CardDensity;
-  /** TBSI stamp (display-only). Present only when the release has a tbsiScore.
-   *  tbsiScore is pre-formatted to 1 decimal; tbsiRingText is the " · "-joined
-   *  bottom-arc source list. Both absent → the card renders no stamp. */
-  tbsiScore?: string;
-  tbsiRingText?: string;
+  /** Display-only seal — see StampContext. Resolved by buildStampContext() for
+   *  every card: "tbsi" (curated blend), "tmdb" (community-avg fallback), "new". */
+  stampKind: "tbsi" | "tmdb" | "new";
+  stampLabel?: string;
+  stampScore?: string;
+  stampRingText?: string;
 }
 
 // ============================================================
@@ -204,11 +224,12 @@ export interface MonMovementCardContext extends RenderBase, PlatformStyle {
   totalSlots: number;
   /** Phase 5.5 — body-density tier (compact/standard/dense) */
   density: CardDensity;
-  /** TBSI stamp (display-only). Present only when the release has a tbsiScore.
-   *  tbsiScore is pre-formatted to 1 decimal; tbsiRingText is the " · "-joined
-   *  bottom-arc source list. Both absent → the card renders no stamp. */
-  tbsiScore?: string;
-  tbsiRingText?: string;
+  /** Display-only seal — see StampContext. Resolved by buildStampContext() for
+   *  every card: "tbsi" (curated blend), "tmdb" (community-avg fallback), "new". */
+  stampKind: "tbsi" | "tmdb" | "new";
+  stampLabel?: string;
+  stampScore?: string;
+  stampRingText?: string;
 }
 
 // ============================================================
@@ -240,9 +261,10 @@ export interface SunSpotlightRenderContext extends PlatformStyle, CardEnrichment
 
   /** Phase 5.5 — body-density tier (compact/standard/dense), applies to card 1 only */
   density: CardDensity;
-  /** TBSI stamp (display-only). Present only when the spotlight film has a
-   *  tbsiScore. tbsiScore is pre-formatted to 1 decimal; tbsiRingText is the
-   *  " · "-joined source list. Rendered only on the why-it-works card. */
-  tbsiScore?: string;
-  tbsiRingText?: string;
+  /** Display-only seal — see StampContext. Resolved by buildStampContext()
+   *  (rendered only on the why-it-works card): "tbsi" / "tmdb" / "new". */
+  stampKind: "tbsi" | "tmdb" | "new";
+  stampLabel?: string;
+  stampScore?: string;
+  stampRingText?: string;
 }

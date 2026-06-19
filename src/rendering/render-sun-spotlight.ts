@@ -17,7 +17,7 @@ import {
   hasMetadataLine2,
   hasReleasedSection,
   hasLanguagesSection,
-  buildTbsiRingText,
+  buildStampContext,
 } from "./_shared.js";
 
 // Same per-language fallback color map used inline by the other pillar orchestrators.
@@ -76,12 +76,6 @@ function buildContext(
     hasReleased: hasReleasedSection(enrichment),
     hasLanguages: hasLanguagesSection(enrichment),
   });
-  // TBSI stamp (display-only) — only when the spotlight film carries a score.
-  // tbsiScore formatted to 1 decimal; ring text lists only present sources.
-  // Shared by all 4 templates, but only the why-it-works card includes the stamp.
-  const tbsiCtx = film.tbsiScore !== undefined
-    ? { tbsiScore: film.tbsiScore.toFixed(1), tbsiRingText: buildTbsiRingText(film) }
-    : {};
   return {
     filmTitle: film.title,
     language: film.language,
@@ -100,7 +94,7 @@ function buildContext(
     ...platformStyle,
     density,
     ...enrichment,
-    ...tbsiCtx,
+    ...buildStampContext(film),
   };
 }
 

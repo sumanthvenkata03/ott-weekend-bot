@@ -19,7 +19,7 @@ import {
   hasMetadataLine2,
   hasReleasedSection,
   hasLanguagesSection,
-  buildTbsiRingText,
+  buildStampContext,
 } from "./_shared.js";
 
 /**
@@ -205,12 +205,6 @@ export async function renderMonMovement(
       hasReleased: hasReleasedSection(enrichedRelease),
       hasLanguages: hasLanguagesSection(enrichedRelease),
     });
-    // TBSI stamp (display-only) — only when the release carries a score.
-    // tbsiScore formatted to 1 decimal; ring text lists only present sources.
-    const tbsiCtx = release.tbsiScore !== undefined
-      ? { tbsiScore: release.tbsiScore.toFixed(1), tbsiRingText: buildTbsiRingText(release) }
-      : {};
-
     const cardCtx: MonMovementCardContext = {
       ...baseCtx,
       title: cleanTitle,
@@ -221,7 +215,7 @@ export async function renderMonMovement(
       totalSlots: bodySlides.length,
       ...platformStyle,
       density,
-      ...tbsiCtx,
+      ...buildStampContext(release),
     };
     const cardPath = `${outputDir}/mon-movement-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
     await renderToPNG({

@@ -7,7 +7,8 @@
 //
 // Both are pure functions — easy to test, no I/O.
 
-import type { PlatformStyle, CardDensity, CardEnrichment } from "./types.js";
+import { differenceInCalendarDays, parseISO } from "date-fns";
+import type { PlatformStyle, CardDensity, CardEnrichment, StampContext } from "./types.js";
 
 /**
  * Map a platform display name (e.g. "Netflix", "Prime Video") to the
@@ -138,4 +139,73 @@ export function buildTbsiRingText(release: {
   if (typeof release.metacritic === "number") parts.push(`MC ${release.metacritic}`);
   if (typeof release.letterboxd === "number") parts.push(`LB ${release.letterboxd.toFixed(1)}`);
   return parts.join(" · ");
+}
+
+/**
+ * TMDb community-average vote floor. Below this, a TMDb average is a handful of
+ * votes — noise, not a verdict — so we fall through to the "new" state instead.
+ * Tunable; 50 is a conservative "enough people weighed in" line.
+ */
+export const TMDB_FALLBACK_MIN_VOTES = 50;
+
+/** Structural subset of Release that buildStampContext reads — all optional so
+ *  the Sat path (where the linked release may be missing) can pass undefined. */
+type StampInput = {
+  tbsiScore?: number;
+  imdbRating?: number;
+  rottenTomatoes?: number;
+  metacritic?: number;
+  letterboxd?: number;
+  tmdbVoteAverage?: number;
+  tmdbVoteCount?: number;
+  releaseDate?: string;
+};
+
+/** True when releaseDate is within ~10 days of today or in the future. */
+function isRecentRelease(releaseDate: string | undefined): boolean {
+  if (!releaseDate) return false;
+  try {
+    return differenceInCalendarDays(new Date(), parseISO(releaseDate)) <= 10;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve the honest seal state for a release (display-only — does NOT change
+ * how tbsiScore is computed). Priority:
+ *   1. "tbsi" — curated TBSI blend exists (release.tbsiScore defined).
+ *   2. "tmdb" — no blend, but a TMDb community average that clears
+ *               TMDB_FALLBACK_MIN_VOTES votes. Rendered MUTED (secondary source).
+ *   3. "new"  — no verdict yet. Recency picks the wording: a just-released /
+ *               upcoming film reads "NEW", an older unrated title reads "UNRATED".
+ * Always returns a stampKind, so every card shows a seal.
+ */
+export function buildStampContext(release: StampInput | undefined): StampContext {
+  if (release && release.tbsiScore !== undefined) {
+    return {
+      stampKind: "tbsi",
+      stampLabel: "TBSI",
+      stampScore: release.tbsiScore.toFixed(1),
+      stampRingText: buildTbsiRingText(release),
+    };
+  }
+  if (
+    release &&
+    typeof release.tmdbVoteAverage === "number" &&
+    (release.tmdbVoteCount ?? 0) >= TMDB_FALLBACK_MIN_VOTES
+  ) {
+    return {
+      stampKind: "tmdb",
+      stampLabel: "TMDb",
+      stampScore: release.tmdbVoteAverage.toFixed(1),
+      stampRingText: `${release.tmdbVoteCount} VOTES`,
+    };
+  }
+  const recent = isRecentRelease(release?.releaseDate);
+  return {
+    stampKind: "new",
+    stampLabel: recent ? "NEW" : "UNRATED",
+    stampRingText: recent ? "JUST DROPPED · NO VERDICT YET" : "NO VERDICT YET",
+  };
 }
