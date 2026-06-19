@@ -30,12 +30,13 @@ async function produceEdition(
   const meta = EDITION_META[edition];
   log.info(`\n— ${meta.notionTitle} — ${pool.length} candidate(s) in pool —`);
 
-  // Per-edition candidate cap: sort THIS pool by popularity, feed up to 24 so
-  // the LLM can pick up to MAX_WED_DROP_FILMS (or skip) without the tail being
-  // crowded out.
+  // Per-edition candidate cap: sort THIS pool by popularity, feed up to 40 so
+  // a large pool can still reach MAX_WED_DROP_FILMS (or skip) without the tail
+  // being crowded out — 40 comfortably exceeds the 15 cap with headroom, and the
+  // popularity sort means the strongest survive if a pool is ever huge.
   const featured = [...pool]
     .sort((a, b) => (b.tmdbPopularity ?? 0) - (a.tmdbPopularity ?? 0))
-    .slice(0, 24);
+    .slice(0, 40);
   log.info(`  Feeding ${featured.length} ${edition} candidates to the LLM (picks up to ${MAX_WED_DROP_FILMS} or skips)`);
 
   // Generate the edition's draft via Claude.

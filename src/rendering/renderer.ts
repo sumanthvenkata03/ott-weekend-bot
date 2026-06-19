@@ -148,8 +148,13 @@ export async function renderToPNG(options: RenderOptions): Promise<string> {
   await page.setViewport({ width, height, deviceScaleFactor: 2 });
 
   // 3. Load HTML
+  //    We intentionally do NOT wait on networkidle0: a single hanging CDN
+  //    image would block setContent until it throws, taking down the whole
+  //    edition. The explicit per-image wait below (step 4, 8s cap) governs
+  //    image loading instead. The 30s timeout is kept as a backstop only —
+  //    domcontentloaded should resolve almost immediately.
   await page.setContent(html, {
-    waitUntil: ["load", "networkidle0"],
+    waitUntil: "domcontentloaded",
     timeout: 30_000,
   });
 
@@ -179,8 +184,10 @@ export async function renderToPNG(options: RenderOptions): Promise<string> {
     );
   });
 
-  // 5. Extra settle for fonts
-  await new Promise(resolve => setTimeout(resolve, 250));
+  // 5. Wait for fonts explicitly. This replaces networkidle0's implicit
+  //    font wait, which we removed above. A short settle follows for safety.
+  await page.evaluate(() => (document as any).fonts?.ready);
+  await new Promise(resolve => setTimeout(resolve, 100));
 
   // 6. Ensure output directory exists, then screenshot
   await mkdir(dirname(outputPath), { recursive: true });

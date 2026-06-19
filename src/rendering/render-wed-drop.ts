@@ -8,6 +8,7 @@ import { log } from "../shared/logger.js";
 import type { WednesdayDropDraft, WedDropSlide } from "../delivery/notion.js";
 import type { Release } from "../shared/types.js";
 import { EDITION_META, type WedDropEdition } from "../shared/wed-drop-edition.js";
+import { sortWedDropByRating } from "../content/weekend/wednesday-drop.js";
 import type {
   WedDropCoverContext,
   WedDropCardContext,
@@ -204,18 +205,17 @@ if (isMainModule) {
     ...over,
   });
 
-  // Assemble a draft from a cover + a list of { body, release } picks.
+  // Assemble a draft from a cover + a list of { body, release } picks. The
+  // sample items are deliberately passed in NON-rating order; sortWedDropByRating
+  // (the SAME function the production generator runs) reorders both the releases
+  // and the 'release' slides into rating-descending order, so this no-LLM render
+  // demonstrates exactly what job:wednesday produces.
   const draftOf = (
     weekendDates: string,
     cover: { title: string; body: string },
     items: Array<{ body: string; release: Release }>
-  ): WednesdayDropDraft => ({
-    pillar: "Wed Drop",
-    weekendDates,
-    caption: `${cover.title} — ${cover.body}`,
-    hashtags: "#WeekendWatch #TBSI",
-    carouselSlides: "(legacy markdown blob)",
-    slides: [
+  ): WednesdayDropDraft => {
+    const rawSlides: WedDropSlide[] = [
       { slideNumber: 1, type: "cover", title: cover.title, body: cover.body },
       ...items.map((it, i) => ({
         slideNumber: i + 2,
@@ -224,9 +224,18 @@ if (isMainModule) {
         body: it.body,
       })),
       { slideNumber: items.length + 2, type: "cta", title: "Which one?", body: "DM us. Save this." },
-    ],
-    releases: items.map(it => it.release),
-  });
+    ];
+    const sorted = sortWedDropByRating(rawSlides, items.map(it => it.release));
+    return {
+      pillar: "Wed Drop",
+      weekendDates,
+      caption: `${cover.title} — ${cover.body}`,
+      hashtags: "#WeekendWatch #TBSI",
+      carouselSlides: "(legacy markdown blob)",
+      slides: sorted.slides,
+      releases: sorted.releases,
+    };
+  };
 
   // ── THEATRICAL edition (In Theaters): all releaseDates.theatrical, cinema-bound ──
   const theatricalDraft = draftOf(
@@ -242,15 +251,22 @@ if (isMainModule) {
   );
 
   // ── OTT edition (Now Streaming): all releaseDates.ott + a platform ──
+  // Items are passed in DELIBERATELY NON-rating order to prove the source sort
+  // reorders them. Expected rating-descending result:
+  //   1. Drishyam 3   — tier 0 (TBSI 8.3)
+  //   2. Razor        — tier 0 (TBSI 6.5)
+  //   3. Sitting      — tier 1 (TMDb 7.4, 300 votes — fallback, no blend)
+  //   4. Kenatha Kanom— tier 2 (unrated, popularity 50)
+  //   5. Athiradi     — tier 2 (unrated, popularity 12)
   const ottDraft = draftOf(
     "Jun 15 — Jun 21, 2026",
     { title: "Five to stream this weekend.", body: "Couch sorted, all weekend long." },
     [
-      { body: "The franchise everyone swore was over returns — and it still grips. Now on Prime Video.", release: mk({ id: "o1", title: "Drishyam 3", language: "Malayalam", genre: ["Thriller"], platform: ["Prime Video"], releaseDate: "2026-06-18", releaseDates: { ott: "2026-06-18" }, posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg", director: "Jeethu Joseph", cast: ["Mohanlal"], runtime: 151, tbsiScore: 8.0, tbsiSourceCount: 4, imdbRating: 8.1, rottenTomatoes: 85, metacritic: 73, letterboxd: 4.0 }) },
-      { body: "Lean Telugu thriller dropping straight to Netflix. A sharp 100 minutes.", release: mk({ id: "o2", title: "Razor", language: "Telugu", genre: ["Thriller"], platform: ["Netflix"], releaseDate: "2026-06-19", releaseDates: { ott: "2026-06-19" }, director: "Sailesh Kolanu", cast: ["Nani"], runtime: 104 }) },
-      { body: "A one-room chamber piece that quietly arrived on Aha. A real find.", release: mk({ id: "o3", title: "Sitting", language: "Telugu", platform: ["Aha"], releaseDate: "2026-06-20", releaseDates: { ott: "2026-06-20" }, director: "Praveen Kandregula", cast: ["Priyadarshi"], runtime: 96, tmdbVoteAverage: 6.5, tmdbVoteCount: 6 }) },
-      { body: "Slow-burn rural drama that finally hit SonyLIV this week. Worth the wait.", release: mk({ id: "o4", title: "Kenatha Kanom", language: "Tamil", platform: ["SonyLIV"], releaseDate: "2026-06-16", releaseDates: { ott: "2026-06-16" }, director: "Ameer", cast: ["Vikram Prabhu"], runtime: 128, tbsiScore: 7.5, tbsiSourceCount: 3, imdbRating: 7.6 }) },
-      { body: "Mass-y action that knows exactly what it is. Now on JioHotstar.", release: mk({ id: "o5", title: "Athiradi", language: "Malayalam", genre: ["Action"], platform: ["JioHotstar"], releaseDate: "2026-06-19", releaseDates: { ott: "2026-06-19" }, director: "Lal Jose", cast: ["Tovino Thomas"], runtime: 142, tbsiScore: 6.2, tbsiSourceCount: 2, imdbRating: 6.3 }) },
+      { body: "Mass-y action that knows exactly what it is. Now on JioHotstar.", release: mk({ id: "o5", title: "Athiradi", language: "Malayalam", genre: ["Action"], platform: ["JioHotstar"], releaseDate: "2026-06-19", releaseDates: { ott: "2026-06-19" }, director: "Lal Jose", cast: ["Tovino Thomas"], runtime: 142, tmdbPopularity: 12 }) },
+      { body: "A one-room chamber piece that quietly arrived on Aha. A real find.", release: mk({ id: "o3", title: "Sitting", language: "Telugu", platform: ["Aha"], releaseDate: "2026-06-20", releaseDates: { ott: "2026-06-20" }, director: "Praveen Kandregula", cast: ["Priyadarshi"], runtime: 96, tmdbVoteAverage: 7.4, tmdbVoteCount: 300 }) },
+      { body: "Lean Telugu thriller dropping straight to Netflix. A sharp 100 minutes.", release: mk({ id: "o2", title: "Razor", language: "Telugu", genre: ["Thriller"], platform: ["Netflix"], releaseDate: "2026-06-19", releaseDates: { ott: "2026-06-19" }, director: "Sailesh Kolanu", cast: ["Nani"], runtime: 104, tbsiScore: 6.5, tbsiSourceCount: 3, imdbRating: 6.6 }) },
+      { body: "Slow-burn rural drama that finally hit SonyLIV this week. Worth the wait.", release: mk({ id: "o4", title: "Kenatha Kanom", language: "Tamil", platform: ["SonyLIV"], releaseDate: "2026-06-16", releaseDates: { ott: "2026-06-16" }, director: "Ameer", cast: ["Vikram Prabhu"], runtime: 128, tmdbPopularity: 50 }) },
+      { body: "The franchise everyone swore was over returns — and it still grips. Now on Prime Video.", release: mk({ id: "o1", title: "Drishyam 3", language: "Malayalam", genre: ["Thriller"], platform: ["Prime Video"], releaseDate: "2026-06-18", releaseDates: { ott: "2026-06-18" }, posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg", director: "Jeethu Joseph", cast: ["Mohanlal"], runtime: 151, tbsiScore: 8.3, tbsiSourceCount: 4, imdbRating: 8.1, rottenTomatoes: 85, metacritic: 73, letterboxd: 4.0 }) },
     ]
   );
 
@@ -282,6 +298,7 @@ if (isMainModule) {
       log.info(`  [${label}] edition skipped — no films (no cover, no cards rendered)`);
       return;
     }
+    log.info(`  [${label}] rating order: ${draft.releases.map((r, i) => `${i + 1}. ${r.title}`).join("  →  ")}`);
     const result = await renderWedDrop(draft, 2, edition);
     log.success(`  [${label}] cover: ${result.coverPath} | cards: ${result.cardPaths.length}`);
     for (const p of result.cardPaths) log.info(`           ${p}`);
