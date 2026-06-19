@@ -122,6 +122,25 @@ function scoreWithinTier(r: Release): number {
 }
 
 /**
+ * Language priority for ordering the UNRATED tier (tier 2), where there is no
+ * verdict to rank by. South-first house style: Telugu → Tamil → Malayalam →
+ * Hindi → Kannada → everything else. Keys are lowercased; both full names and
+ * ISO codes are accepted so the map keys on whatever form Release.language
+ * holds (today it's a full English name). Anything unlisted falls to 5.
+ */
+const LANGUAGE_PRIORITY: Record<string, number> = {
+  telugu: 0, te: 0,
+  tamil: 1, ta: 1,
+  malayalam: 2, ml: 2,
+  hindi: 3, hi: 3,
+  kannada: 4, kn: 4,
+};
+
+function languagePriority(r: Release): number {
+  return LANGUAGE_PRIORITY[String(r.language).toLowerCase()] ?? 5;
+}
+
+/**
  * Deterministic rating comparator: tier ASC, then score-within-tier DESC.
  * Tiebreakers (tmdbPopularity DESC, then title ASC) make the order fully
  * deterministic for equal scores, independent of the LLM's pick order.
@@ -130,6 +149,20 @@ function compareByRating(a: Release, b: Release): number {
   const tierA = ratingTier(a);
   const tierB = ratingTier(b);
   if (tierA !== tierB) return tierA - tierB;                  // tier ASC
+
+  // Unrated tier (2): no verdict to rank by, so order by language priority
+  // (South-first house style) first, then popularity, then title.
+  if (tierA === 2) {
+    const langA = languagePriority(a);
+    const langB = languagePriority(b);
+    if (langA !== langB) return langA - langB;               // language ASC
+    const popA = a.tmdbPopularity ?? 0;
+    const popB = b.tmdbPopularity ?? 0;
+    if (popA !== popB) return popB - popA;                   // popularity DESC
+    return a.title.localeCompare(b.title);                   // title ASC
+  }
+
+  // Rated tiers (0, 1): score-within-tier DESC, then popularity, then title.
   const scoreA = scoreWithinTier(a);
   const scoreB = scoreWithinTier(b);
   if (scoreA !== scoreB) return scoreB - scoreA;             // score DESC
@@ -227,13 +260,18 @@ SELECTION — include every REAL release in this medium, capped at ${MAX_WED_DRO
 - If after skipping junk there are 0 real films, return carouselSlides: [] (empty array) to skip this edition.
 - Title strings on release slides must match the input title exactly (case + punctuation) so the renderer can match them to the Release records.
 
+ANCHOR THIS EDITION ON THE STANDOUT FILM:
+- Choose the single STANDOUT film from the list to anchor this edition — normally the highest-rated marquee title (use the rating data provided); if no film is rated, the most anticipated / highest-profile release.
+- OPEN the caption with a specific, catchy hook about that film (name it, its star/director, the angle) — never a generic "N films this week" opener.
+- Write the COVER headline and subtitle around that same standout (or the week's theme led by it). ${framing.cover} Stay specific and editorial.
+
 DELIVERABLES (respond as JSON):
 
 {
-  "caption": "Instagram caption text under 150 words. Opens with a hook, mentions the biggest drop, the hidden gem, the regional spotlight if any, closes with 'Save this' / 'DM us' / 'Which one are you watching?' CTA.",
+  "caption": "Instagram caption text under 150 words. OPEN with a specific, catchy hook on the STANDOUT film (name it + its star/director + the angle) — not a generic 'N films this week' opener. Then mention the other notable drop, the hidden gem, the regional spotlight if any, and close with 'Save this' / 'DM us' / 'Which one are you watching?' CTA.",
   "hashtags": ["array", "of", "10-12", "hashtags", "with", "the", "# prefix"],
   "carouselSlides": [
-    { "slideNumber": 1, "type": "cover", "title": "<6-word headline>", "body": "<10-word subtext>" },
+    { "slideNumber": 1, "type": "cover", "title": "<6-word headline anchored on the standout film>", "body": "<10-word subtext>" },
     { "slideNumber": 2, "type": "index", "title": "This weekend", "body": "<quick visual list: Title (Language) → Platform>" },
     { "slideNumber": 3, "type": "release", "title": "<exact film title>", "body": "<one-line WHY this matters — not a synopsis, a reason to care>", "isMusicDirectorNotable": false },
     { "slideNumber": 4, "type": "release", "title": "<exact film title>", "body": "<...>", "isMusicDirectorNotable": false },
