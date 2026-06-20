@@ -1,9 +1,10 @@
 name: Sat Verdict
 
 on:
-  schedule:
-    # generates the draft; target IG post ≈ 7–9 PM IST — operator posts from Notion.
-    - cron: "0 8 * * 5"
+  # scheduled runs disabled — run manually/locally
+  # schedule:
+  #   # generates the draft; target IG post ≈ 7–9 PM IST — operator posts from Notion.
+  #   - cron: "0 8 * * 5"
   workflow_dispatch:
 
 concurrency:

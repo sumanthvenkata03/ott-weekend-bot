@@ -1,9 +1,10 @@
 name: Mon Movement
 
 on:
-  schedule:
-    # generates the draft; target IG post ≈ 7–9 PM IST — operator posts from Notion.
-    - cron: "0 8 * * 2"
+  # scheduled runs disabled — run manually/locally
+  # schedule:
+  #   # generates the draft; target IG post ≈ 7–9 PM IST — operator posts from Notion.
+  #   - cron: "0 8 * * 2"
   workflow_dispatch:
 
 concurrency:

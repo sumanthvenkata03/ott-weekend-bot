@@ -9,11 +9,11 @@
 // fabricated verdict. The numeric score is computed HERE (computeVerdictScore),
 // not by the model — the model only reports what it read.
 //
-// Cost: each researchVerdict() call is a billed Anthropic request WITH web
-// search. It belongs to the JOB path only. The render:* sample path must never
-// import or call this.
+// Cost: each researchVerdict() call runs the Max-plan Claude Code CLI with its
+// built-in WebSearch tool — no Anthropic API key, no per-call API billing. It
+// still belongs to the JOB path only: the render:* sample path must never import
+// or call this.
 
-import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { callClaude } from "../claude.js";
 import type { ModelChoice } from "../claude.js";
@@ -24,14 +24,11 @@ import type { Release } from "../../shared/types.js";
 // TUNABLE EDITORIAL DIALS (Phase 1). All weights/thresholds live here.
 // ──────────────────────────────────────────────────────────────────────────
 
-/** Web searches the model may run per film (server-side, billed). */
+/** Web searches the model may run per film (prompt-level cap; CLI WebSearch tool). */
 export const MAX_SEARCHES_PER_FILM = 5;
 
-/** Cost-efficient model for the per-film research call (Sonnet-class). */
-const RESEARCH_MODEL: ModelChoice = "sonnet";
-
-/** Output token cap for the research reply (the JSON + its reasoning). */
-const RESEARCH_MAX_TOKENS = 3072;
+/** Model for the per-film research call — routes to Claude Opus 4.8. */
+const RESEARCH_MODEL: ModelChoice = "opus";
 
 /**
  * TBSI blend weights — applied over WHICHEVER signals are present and then
@@ -43,9 +40,14 @@ export const CRITIC_WEIGHT = 0.55;
 export const AUDIENCE_WEIGHT = 0.35;
 export const BUZZ_WEIGHT = 0.10;
 
-/** Verdict thresholds on the 0-10 TBSI score. */
-export const MUST_WATCH_MIN = 8.0;
-export const WORTH_TRY_MIN = 6.0;
+/**
+ * Verdict thresholds on the SAME rounded ★/5 the reader sees — NOT the raw
+ * tbsiScore. Deriving the verdict from `star` guarantees the star and the
+ * verdict can never disagree at a tier boundary (e.g. ★4.0 is always "Must
+ * Watch", never "Worth a Try").
+ */
+export const MUST_WATCH_STAR_MIN = 4.0; // ★ ≥ 4.0 → Must Watch
+export const WORTH_TRY_STAR_MIN = 3.0; // ★ ≥ 3.0 → Worth a Try; else Skip
 
 /** Explicit critic scores required (with audience present) for a 'high' read. */
 export const MIN_CRITICS_FOR_FIRM = 2;
@@ -109,12 +111,6 @@ const ResearchResponseSchema = z.object({
 
 type ResearchResponse = z.infer<typeof ResearchResponseSchema>;
 
-const WEB_SEARCH_TOOL: Anthropic.Messages.ToolUnion = {
-  type: "web_search_20250305",
-  name: "web_search",
-  max_uses: MAX_SEARCHES_PER_FILM,
-};
-
 // ──────────────────────────────────────────────────────────────────────────
 // Deterministic scoring — PURE, no API, unit-testable.
 // ──────────────────────────────────────────────────────────────────────────
@@ -122,16 +118,24 @@ const WEB_SEARCH_TOOL: Anthropic.Messages.ToolUnion = {
 const mean = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
 const round1 = (n: number): number => Math.round(n * 10) / 10;
 
+/** Median of a non-empty list. Even count → mean of the two middle values. */
+const median = (xs: number[]): number => {
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
+};
+
 /**
  * Turn the found critic ratings + the reused audience score into a grounded
  * TBSI score, ★/5, verdict, and confidence. PURE function.
  *
- * - criticConsensus (0-10): mean of each rating's explicit/5 (×2) when the
+ * - criticConsensus (0-10): MEDIAN of each rating's explicit/5 (×2) when the
  *   outlet published one, else its sentiment/5 (×2).
  * - buzz nudge (0-10): mean review SENTIMENT (×2) — Phase 1's minor tone nudge.
  * - tbsiScore: weighted blend (CRITIC/AUDIENCE/BUZZ) over the signals present,
  *   re-normalized; star = tbsiScore / 2.
- * - verdict by threshold; confidence by how much real signal exists.
+ * - verdict by ★ threshold (derived from the rounded star, so ★ and verdict
+ *   never disagree); confidence by how much real signal exists.
  * - GATE: confidence 'none' → tbsiScore/star/verdict all null (the no-score
  *   path). 'none' triggers on found:false OR zero critic ratings — we never
  *   issue a score with no critic grounding (audience alone is not enough).
@@ -159,7 +163,10 @@ export function computeVerdictScore(
     return { tbsiScore: null, star: null, verdict: null, confidence: "none" };
   }
 
-  const criticConsensus = mean(
+  // Median resists a lone outlier (e.g. a single 1.5/5 dissent) dragging the tier,
+  // while the dissent still surfaces in theRead copy. Buzz stays a mean — it's a
+  // minor 0.10 nudge, so only the CRITIC-quality consensus needs the median.
+  const criticConsensus = median(
     ratings.map(r => (r.explicitScore !== null ? r.explicitScore : r.sentimentScore) * 2)
   );
   const buzzSentiment = mean(ratings.map(r => r.sentimentScore * 2));
@@ -172,8 +179,10 @@ export function computeVerdictScore(
   const weightSum = signals.reduce((a, s) => a + s.w, 0);
   const tbsiScore = round1(signals.reduce((a, s) => a + s.w * s.v, 0) / weightSum);
   const star = round1(tbsiScore / 2);
+  // Verdict derives from the SAME rounded star the reader sees — never the raw
+  // tbsiScore — so ★ and verdict can never split at a tier boundary.
   const verdict: GroundedVerdict =
-    tbsiScore >= MUST_WATCH_MIN ? "Must Watch" : tbsiScore >= WORTH_TRY_MIN ? "Worth a Try" : "Skip";
+    star >= MUST_WATCH_STAR_MIN ? "Must Watch" : star >= WORTH_TRY_STAR_MIN ? "Worth a Try" : "Skip";
 
   return { tbsiScore, star, verdict, confidence };
 }
@@ -271,8 +280,8 @@ function assembleResearch(r: ResearchResponse, audienceScore: number | null): Ve
 /**
  * Interpret a raw research reply (text from the model) into a VerdictResearch:
  * parse → validate → deterministic score. Returns null if the reply can't be
- * parsed/validated. Exposed so the transport (API web_search vs CLI) can be
- * swapped in tests without touching the honesty/scoring logic.
+ * parsed/validated. Exposed so the transport (CLI WebSearch) can be swapped in
+ * tests without touching the honesty/scoring logic.
  */
 export function interpretResearchReply(raw: string, audienceScore: number | null): VerdictResearch | null {
   const parsed = parseResearchResponse(raw);
@@ -299,8 +308,9 @@ export function notFound(audienceScore: number | null): VerdictResearch {
 
 /**
  * Research ONE film via web search and return a grounded VerdictResearch.
- * Billed Anthropic call (web search). On an unparseable/invalid reply it retries
- * ONCE, then degrades to notFound() — never throws into the job, never fabricates.
+ * Runs on the Max-plan CLI with its built-in WebSearch tool. On an unparseable/
+ * invalid reply it retries ONCE, then degrades to notFound() — never throws into
+ * the job, never fabricates.
  */
 export async function researchVerdict(film: Release): Promise<VerdictResearch> {
   // Audience signal is REUSED from the aggregator (IMDb) — never re-fetched here.
@@ -314,8 +324,7 @@ export async function researchVerdict(film: Release): Promise<VerdictResearch> {
       : `${basePrompt}\n\nYour previous reply was not valid JSON matching the required shape. Respond with ONLY the strict JSON object — no prose, no code fences.`;
     try {
       const raw = await callClaude(prompt, RESEARCH_MODEL, {
-        tools: [WEB_SEARCH_TOOL],
-        maxTokens: RESEARCH_MAX_TOKENS,
+        webSearch: true,
       });
       const parsed = parseResearchResponse(raw);
       if (parsed) return assembleResearch(parsed, audienceScore);

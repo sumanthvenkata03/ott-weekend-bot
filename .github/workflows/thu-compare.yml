@@ -1,8 +1,9 @@
 name: Thu Compare
 
 on:
-  schedule:
-    - cron: "30 1 * * 4"
+  # scheduled runs disabled — run manually/locally
+  # schedule:
+  #   - cron: "30 1 * * 4"
   workflow_dispatch:
 
 concurrency:

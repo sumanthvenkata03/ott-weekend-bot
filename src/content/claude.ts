@@ -1,47 +1,42 @@
 // src/content/claude.ts
-import Anthropic from "@anthropic-ai/sdk";
 import { spawn } from "node:child_process";
 import { z } from "zod";
-import { config } from "../shared/config.js";
 import { log } from "../shared/logger.js";
 
 /**
- * Available models for API calls.
- * Sonnet: cheaper, faster, great for curation/listing pillars.
- * Opus: pricier, deeper editorial register, used for verdicts/spotlight/compare.
+ * Model routing. The per-pillar Sonnet/Opus split is retired — every LLM call now
+ * runs on Claude Opus 4.8 through the Max-plan CLI's --model flag. Both ModelChoice
+ * keys resolve to MODEL_ID so existing call sites keep compiling; swap the single
+ * MODEL_ID constant to change models.
  */
+export const MODEL_ID = "claude-opus-4-8";
+
 export const MODELS = {
-  sonnet: "claude-sonnet-4-6",
-  opus: "claude-opus-4-7",
+  sonnet: MODEL_ID,
+  opus: MODEL_ID,
 } as const;
 
 export type ModelChoice = keyof typeof MODELS;
 
-// Approximate per-million-token pricing for cost log line
-const PRICING = {
-  sonnet: { input: 3, output: 15 },
-  opus:   { input: 5, output: 25 },
-} as const;
-
-let anthropicClient: Anthropic | null = null;
-function getAnthropicClient(): Anthropic {
-  if (!anthropicClient) {
-    if (!config.ANTHROPIC_API_KEY) {
-      throw new Error("ANTHROPIC_API_KEY required for API mode");
-    }
-    anthropicClient = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
-  }
-  return anthropicClient;
-}
-
 /**
- * Call Claude Code CLI in headless mode. Local dev path (Max plan).
- * Always uses whatever model Claude Code defaults to (currently Opus 4.7).
- * The model parameter is accepted but ignored — CLI doesn't expose model choice in -p mode.
+ * Call Claude Code CLI in headless mode (Max plan) — the sole transport.
+ * Pipes the prompt over stdin, forces the model via --model, and (when webSearch
+ * is requested) pre-approves the built-in WebSearch tool via --allowedTools so the
+ * headless `-p` run grounds its answer without blocking on a permission prompt.
  */
-async function callClaudeCLI(prompt: string): Promise<string> {
+async function callClaudeCLI(
+  prompt: string,
+  model: ModelChoice,
+  opts?: CallOptions
+): Promise<string> {
+  const modelId = MODELS[model];
+  const args = ["-p", "--model", modelId];
+  if (opts?.webSearch) {
+    args.push("--allowedTools", "WebSearch");
+  }
+
   return new Promise((resolve, reject) => {
-    const child = spawn("claude", ["-p"], {
+    const child = spawn("claude", args, {
       stdio: ["pipe", "pipe", "pipe"],
       shell: true,
     });
@@ -67,81 +62,27 @@ async function callClaudeCLI(prompt: string): Promise<string> {
 }
 
 /**
- * Optional per-call overrides. `tools` enables server-side tools (e.g. the
- * web_search tool used by grounded Verdict research) — these run ONLY on the
- * API path; the CLI path can't execute server tools, so requesting tools without
- * an API key throws rather than silently dropping them. Threaded through the one
- * existing client (we never fork a second Anthropic instance).
+ * Optional per-call overrides. `webSearch` turns on the Max-plan CLI's built-in
+ * WebSearch tool (used by grounded Verdict research) for this one invocation — it
+ * is pre-approved via --allowedTools so the headless `-p` run never blocks on a
+ * permission prompt.
  */
 export interface CallOptions {
-  /** Server-side tools to enable (e.g. web_search). */
-  tools?: Anthropic.Messages.ToolUnion[];
-  /** Override max_tokens (default 4096). */
-  maxTokens?: number;
+  /** Enable the CLI's built-in WebSearch tool for this call. */
+  webSearch?: boolean;
 }
 
 /**
- * Call Claude via the Anthropic API with explicit model choice.
- *
- * Tools (when supplied) make the model run an agentic loop SERVER-SIDE within
- * this single request: the response.content interleaves server_tool_use +
- * web_search_tool_result + text blocks. We join only the TEXT blocks (the final
- * answer), which is exactly the same extraction used for plain calls.
- */
-async function callClaudeAPI(
-  prompt: string,
-  model: ModelChoice,
-  opts?: CallOptions
-): Promise<string> {
-  const client = getAnthropicClient();
-  const modelId = MODELS[model];
-
-  const response = await client.messages.create({
-    model: modelId,
-    max_tokens: opts?.maxTokens ?? 4096,
-    messages: [{ role: "user", content: prompt }],
-    ...(opts?.tools && opts.tools.length > 0 ? { tools: opts.tools } : {}),
-  });
-
-  const text = response.content
-    .filter(block => block.type === "text")
-    .map(block => (block as { type: "text"; text: string }).text)
-    .join("\n")
-    .trim();
-
-  const pricing = PRICING[model];
-  const cost = (response.usage.input_tokens * pricing.input + response.usage.output_tokens * pricing.output) / 1_000_000;
-  // server_tool_use web search adds its own line-item cost, billed separately by
-  // the API; this estimate covers token cost only (flagged so logs aren't read
-  // as the full bill when tools are enabled).
-  const toolNote = opts?.tools && opts.tools.length > 0 ? " + web_search (billed separately)" : "";
-  log.info(
-    `Claude API [${model}]: ${response.usage.input_tokens} in + ${response.usage.output_tokens} out tokens ` +
-    `(~$${cost.toFixed(4)}${toolNote})`
-  );
-
-  return text;
-}
-
-/**
- * Call Claude. Picks API (with chosen model) if ANTHROPIC_API_KEY is set, else falls back to CLI.
- * The `model` parameter is honored on API path; ignored on CLI path (CLI uses Max plan default).
- * `opts.tools` is API-only — requesting tools without an API key throws.
+ * Call Claude over the sole transport (Max-plan Claude Code CLI) with explicit
+ * model choice. `opts.webSearch` enables grounded research via the CLI's built-in
+ * WebSearch tool. There is no API-key path — the pipeline never needs ANTHROPIC_API_KEY.
  */
 export async function callClaude(
   prompt: string,
-  model: ModelChoice = "sonnet",
+  model: ModelChoice = "opus",
   opts?: CallOptions
 ): Promise<string> {
-  if (config.ANTHROPIC_API_KEY) {
-    return callClaudeAPI(prompt, model, opts);
-  }
-  if (opts?.tools && opts.tools.length > 0) {
-    throw new Error(
-      "Server-side tools (e.g. web_search) require ANTHROPIC_API_KEY — the CLI path can't run them."
-    );
-  }
-  return callClaudeCLI(prompt);
+  return callClaudeCLI(prompt, model, opts);
 }
 
 /**
@@ -157,7 +98,7 @@ export async function callClaude(
 export async function callClaudeJSON<T>(
   prompt: string,
   schema: z.ZodType<T>,
-  model: ModelChoice = "sonnet"
+  model: ModelChoice = "opus"
 ): Promise<T> {
   const baseInstruction = `
 
