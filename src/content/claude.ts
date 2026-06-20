@@ -32,7 +32,11 @@ async function callClaudeCLI(
   const modelId = MODELS[model];
   const args = ["-p", "--model", modelId];
   if (opts?.webSearch) {
-    args.push("--allowedTools", "WebSearch");
+    // Pre-approve WebSearch (find reviews) AND WebFetch (open the review page to
+    // read the outlet's printed rating — most ratings sit in an on-page box the
+    // search snippet drops). Comma-joined single token: the CLI accepts a "comma
+    // or space-separated list" and one token avoids shell word-splitting.
+    args.push("--allowedTools", "WebSearch,WebFetch");
   }
 
   return new Promise((resolve, reject) => {

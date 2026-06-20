@@ -30,6 +30,12 @@ import { TMDB_FALLBACK_MIN_VOTES } from "../../rendering/_shared.js";
 /** Web searches the model may run per film (prompt-level cap; CLI WebSearch tool). */
 export const MAX_SEARCHES_PER_FILM = 5;
 
+/** Review pages the model may WebFetch per film to read on-page published ratings
+ *  (prompt-level cap, like MAX_SEARCHES_PER_FILM). Most outlets print their star
+ *  rating in a box the search snippet drops, so the page must be opened to read it.
+ *  Credible professional outlets ONLY — never social/roundup/aggregator pages. */
+export const MAX_PAGE_FETCHES_PER_FILM = 6;
+
 /**
  * Cache version for the RAW research blob (the cached value in researchFilmCached).
  * Folded into the cache key. BUMP THIS ONLY when the research PROMPT text
@@ -38,8 +44,10 @@ export const MAX_SEARCHES_PER_FILM = 5;
  * bump for SCORING changes (computeVerdictScore / classification): scoring runs
  * fresh OUTSIDE the cache, so it re-tunes for free and must keep hitting the
  * existing cache. Bumping on a scoring change throws that property away.
+ *
+ * v2: added the bounded page-fetch (WebFetch) + on-page rating extraction guard.
  */
-export const RESEARCH_CACHE_VERSION = "v1";
+export const RESEARCH_CACHE_VERSION = "v2";
 
 /** Model for the per-film research call — routes to Claude Opus 4.8. */
 const RESEARCH_MODEL: ModelChoice = "opus";
@@ -179,7 +187,12 @@ export interface VerdictResearch {
 const CriticRatingSchema = z.object({
   source: z.string(),
   url: z.string(),
-  explicitScore: z.number().min(0).max(5).nullable(),
+  explicitScore: z.number().min(0).max(5).nullable().describe(
+    "ONLY a rating the outlet ACTUALLY PRINTED on its page (X/5, X/10, X%, ★), read " +
+    "off the page and normalized to 0-5. NEVER estimated, inferred, averaged, or " +
+    "converted from a verbal verdict. No stated number / paywalled / failed / un-" +
+    "fetched page → null, and sentimentScore carries it. A number found, never produced."
+  ),
   sentimentScore: z.number().min(0).max(5),
 });
 
@@ -453,11 +466,19 @@ SEARCH (up to ${MAX_SEARCHES_PER_FILM} searches):
 - Try queries like "${film.title} ${film.language} movie review rating ${year}", "${film.title} review", "${film.title} critics rating", plus outlet-specific variants.
 - Read the results. Collect EVERY distinct CRITIC review you genuinely find (professional outlets / named critics — not random user comments).
 
-FOR EACH CRITIC RATING (only ones that actually appear in your search results):
+OPEN THE PAGE TO READ THE RATING (up to ${MAX_PAGE_FETCHES_PER_FILM} page fetches):
+- Most outlets PRINT their star/numeric rating in a box at the top or bottom of the review, and that number is often NOT in the search snippet. So for the ESTABLISHED PROFESSIONAL outlets you found (e.g. 123telugu, Film Companion, The Hindu, Times of India, Cinema Express, OTTplay, Gulte, Greatandhra, Behindwoods, Hindustan Times, Bollywood Hungama, Sify, Only Kollywood), OPEN the review page (fetch it) and read the outlet's OWN published rating off the page.
+- Fetch AT MOST ${MAX_PAGE_FETCHES_PER_FILM} pages, most-established outlets first. Do NOT fetch social-media / "Twitter review" / "X review" / tweet-roundup / fan-reaction / box-office-aggregator / encyclopedia (Wikipedia, IMDb, TMDb) pages — those are not critic ratings.
+
+FOR EACH CRITIC RATING (only ones that actually appear in your search results / fetched pages):
 - source: the outlet or critic name (e.g. "The Hindu", "Film Companion").
 - url: the REAL url from the results. Never invent, guess, or "reconstruct" a url — if you are not sure it is a real result, omit that rating.
-- explicitScore: the outlet's OWN rating NORMALIZED to 0-5 (4/5→4, 8/10→4, 80%→4, 3.5/5→3.5, ★★★½→3.5). If the outlet gives NO numeric/star rating, use null.
-- sentimentScore: YOUR read of the review's tone, 0-5 (0 pan, 2.5 mixed, 5 rave), grounded in the review's actual wording.
+- explicitScore: ONLY a rating the outlet ACTUALLY PRINTED on its page — a stated "X/5", "X/10", "X%", or ★ rating you can SEE in the text. Read it off the page and NORMALIZE to 0-5 (4/5→4, 8/10→4, 80%→4, 3.5/5→3.5, ★★★½→3.5).
+  HONESTY — explicitScore is a number you FOUND, never one you PRODUCED:
+  • NEVER estimate, infer, average, guess, or convert a verbal verdict ("a must-watch", "disappointing") into a number.
+  • If the page states no rating, is paywalled, won't load, or you did not fetch it → explicitScore MUST be null. A failed or rating-less fetch is null, NEVER a filled-in number.
+  • Many genuine reviews (especially Malayalam / festival prose) carry NO rating at all — that is expected; leave explicitScore null.
+- sentimentScore: YOUR read of the review's tone, 0-5 (0 pan, 2.5 mixed, 5 rave), grounded in the review's actual wording. INDEPENDENT of explicitScore — never derive one from the other; an unrated review still gets a sentiment, and a rated one's sentiment is not "backed into" its number.
 
 ALSO REPORT:
 - buzzNote: one short qualitative phrase on chatter/anticipation IF evident (e.g. "strong pre-release buzz"); else "".
