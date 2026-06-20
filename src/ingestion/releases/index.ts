@@ -1,6 +1,6 @@
 // src/ingestion/releases/index.ts
 import { log } from "../../shared/logger.js";
-import type { Release } from "../../shared/types.js";
+import type { Release, Language } from "../../shared/types.js";
 import {
   discoverIndianReleases,
   getImdbId,
@@ -114,6 +114,38 @@ async function enrichWithRatings(releases: Release[]): Promise<Release[]> {
 }
 
 /**
+ * Reconcile the audio "original" track with the discover-derived language.
+ *
+ * `audio.original` is built upstream from TMDb's /movie/{id} original_language,
+ * which can disagree with the discover index that set `r.language` — e.g. Thank
+ * You Subbarao, a Telugu film whose detail record wrongly reports "en" (class-(a)
+ * source-data bug). `r.language` is the value the rest of the card already trusts
+ * (poster, title, fallback color), so prefer it for the original track. This
+ * self-corrects ANY future detail/discover disagreement, not just this one film.
+ *
+ * `dubbed` stays TMDb-sourced — original and dubbed are different facts (what the
+ * film IS vs which other tracks exist) and must keep separate sources. Any dub
+ * equal to the reconciled original is dropped (normalized compare) so the card
+ * never shows "Telugu · also Telugu". Falls back to the detail-derived original
+ * when `r.language` is absent or unclassified ("Other"), so films that already
+ * render correctly never regress.
+ */
+function reconcileAudioOriginal(
+  audio: { original: string; dubbed?: string[] } | undefined,
+  releaseLanguage: Language
+): { original: string; dubbed?: string[] } | undefined {
+  if (!audio) return undefined;
+  const original =
+    releaseLanguage && releaseLanguage !== "Other" ? releaseLanguage : audio.original;
+  const norm = (s: string) => s.trim().toLowerCase();
+  const dubbed = (audio.dubbed ?? []).filter(d => norm(d) !== norm(original));
+  return {
+    original,
+    ...(dubbed.length > 0 ? { dubbed } : {}),
+  };
+}
+
+/**
  * Phase 5.5 — apply credits + audio-language enrichment to a release list.
  * Pulls top-2 billed cast, music composer, and { original, dubbed } language
  * structure from TMDb in one helper call per film. Returns release records
@@ -124,11 +156,14 @@ async function enrichWithCreditsAndLanguages(releases: Release[]): Promise<Relea
     releases.map(async r => {
       if (!r.tmdbId) return r;
       const data = await getCreditsAndLanguages(r.tmdbId);
+      // Trust the discover-derived language for the original track; keep TMDb's
+      // spoken_languages for dubbed. See reconcileAudioOriginal for the why.
+      const audioLanguages = reconcileAudioOriginal(data.audioLanguages, r.language);
       return {
         ...r,
         ...(data.leadCast.length > 0 ? { leadCast: data.leadCast } : {}),
         ...(data.musicDirector ? { musicDirector: data.musicDirector } : {}),
-        ...(data.audioLanguages ? { audioLanguages: data.audioLanguages } : {}),
+        ...(audioLanguages ? { audioLanguages } : {}),
         ...(data.releaseDates ? { releaseDates: data.releaseDates } : {}),
       };
     })
