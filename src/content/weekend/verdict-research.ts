@@ -27,18 +27,32 @@ import type { Release } from "../../shared/types.js";
 /** Web searches the model may run per film (prompt-level cap; CLI WebSearch tool). */
 export const MAX_SEARCHES_PER_FILM = 5;
 
+/**
+ * Cache version for the RAW research blob (the cached value in researchFilmCached).
+ * Folded into the cache key. BUMP THIS ONLY when the research PROMPT text
+ * (buildResearchPrompt) OR the ResearchResponseSchema SHAPE changes — i.e. when an
+ * already-cached raw blob would no longer mean what a fresh fetch produces. Do NOT
+ * bump for SCORING changes (computeVerdictScore / classification): scoring runs
+ * fresh OUTSIDE the cache, so it re-tunes for free and must keep hitting the
+ * existing cache. Bumping on a scoring change throws that property away.
+ */
+export const RESEARCH_CACHE_VERSION = "v1";
+
 /** Model for the per-film research call — routes to Claude Opus 4.8. */
 const RESEARCH_MODEL: ModelChoice = "opus";
 
 /**
- * TBSI blend weights — applied over WHICHEVER signals are present and then
- * re-normalized, so a film with critics-only still scores. Phase 1: buzz is a
- * minor review-sentiment nudge only; hard buzz metrics (YouTube/Trends/Reddit)
- * are Phase 2, so BUZZ_WEIGHT is deliberately small.
+ * TBSI blend weights — applied over WHICHEVER axes are present and then
+ * re-normalized, so a film with credible critics still scores. The third axis is
+ * REVIEW TONE (mean critic-review sentiment): a minor nudge on top of the
+ * published critic numbers. It is NOT popularity/heat — no views/Trends/Reddit/
+ * buzz feeds the grounded score at all (Heat is a separate axis, a later build).
+ * The old `BUZZ_WEIGHT` is renamed REVIEW_TONE_WEIGHT (same value) so the buzz/
+ * heat namespace is left free for that build.
  */
 export const CRITIC_WEIGHT = 0.55;
 export const AUDIENCE_WEIGHT = 0.35;
-export const BUZZ_WEIGHT = 0.10;
+export const REVIEW_TONE_WEIGHT = 0.10;
 
 /**
  * Verdict thresholds on the SAME rounded ★/5 the reader sees — NOT the raw
@@ -49,8 +63,71 @@ export const BUZZ_WEIGHT = 0.10;
 export const MUST_WATCH_STAR_MIN = 4.0; // ★ ≥ 4.0 → Must Watch
 export const WORTH_TRY_STAR_MIN = 3.0; // ★ ≥ 3.0 → Worth a Try; else Skip
 
-/** Explicit critic scores required (with audience present) for a 'high' read. */
+// ── Evidence gate on Must Watch (release-day honesty) ──────────────────────
+// On the Wed→Fri window the evidence base is THIN: a couple of raves can push
+// the raw star past 4.0 with almost nothing behind it. So the top recommendation
+// is gated on real evidence — credible critics ANCHOR it, audience only
+// CORROBORATES. When the bar isn't met the star is clamped just below the Must
+// Watch line; the badge still shows the TRUE credible-critic count + EARLY, so
+// nothing is hidden. The cap NEVER pushes a score DOWN past its tier — a real
+// Skip stays a Skip; it only blocks an under-evidenced film from Must Watch.
+/** Credible critics (Tier A/B, with a published rating) needed to allow ★4.0+. */
+export const MUST_WATCH_MIN_CRITICS = 3;
+/** Audience votes that let 2 credible critics substitute for the 3rd. BOTH the
+ *  2-critic anchor AND this vote floor are required, so a fresh fan-brigaded
+ *  number can't mint a Must Watch on its own. Tunable. */
+export const MUST_WATCH_AUDIENCE_VOTES = 1000;
+/** Star ceiling when the Must Watch evidence bar isn't met (just under 4.0). */
+export const WORTH_TRY_STAR_CEIL = 3.9;
+
+/** Credible critics that make a read 'firm' (also the override's 2-critic anchor). */
 export const MIN_CRITICS_FOR_FIRM = 2;
+
+// ──────────────────────────────────────────────────────────────────────────
+// SOURCE REGISTRY — outlet → credibility tier. Editorially maintained.
+//
+// Classification is keyed on BOTH the url host AND the source name, so a bare
+// domain or a renamed/abbreviated outlet still matches:
+//   Tier A — established critics; full weight in the consensus.
+//   Tier B — real but smaller outlets (anything not in A or C). Counted at the
+//            SAME weight as A in the median for now: the median is already
+//            outlier-robust and the brief defers weighted-median complexity. To
+//            down-weight Tier B later, switch criticConsensus to a weighted
+//            median keyed on tierOf() — that's the single extension point.
+//   Tier C — grade-inflation / non-credible (rave farms). EXCLUDED from the
+//            critic consensus AND the credible-critic count (and every axis).
+//
+// A Tier A/B outlet's OWN star-rated review is a CRITIC anchor. A social/tweet
+// roundup ("Twitter review", "X review", "N tweets to read") is AUDIENCE
+// sentiment, never a critic — see isRoundup(). A review with no published score
+// is likewise treated as audience sentiment, not a critic anchor.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Tier A — established critics (full weight). Extend by adding a host and/or a
+ *  lowercased name token; matching is substring/suffix on host and on name. */
+export const TIER_A_SOURCES: { domains: string[]; names: string[] } = {
+  domains: [
+    "123telugu.com", "filmcompanion.in", "thehindu.com", "timesofindia.indiatimes.com",
+    "indianexpress.com", "cinemaexpress.com", "newindianexpress.com", "ottplay.com",
+    "hindustantimes.com", "gulte.com", "greatandhra.com", "sify.com",
+    "onlykollywood.com", "behindwoods.com", "baradwajrangan.com",
+  ],
+  names: [
+    "123telugu", "film companion", "the hindu", "times of india", "cinema express",
+    "new indian express", "indian express", "ottplay", "hindustan times", "gulte",
+    "greatandhra", "great andhra", "sify", "only kollywood", "behindwoods",
+    "baradwaj rangan",
+  ],
+};
+
+/** Tier C — EXCLUDE from the score entirely (grade-inflation / non-credible).
+ *  Seeded with the outlet named in the brief; editors extend conservatively
+ *  (denylisting a real outlet silently drops its rating). Social roundups are
+ *  caught separately by isRoundup() regardless of tier. */
+export const TIER_C_SOURCES: { domains: string[]; names: string[] } = {
+  domains: ["indian.community"],
+  names: ["indian.community", "indian community"],
+};
 
 // ──────────────────────────────────────────────────────────────────────────
 // Types
@@ -71,9 +148,13 @@ export interface CriticRating {
 export interface VerdictResearch {
   found: boolean;
   criticRatings: CriticRating[];
+  /** Tier A/B non-roundup critics (explicit OR sentiment-only) — the credible
+   *  anchor set. Feeds the evidence gate/cap AND the card badge's "N CRITICS"
+   *  (NOT criticRatings.length, which includes excluded Tier C and roundups). */
+  credibleCriticCount: number;
   /** 0-10 audience signal REUSED from the film's aggregator data (IMDb). Not re-fetched. */
   audienceScore: number | null;
-  /** Short qualitative chatter note only (hard buzz metrics are Phase 2). */
+  /** Short qualitative chatter note only (display copy; never feeds the score). */
   buzzNote: string;
   /** 0-10, computed deterministically; null when confidence is 'none'. */
   tbsiScore: number | null;
@@ -125,66 +206,215 @@ const median = (xs: number[]): number => {
   return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
 };
 
+// ── Source classification (tier + roundup) — PURE, registry-driven ──────────
+
+export type SourceTier = "A" | "B" | "C";
+
+/** Lowercased registrable host of a url ("" when unparseable). */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function matchesRegistry(
+  reg: { domains: string[]; names: string[] },
+  host: string,
+  name: string
+): boolean {
+  return (
+    reg.domains.some(d => host === d || host.endsWith(`.${d}`)) ||
+    reg.names.some(n => name.includes(n))
+  );
+}
+
+/** Credibility tier of a found rating, from its url host + source name. */
+export function tierOf(rating: CriticRating): SourceTier {
+  const host = hostOf(rating.url);
+  const name = rating.source.toLowerCase();
+  if (matchesRegistry(TIER_C_SOURCES, host, name)) return "C";
+  if (matchesRegistry(TIER_A_SOURCES, host, name)) return "A";
+  return "B";
+}
+
+/** Social/tweet roundup → AUDIENCE sentiment, not a critic. Matches roundup
+ *  tokens in the url or source name (Pinkvilla/Filmibeat "Twitter review",
+ *  "X review", "N tweets to read" pieces). Token-anchored so a normal "/review"
+ *  slug or "...express" host never trips it. */
+const ROUNDUP_RE =
+  /twitter|tweets?\b|netizen|\bx[-\s]?review|public[-\s]?talk|fan[-\s]?reaction|audience[-\s]?reaction|social[-\s]?media/i;
+export function isRoundup(rating: CriticRating): boolean {
+  return ROUNDUP_RE.test(rating.url) || ROUNDUP_RE.test(rating.source);
+}
+
+/** A CRITIC anchor: a Tier A/B outlet review that is not a social roundup —
+ *  REGARDLESS of whether we parsed an explicit score. Credibility is the
+ *  OUTLET's, not the parser's: a real critic whose star rating we failed to
+ *  extract is still a real critic (a sentiment-only review counts). The explicit
+ *  score, when present, only sharpens the median; the ≥3-credible Must Watch cap
+ *  still backstops re-inflation, so a single sentiment-only rave can't reach ★4.0+. */
+function isCredibleCritic(rating: CriticRating): boolean {
+  return tierOf(rating) !== "C" && !isRoundup(rating);
+}
+
 /**
- * Turn the found critic ratings + the reused audience score into a grounded
+ * Aggregator-derived audience signal, REUSED from the film's existing ratings
+ * (the computeTbsiScore inputs) — never re-fetched here. SUPPORTING only: it
+ * feeds the blend, the Must Watch override, and confidence. It can NEVER anchor
+ * a verdict by itself — with zero credible critics there is no grounded score,
+ * no matter how strong the numbers (release-day vote counts are tiny and
+ * brigade-prone).
+ */
+export interface AudienceSignal {
+  /** IMDb average, 0-10. */
+  imdbRating: number | null;
+  /** IMDb vote count — gates the Must Watch override + feeds confidence. */
+  imdbVotes: number | null;
+  /** Letterboxd average, 0-5. */
+  letterboxd: number | null;
+  /** TMDb community vote average, 0-10. */
+  tmdbVoteAverage: number | null;
+}
+
+/** Empty audience signal — when no aggregator data is available. */
+export const NO_AUDIENCE: AudienceSignal = {
+  imdbRating: null,
+  imdbVotes: null,
+  letterboxd: null,
+  tmdbVoteAverage: null,
+};
+
+/** Build the supporting audience signal from a film's existing aggregator data. */
+export function audienceSignalOf(film: Release): AudienceSignal {
+  return {
+    imdbRating: typeof film.imdbRating === "number" ? film.imdbRating : null,
+    imdbVotes: typeof film.imdbVotes === "number" ? film.imdbVotes : null,
+    letterboxd: typeof film.letterboxd === "number" ? film.letterboxd : null,
+    tmdbVoteAverage: typeof film.tmdbVoteAverage === "number" ? film.tmdbVoteAverage : null,
+  };
+}
+
+/**
+ * Raw research for one film — EXACTLY what the web search produces (the parsed
+ * ResearchResponse) plus the reused AudienceSignal, BEFORE any scoring. THIS is
+ * what gets cached (see researchFilmCached): scoring (computeVerdictScore) runs
+ * FRESH on top of it on every invocation, so re-tuning the scorer costs nothing
+ * and a stale verdict is structurally impossible. Bump RESEARCH_CACHE_VERSION
+ * when this shape — or the prompt that fills it — changes.
+ */
+export interface RawResearch extends ResearchResponse {
+  audience: AudienceSignal;
+}
+
+/**
+ * Turn the found critic ratings + the reused audience signal into a grounded
  * TBSI score, ★/5, verdict, and confidence. PURE function.
  *
- * - criticConsensus (0-10): MEDIAN of each rating's explicit/5 (×2) when the
- *   outlet published one, else its sentiment/5 (×2).
- * - buzz nudge (0-10): mean review SENTIMENT (×2) — Phase 1's minor tone nudge.
- * - tbsiScore: weighted blend (CRITIC/AUDIENCE/BUZZ) over the signals present,
- *   re-normalized; star = tbsiScore / 2.
- * - verdict by ★ threshold (derived from the rounded star, so ★ and verdict
- *   never disagree); confidence by how much real signal exists.
- * - GATE: confidence 'none' → tbsiScore/star/verdict all null (the no-score
- *   path). 'none' triggers on found:false OR zero critic ratings — we never
- *   issue a score with no critic grounding (audience alone is not enough).
+ * - Each found rating is classified (tierOf + isRoundup): a Tier A/B non-roundup
+ *   review → CREDIBLE CRITIC (explicit OR sentiment-only); Tier C → dropped
+ *   entirely; a social roundup → AUDIENCE sentiment.
+ * - criticConsensus (0-10): MEDIAN of the credible critics' score ×2 — explicit
+ *   when parsed, else sentiment (Tier C and roundups excluded). Outlier-robust.
+ * - audience axis (0-10): mean of the available aggregator signals (IMDb,
+ *   Letterboxd×2, TMDb) PLUS any audience-classified review sentiment ×2.
+ * - reviewTone (0-10): mean of the credible critics' SENTIMENT ×2 — a minor tone
+ *   nudge on top of the published numbers (NOT popularity/heat).
+ * - tbsiScore: weighted blend (CRITIC/AUDIENCE/REVIEW_TONE) over the axes
+ *   present, re-normalized; rawStar = tbsiScore / 2.
+ * - EVIDENCE CAP: rawStar may pass 4.0 only when meetsMustWatchEvidence (≥3
+ *   credible critics, or ≥2 with ≥MUST_WATCH_AUDIENCE_VOTES IMDb votes);
+ *   otherwise the star is clamped to WORTH_TRY_STAR_CEIL. The verdict derives
+ *   from the FINAL star, so ★ and stamp can never disagree. The cap only blocks
+ *   inflated Must Watch — it never pushes a genuinely low score down a tier.
+ * - GATE: zero credible critics (or found:false) → tbsiScore/star/verdict all
+ *   null (the no-score "too early to call" path). Audience alone NEVER grounds a
+ *   verdict.
  */
 export function computeVerdictScore(
   research: { found: boolean; criticRatings: CriticRating[] },
-  audienceScore: number | null
-): { tbsiScore: number | null; star: number | null; verdict: GroundedVerdict | null; confidence: Confidence } {
+  audience: AudienceSignal
+): {
+  tbsiScore: number | null;
+  star: number | null;
+  verdict: GroundedVerdict | null;
+  confidence: Confidence;
+  credibleCriticCount: number;
+} {
   const ratings = research.criticRatings;
-  const explicitCount = ratings.filter(r => r.explicitScore !== null).length;
+  const nonExcluded = ratings.filter(r => tierOf(r) !== "C"); // Tier C dropped from every axis
+  const credible = nonExcluded.filter(isCredibleCritic);
+  const audienceReviews = nonExcluded.filter(r => !isCredibleCritic(r)); // roundups → audience
+  const credibleCriticCount = credible.length;
 
-  // Confidence first — it gates whether we publish any score.
-  let confidence: Confidence;
-  if (!research.found || ratings.length === 0) {
-    confidence = "none";
-  } else if (explicitCount >= MIN_CRITICS_FOR_FIRM && audienceScore !== null) {
-    confidence = "high";
-  } else if (explicitCount >= 1 || ratings.length >= 2) {
-    confidence = "medium";
-  } else {
-    confidence = "low"; // a single review, sentiment only — an early read
+  // GATE — credible critics ANCHOR every grounded verdict. No critic → no score,
+  // regardless of audience (release-day votes are too thin/brigade-prone to mint
+  // a verdict). Honesty contract: never a fabricated number.
+  if (!research.found || credibleCriticCount === 0) {
+    return { tbsiScore: null, star: null, verdict: null, confidence: "none", credibleCriticCount };
   }
 
-  if (confidence === "none") {
-    return { tbsiScore: null, star: null, verdict: null, confidence: "none" };
-  }
-
-  // Median resists a lone outlier (e.g. a single 1.5/5 dissent) dragging the tier,
-  // while the dissent still surfaces in theRead copy. Buzz stays a mean — it's a
-  // minor 0.10 nudge, so only the CRITIC-quality consensus needs the median.
+  // CRITIC axis — median of the credible critics' scores (×2): the outlet's own
+  // published score when we parsed one, else our read of the review's sentiment.
+  // NO non-null assertion — `credible` now includes sentiment-only Tier-A/B
+  // reviews, so the explicit score may be absent; falling back to sentiment keeps
+  // a real critic in the consensus instead of dropping or zeroing it. Median
+  // resists a lone dissent dragging the tier; Tier B counts equally with Tier A.
   const criticConsensus = median(
-    ratings.map(r => (r.explicitScore !== null ? r.explicitScore : r.sentimentScore) * 2)
+    credible.map(r => (r.explicitScore !== null ? r.explicitScore : r.sentimentScore) * 2)
   );
-  const buzzSentiment = mean(ratings.map(r => r.sentimentScore * 2));
+
+  // AUDIENCE axis — aggregator magnitudes (each → 0-10) plus any audience-class
+  // review sentiment (×2). Present only when at least one audience signal exists;
+  // otherwise the blend re-normalizes over CRITIC + REVIEW_TONE.
+  const audienceParts: number[] = [];
+  if (audience.imdbRating !== null) audienceParts.push(audience.imdbRating);
+  if (audience.letterboxd !== null) audienceParts.push(audience.letterboxd * 2);
+  if (audience.tmdbVoteAverage !== null) audienceParts.push(audience.tmdbVoteAverage);
+  for (const r of audienceReviews) audienceParts.push(r.sentimentScore * 2);
+  const audienceAxis = audienceParts.length ? mean(audienceParts) : null;
+
+  // REVIEW TONE axis — mean of the credible critics' tone read (×2). A minor 0.10
+  // nudge on top of the published numbers; NOT popularity/heat.
+  const reviewTone = mean(credible.map(r => r.sentimentScore * 2));
 
   const signals: { w: number; v: number }[] = [
     { w: CRITIC_WEIGHT, v: criticConsensus },
-    ...(audienceScore !== null ? [{ w: AUDIENCE_WEIGHT, v: audienceScore }] : []),
-    { w: BUZZ_WEIGHT, v: buzzSentiment },
+    ...(audienceAxis !== null ? [{ w: AUDIENCE_WEIGHT, v: audienceAxis }] : []),
+    { w: REVIEW_TONE_WEIGHT, v: reviewTone },
   ];
   const weightSum = signals.reduce((a, s) => a + s.w, 0);
   const tbsiScore = round1(signals.reduce((a, s) => a + s.w * s.v, 0) / weightSum);
-  const star = round1(tbsiScore / 2);
-  // Verdict derives from the SAME rounded star the reader sees — never the raw
-  // tbsiScore — so ★ and verdict can never split at a tier boundary.
+  const rawStar = round1(tbsiScore / 2);
+
+  // EVIDENCE CAP — credible critics anchor Must Watch; audience only corroborates
+  // (2-critic anchor AND a real vote floor BOTH required, so a brigaded number
+  // can't substitute on its own). When the bar isn't met, clamp the star just
+  // under the Must Watch line. Never caps DOWNWARD past a tier — a real Skip
+  // stays a Skip. tbsiScore stays the uncapped blend (not shown on the ★ seal).
+  const imdbVotes = audience.imdbVotes ?? 0;
+  const meetsMustWatchEvidence =
+    credibleCriticCount >= MUST_WATCH_MIN_CRITICS ||
+    (credibleCriticCount >= MIN_CRITICS_FOR_FIRM && imdbVotes >= MUST_WATCH_AUDIENCE_VOTES);
+  const star = meetsMustWatchEvidence ? rawStar : Math.min(rawStar, WORTH_TRY_STAR_CEIL);
+
+  // Verdict derives from the FINAL (capped) star — never the raw tbsiScore — so
+  // the ★ and the verdict stamp can never split at a tier boundary.
   const verdict: GroundedVerdict =
     star >= MUST_WATCH_STAR_MIN ? "Must Watch" : star >= WORTH_TRY_STAR_MIN ? "Worth a Try" : "Skip";
 
-  return { tbsiScore, star, verdict, confidence };
+  // Confidence from COUNTABLE evidence (not a vibe) — drives the seal's EARLY vs
+  // TBSI badge. 'low' (a single credible critic) ⊆ the cap-firing set, so an
+  // EARLY badge always coincides with a clamped star; the cap independently
+  // blocks any sub-bar film from Must Watch regardless of the badge.
+  const confidence: Confidence = meetsMustWatchEvidence
+    ? "high"
+    : credibleCriticCount >= MIN_CRITICS_FOR_FIRM
+      ? "medium"
+      : "low";
+
+  return { tbsiScore, star, verdict, confidence, credibleCriticCount };
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -259,21 +489,42 @@ function parseResearchResponse(raw: string): ResearchResponse | null {
   return null;
 }
 
-function assembleResearch(r: ResearchResponse, audienceScore: number | null): VerdictResearch {
-  const scored = computeVerdictScore({ found: r.found, criticRatings: r.criticRatings }, audienceScore);
+/**
+ * Score RAW research into a grounded VerdictResearch. PURE — runs OUTSIDE the
+ * research cache (researchFilmCached caches the RawResearch blob, then calls
+ * this), so the verdict ALWAYS reflects the current scoring logic and re-running
+ * re-scores at zero cost. No web access, fixture-testable.
+ */
+export function scoreResearch(raw: RawResearch): VerdictResearch {
+  const scored = computeVerdictScore({ found: raw.found, criticRatings: raw.criticRatings }, raw.audience);
   return {
-    found: r.found,
-    criticRatings: r.criticRatings,
-    audienceScore,
-    buzzNote: r.buzzNote,
+    found: raw.found,
+    criticRatings: raw.criticRatings,
+    credibleCriticCount: scored.credibleCriticCount,
+    audienceScore: raw.audience.imdbRating,
+    buzzNote: raw.buzzNote,
     tbsiScore: scored.tbsiScore,
     star: scored.star,
     verdict: scored.verdict,
     confidence: scored.confidence,
-    summaryLine: r.summaryLine,
-    theRead: r.theRead,
-    watchIf: r.watchIf,
-    sources: r.sources,
+    summaryLine: raw.summaryLine,
+    theRead: raw.theRead,
+    watchIf: raw.watchIf,
+    sources: raw.sources,
+  };
+}
+
+/** Empty raw research — the honest "nothing found" blob (no fabricated verdict). */
+export function rawNotFound(audience: AudienceSignal): RawResearch {
+  return {
+    found: false,
+    criticRatings: [],
+    buzzNote: "",
+    summaryLine: "",
+    theRead: "",
+    watchIf: "",
+    sources: [],
+    audience,
   };
 }
 
@@ -283,38 +534,29 @@ function assembleResearch(r: ResearchResponse, audienceScore: number | null): Ve
  * parsed/validated. Exposed so the transport (CLI WebSearch) can be swapped in
  * tests without touching the honesty/scoring logic.
  */
-export function interpretResearchReply(raw: string, audienceScore: number | null): VerdictResearch | null {
+export function interpretResearchReply(raw: string, audience: AudienceSignal): VerdictResearch | null {
   const parsed = parseResearchResponse(raw);
-  return parsed ? assembleResearch(parsed, audienceScore) : null;
+  return parsed ? scoreResearch({ ...parsed, audience }) : null;
 }
 
-/** Honest "nothing found" result — the NO SCORE YET path, no fabricated verdict. */
-export function notFound(audienceScore: number | null): VerdictResearch {
-  return {
-    found: false,
-    criticRatings: [],
-    audienceScore,
-    buzzNote: "",
-    tbsiScore: null,
-    star: null,
-    verdict: null,
-    confidence: "none",
-    summaryLine: "",
-    theRead: "",
-    watchIf: "",
-    sources: [],
-  };
+/** Honest "nothing found" result — the NO SCORE YET path, no fabricated verdict.
+ *  Scores the empty raw blob, so it stays in lockstep with scoreResearch(). */
+export function notFound(audience: AudienceSignal): VerdictResearch {
+  return scoreResearch(rawNotFound(audience));
 }
 
 /**
- * Research ONE film via web search and return a grounded VerdictResearch.
- * Runs on the Max-plan CLI with its built-in WebSearch tool. On an unparseable/
- * invalid reply it retries ONCE, then degrades to notFound() — never throws into
- * the job, never fabricates.
+ * Fetch RAW research for ONE film via web search — the found flag + criticRatings
+ * + buzzNote + copy + the reused AudienceSignal, BEFORE any scoring. Runs on the
+ * Max-plan CLI with its built-in WebSearch tool. On an unparseable/invalid reply
+ * it retries ONCE, then degrades to rawNotFound() — never throws into the job,
+ * never fabricates. THIS is the cached unit (researchFilmCached caches it);
+ * scoreResearch() runs afterwards, outside the cache.
  */
-export async function researchVerdict(film: Release): Promise<VerdictResearch> {
-  // Audience signal is REUSED from the aggregator (IMDb) — never re-fetched here.
-  const audienceScore = typeof film.imdbRating === "number" ? film.imdbRating : null;
+export async function fetchRawResearch(film: Release): Promise<RawResearch> {
+  // Audience signal is REUSED from the aggregator (IMDb/Letterboxd/TMDb) — never
+  // re-fetched here. Supporting only; credible critics anchor the verdict.
+  const audience = audienceSignalOf(film);
   const year = (film.releaseDate ?? "").slice(0, 4);
   const basePrompt = buildResearchPrompt(film, year);
 
@@ -327,14 +569,23 @@ export async function researchVerdict(film: Release): Promise<VerdictResearch> {
         webSearch: true,
       });
       const parsed = parseResearchResponse(raw);
-      if (parsed) return assembleResearch(parsed, audienceScore);
-      log.warn(`researchVerdict(${film.title}): attempt ${attempt} — unparseable/invalid reply`);
+      if (parsed) return { ...parsed, audience };
+      log.warn(`fetchRawResearch(${film.title}): attempt ${attempt} — unparseable/invalid reply`);
     } catch (err) {
       log.warn(
-        `researchVerdict(${film.title}): attempt ${attempt} errored — ` +
+        `fetchRawResearch(${film.title}): attempt ${attempt} errored — ` +
         `${err instanceof Error ? err.message : String(err)}`
       );
     }
   }
-  return notFound(audienceScore);
+  return rawNotFound(audience);
+}
+
+/**
+ * Research ONE film and return a grounded VerdictResearch (fetch raw → score).
+ * Convenience wrapper; the JOB instead caches fetchRawResearch() and calls
+ * scoreResearch() separately, so scoring stays OUTSIDE the cache boundary.
+ */
+export async function researchVerdict(film: Release): Promise<VerdictResearch> {
+  return scoreResearch(await fetchRawResearch(film));
 }

@@ -9,8 +9,12 @@ import {
   type GroundedCoverFilm,
 } from "../content/weekend/saturday-verdict.js";
 import {
-  researchVerdict,
+  fetchRawResearch,
+  scoreResearch,
   notFound,
+  audienceSignalOf,
+  RESEARCH_CACHE_VERSION,
+  type RawResearch,
   type VerdictResearch,
   type GroundedVerdict,
 } from "../content/weekend/verdict-research.js";
@@ -114,20 +118,24 @@ async function mapWithConcurrency<T, R>(
 }
 
 /**
- * Research one film, cached by IMDb id (fallback title+releaseDate). The loader
- * runs only on a cache miss, so a silent run = a hit, which we log. The billed
- * web-search call lives behind this cache.
+ * Research one film, cached by IMDb id (fallback title+releaseDate). ONLY the RAW
+ * research (web-search output) is cached; scoring runs FRESH below, OUTSIDE the
+ * cache boundary, so re-tuning the scorer needs no cache bust and a stale verdict
+ * is structurally impossible. The billed web-search call lives behind this cache;
+ * a silent run = a hit, which we log. RESEARCH_CACHE_VERSION is folded into the
+ * key (bump only when the research prompt/shape changes — see its definition).
  */
 async function researchFilmCached(film: Release): Promise<VerdictResearch> {
-  const key = `verdict-research:${film.imdbId ?? `${film.title}|${film.releaseDate}`}`;
+  const id = film.imdbId ?? `${film.title}|${film.releaseDate}`;
+  const key = `verdict-research:${RESEARCH_CACHE_VERSION}:${id}`;
   let miss = false;
-  const result = await cached<VerdictResearch>(
+  const raw = await cached<RawResearch>(
     key,
-    async () => { miss = true; return researchVerdict(film); },
+    async () => { miss = true; return fetchRawResearch(film); },
     { ttlSeconds: RESEARCH_CACHE_TTL_HOURS * 3600 }
   );
   if (!miss) log.info(`  cache hit — ${film.title}`);
-  return result;
+  return scoreResearch(raw);
 }
 
 /**
@@ -188,9 +196,12 @@ export function selectVerdictCards(
   return { selected, trimmedSkips };
 }
 
-async function main() {
+async function main(deliver = true) {
   log.info("⚖️  Saturday Verdict job — starting");
-  
+  if (!deliver) {
+    log.warn("DRY RUN — no delivery (--no-deliver): render + score + table run; R2/Notion/Slack skipped");
+  }
+
   purgeExpired();
   
   const { startDate, endDate } = pickVerdictWindow(new Date());
@@ -226,7 +237,7 @@ async function main() {
     ...deepFilms.map((film, i) => ({ film, research: deepResults[i]! })),
     ...tailFilms.map(film => ({
       film,
-      research: notFound(typeof film.imdbRating === "number" ? film.imdbRating : null),
+      research: notFound(audienceSignalOf(film)),
     })),
   ];
 
@@ -235,10 +246,13 @@ async function main() {
     if (research.verdict !== null && research.star !== null) {
       log.info(
         `  ${film.title} — ★${research.star.toFixed(1)} (${research.verdict}, conf ${research.confidence})` +
-        ` · ${research.criticRatings.length} critic(s)`
+        ` · ${research.credibleCriticCount} credible critic(s) of ${research.criticRatings.length} found`
       );
     } else {
-      log.info(`  ${film.title} — no grounded score (conf ${research.confidence})`);
+      log.info(
+        `  ${film.title} — no grounded score (conf ${research.confidence})` +
+        ` · ${research.credibleCriticCount} credible critic(s) of ${research.criticRatings.length} found`
+      );
     }
   }
 
@@ -306,11 +320,10 @@ async function main() {
     releases: selected.map(e => e.release).filter((r): r is Release => r !== undefined),
   };
 
-  // ALSO SKIPPING = trimmed grounded Skips + every no-score film (named, not carded).
-  const alsoSkipping = [
-    ...trimmedSkips.map(e => e.slide.filmTitle),
-    ...noScoreFilms.map(r => r.film.title),
-  ];
+  // ALSO SKIPPING = ONLY genuine trimmed Skip-verdict films. No-score
+  // (found:false / "too early to call") films are NOT skips — we never judged
+  // them — so they are omitted entirely rather than listed as "skipping".
+  const alsoSkipping = trimmedSkips.map(e => e.slide.filmTitle);
 
   // Verdict tally for the SELECTED carousel (what actually ships).
   const tally = draft.verdicts.reduce<Record<string, number>>((acc, v) => {
@@ -334,6 +347,17 @@ async function main() {
       `Sat Verdict rendered ${cardCount} cards but selected ${draft.verdicts.length}. ` +
       `Render/selection out of sync.`
     );
+  }
+
+  // DRY RUN — stop here. Everything above (research, scoring, the per-film table,
+  // PNG render to output/posts) has run; only the outward-facing delivery (R2
+  // upload + Notion write + Slack notify) is skipped, so tuning runs never push.
+  if (!deliver) {
+    log.success(
+      `\n✅ Sat Verdict DRY RUN complete — no delivery. ` +
+      `${cardCount} card(s) + cover in output/posts (cover: ${renderResult.coverPath})`
+    );
+    return;
   }
 
   log.info("Uploading to R2...");
@@ -402,7 +426,10 @@ const isMainModule = import.meta.url.endsWith(
 );
 
 if (isMainModule) {
-  main()
+  // `npm run job:saturday -- --no-deliver` (or DELIVER=false) → render + score +
+  // print the table, but skip R2/Notion/Slack. Default: deliver.
+  const deliver = !process.argv.includes("--no-deliver") && process.env.DELIVER !== "false";
+  main(deliver)
     .catch(async (err) => {
       log.error("Saturday Verdict job failed", err);
       await notifyJobFailure("Sat Verdict", err instanceof Error ? err.message : String(err));

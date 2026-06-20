@@ -200,7 +200,9 @@ export async function renderSatVerdict(
           star: research.star,
           confidence: research.confidence,
           audienceImdb: research.audienceScore,
-          criticCount: research.criticRatings.length,
+          // Badge shows the CREDIBLE critic count (Tier A/B w/ a published score),
+          // not every found rating — matches the count that gates the evidence cap.
+          criticCount: research.credibleCriticCount,
         },
       } : {}),
     });
@@ -262,7 +264,9 @@ if (isMainModule) {
           criticRatings: [
             { source: "The Hindu", url: "https://www.thehindu.com/reviews/pennum-porattum", explicitScore: 4.5, sentimentScore: 4.5 },
             { source: "Film Companion", url: "https://www.filmcompanion.in/reviews/pennum-porattum", explicitScore: 4, sentimentScore: 4 },
+            { source: "123telugu", url: "https://www.123telugu.com/reviews/pennum-porattum", explicitScore: 4, sentimentScore: 4 },
           ],
+          credibleCriticCount: 3,
           audienceScore: 8.8,
           buzzNote: "strong festival word-of-mouth",
           tbsiScore: 8.6,
@@ -286,13 +290,15 @@ if (isMainModule) {
         whereItWins: "Mammootty's central performance and the production design.",
         whereItLoses: "Last act doesn't land its mythology.",
         watchSetup: "Night, headphones on.",
-        // Verification-only sample research: LOW-confidence (one review, no
-        // explicit score) → seal labels it "EARLY" with the ★ still shown.
+        // Verification-only sample research: LOW-confidence (a single credible
+        // critic) → seal labels it "EARLY" with the ★ still shown. The single
+        // critic also trips the evidence cap, so the star can't reach Must Watch.
         research: {
           found: true,
           criticRatings: [
-            { source: "Letterboxd (early)", url: "https://letterboxd.com/film/bramayugam", explicitScore: null, sentimentScore: 3 },
+            { source: "Cinema Express", url: "https://www.cinemaexpress.com/reviews/bramayugam", explicitScore: 3, sentimentScore: 3 },
           ],
+          credibleCriticCount: 1,
           audienceScore: 7,
           buzzNote: "",
           tbsiScore: 6.4,
@@ -323,6 +329,7 @@ if (isMainModule) {
         research: {
           found: false,
           criticRatings: [],
+          credibleCriticCount: 0,
           audienceScore: null,
           buzzNote: "",
           tbsiScore: null,
