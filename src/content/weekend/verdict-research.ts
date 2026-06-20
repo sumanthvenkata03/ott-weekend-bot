@@ -19,6 +19,9 @@ import { callClaude } from "../claude.js";
 import type { ModelChoice } from "../claude.js";
 import { log } from "../../shared/logger.js";
 import type { Release } from "../../shared/types.js";
+// SHARED with the stamp path (buildStampContext) — one definition so the two
+// TMDb vote floors can't drift. Re-homing to src/shared/ is a later cleanup.
+import { TMDB_FALLBACK_MIN_VOTES } from "../../rendering/_shared.js";
 
 // ──────────────────────────────────────────────────────────────────────────
 // TUNABLE EDITORIAL DIALS (Phase 1). All weights/thresholds live here.
@@ -276,6 +279,9 @@ export interface AudienceSignal {
   letterboxd: number | null;
   /** TMDb community vote average, 0-10. */
   tmdbVoteAverage: number | null;
+  /** TMDb vote count — gates tmdbVoteAverage behind the vote floor (a brand-new
+   *  film reports average 0.0 on 0 votes, which must NOT enter the blend). */
+  tmdbVoteCount: number | null;
 }
 
 /** Empty audience signal — when no aggregator data is available. */
@@ -284,6 +290,7 @@ export const NO_AUDIENCE: AudienceSignal = {
   imdbVotes: null,
   letterboxd: null,
   tmdbVoteAverage: null,
+  tmdbVoteCount: null,
 };
 
 /** Build the supporting audience signal from a film's existing aggregator data. */
@@ -293,6 +300,7 @@ export function audienceSignalOf(film: Release): AudienceSignal {
     imdbVotes: typeof film.imdbVotes === "number" ? film.imdbVotes : null,
     letterboxd: typeof film.letterboxd === "number" ? film.letterboxd : null,
     tmdbVoteAverage: typeof film.tmdbVoteAverage === "number" ? film.tmdbVoteAverage : null,
+    tmdbVoteCount: typeof film.tmdbVoteCount === "number" ? film.tmdbVoteCount : null,
   };
 }
 
@@ -371,8 +379,18 @@ export function computeVerdictScore(
   const audienceParts: number[] = [];
   if (audience.imdbRating !== null) audienceParts.push(audience.imdbRating);
   if (audience.letterboxd !== null) audienceParts.push(audience.letterboxd * 2);
-  if (audience.tmdbVoteAverage !== null) audienceParts.push(audience.tmdbVoteAverage);
+  // TMDb community average is trustworthy ONLY above the vote-count floor — a
+  // brand-new film reports vote_average 0.0 on 0 votes, and that literal 0 must
+  // NOT enter the mean as a real 0/10 pan (it manufactured false Skips). Same rule
+  // the stamp path uses (shared TMDB_FALLBACK_MIN_VOTES). Below the floor — incl.
+  // the zero-vote / unknown-count case — treat tmdbVoteAverage as ABSENT.
+  if (audience.tmdbVoteAverage !== null && (audience.tmdbVoteCount ?? 0) >= TMDB_FALLBACK_MIN_VOTES) {
+    audienceParts.push(audience.tmdbVoteAverage);
+  }
   for (const r of audienceReviews) audienceParts.push(r.sentimentScore * 2);
+  // Each component above enters only when present — a null/absent signal is
+  // EXCLUDED from the mean, never folded in as 0. No signals → null (the blend
+  // then re-normalizes over CRITIC + REVIEW_TONE).
   const audienceAxis = audienceParts.length ? mean(audienceParts) : null;
 
   // REVIEW TONE axis — mean of the credible critics' tone read (×2). A minor 0.10

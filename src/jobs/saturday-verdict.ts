@@ -135,7 +135,12 @@ async function researchFilmCached(film: Release): Promise<VerdictResearch> {
     { ttlSeconds: RESEARCH_CACHE_TTL_HOURS * 3600 }
   );
   if (!miss) log.info(`  cache hit — ${film.title}`);
-  return scoreResearch(raw);
+  // Score with a FRESH audience signal, never the one frozen in the cached blob:
+  // audience is deterministic aggregator data (not research output), so re-deriving
+  // it from the current film keeps newly-threaded fields (e.g. tmdbVoteCount) live
+  // and avoids serving stale aggregator values. Cached criticRatings are still
+  // reused — this triggers no web search. DO NOT re-freeze audience into the cache.
+  return scoreResearch({ ...raw, audience: audienceSignalOf(film) });
 }
 
 /**

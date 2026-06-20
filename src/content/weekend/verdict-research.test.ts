@@ -77,7 +77,9 @@ const aud = (
   imdbRating: number | null,
   imdbVotes: number | null = null,
   extra: Partial<AudienceSignal> = {}
-): AudienceSignal => ({ imdbRating, imdbVotes, letterboxd: null, tmdbVoteAverage: null, ...extra });
+): AudienceSignal => ({
+  imdbRating, imdbVotes, letterboxd: null, tmdbVoteAverage: null, tmdbVoteCount: null, ...extra,
+});
 const NO_AUD = aud(null);
 
 // ── Asserting helpers (self-counting) ──
@@ -269,6 +271,62 @@ console.log("  Tier A/B/C + roundup classification OK\n");
   eq(r.star, 3.9, "only 1 credible critic → cap fires");
   eq(r.verdict, "Worth a Try");
   eq(r.confidence, "low");
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// (5) TMDb VOTE FLOOR — a zero-vote tmdbVoteAverage (0.0) must NOT enter the
+//     audience mean as a real 0/10 pan. Gated behind TMDB_FALLBACK_MIN_VOTES (50),
+//     the same floor the stamp path uses.
+// ════════════════════════════════════════════════════════════════════════════
+
+// (tmdb-a) NOORU SAMI PIN — tmdbVoteAverage=0 on 0 votes, two sentiment-only
+// credible critics at 7.5/10, no imdb/letterboxd. The phantom 0 is DROPPED →
+// audienceScore null → blend re-normalizes over critic+tone → ★3.8 "Worth a Try".
+// With the bug (0 counted) audience would be 0 → tbsi 4.9 → ★2.5 SKIP (the false Skip).
+{
+  const r = check("(tmdb-a) zero-vote TMDb (Nooru Sami)", [critic(null, 4), critic(null, 3.5)],
+    aud(null, null, { tmdbVoteAverage: 0, tmdbVoteCount: 0 }));
+  eq(r.tbsiScore, 7.5, "critic+tone only — phantom 0 dropped (would be 4.9 if counted)");
+  eq(r.star, 3.8);
+  eq(r.verdict, "Worth a Try", "leaves Skip once the phantom 0 is gone");
+  eq(r.credibleCriticCount, 2);
+  eq(r.confidence, "medium");
+}
+
+// (tmdb-b) REAL TMDb (control, Maa Inti shape) — tmdbVoteAverage=7 on 100 votes
+// (≥ floor) → counts as a genuine audience signal. Unchanged behavior.
+{
+  const r = check("(tmdb-b) real TMDb (≥50 votes)", [critic(3, 3), critic(3, 3)],
+    aud(null, null, { tmdbVoteAverage: 7, tmdbVoteCount: 100 }));
+  eq(r.tbsiScore, 6.4, "tmdbAvg=7 counts (would be 6.0 if wrongly dropped)");
+  eq(r.star, 3.2);
+  eq(r.verdict, "Worth a Try");
+  eq(r.credibleCriticCount, 2);
+}
+
+// (tmdb-c) BALAN SHAPE — real IMDb 8.3 + phantom tmdbVoteAverage=0/0 votes. Audience
+// axis = 8.3 ALONE (not mean(8.3,0)=4.15). With 3 credible critics the un-halved
+// audience lets it reach ★4.0 "Must Watch"; the bug (audience 4.15) caps it to ★3.3.
+{
+  const r = check("(tmdb-c) IMDb 8.3 + phantom TMDb 0 (Balan)", [critic(null, 4), critic(null, 4), critic(null, 3)],
+    aud(8.3, null, { tmdbVoteAverage: 0, tmdbVoteCount: 0 }));
+  eq(r.tbsiScore, 8.0, "audience = imdb 8.3 alone, NOT mean(8.3,0)=4.15");
+  eq(r.star, 4.0);
+  eq(r.verdict, "Must Watch", "un-halved audience clears Must Watch");
+  eq(r.credibleCriticCount, 3);
+  eq(r.confidence, "high");
+}
+
+// (tmdb-d) BELOW-FLOOR NONZERO — tmdbVoteAverage=6 on 10 votes (< 50) → dropped,
+// not counted. Two credible critics at 8/10; audience drops out → ★3.9 "Worth a
+// Try". If counted (audience=6) tbsi would fall 8.0 → 7.3.
+{
+  const r = check("(tmdb-d) below-floor TMDb (10 votes)", [critic(4, 4), critic(4, 4)],
+    aud(null, null, { tmdbVoteAverage: 6, tmdbVoteCount: 10 }));
+  eq(r.tbsiScore, 8.0, "10 votes < floor → tmdbAvg=6 dropped (would be 7.3 if counted)");
+  eq(r.star, 3.9);
+  eq(r.verdict, "Worth a Try");
+  eq(r.credibleCriticCount, 2);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
