@@ -14,7 +14,7 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
     width: 1080px;
-    height: 1350px;
+    height: 1080px;
     overflow: hidden;
     font-family: 'Playfair Display', Georgia, serif;
     background: var(--ink);
@@ -31,7 +31,7 @@
   .hero {
     position: absolute;
     top: 0; left: 0; right: 0;
-    height: 78%;
+    height: 100%;
     background-color: {{ hero.fallbackColor }};
     overflow: hidden;
   }
@@ -173,41 +173,41 @@
     margin-top: 2px;
   }
 
-  /* Title block — anchored from bottom so its content ends at y=1050,
-     giving 30px clearance above the poster strip that starts at y=1080.
-     1350 - 1050 = 300px from bottom. */
+  /* Title block — bottom-anchored. On the 1080 square it ends at y≈760, above the
+     swipe cue (≈790) and poster strip (≈835). Headline/hot-take sized down from
+     the old 4:5 cover so a 3-line ruling + 2-line dek still clear the strip. */
   .title-block {
     position: absolute;
-    bottom: 300px;
+    bottom: 320px;
     left: 70px;
     right: 70px;
     z-index: 10;
   }
   .title-block .kicker {
     font-family: 'Playfair Display', serif;
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 500;
     letter-spacing: 6px;
     color: var(--brass);
-    margin-bottom: 18px;
+    margin-bottom: 12px;
     text-transform: uppercase;
   }
   .title-block .headline {
     font-family: 'Playfair Display', serif;
-    font-size: 64px;
+    font-size: 48px;
     font-weight: 700;
-    letter-spacing: -1.5px;
-    line-height: 1.02;
+    letter-spacing: -1px;
+    line-height: 1.04;
     color: var(--cream);
   }
   .title-block .hot-take {
     font-family: 'Playfair Display', serif;
     font-style: italic;
-    font-size: 30px;
+    font-size: 25px;
     font-weight: 400;
     line-height: 1.3;
     color: var(--brass);
-    margin-top: 20px;
+    margin-top: 14px;
   }
   /* "ALSO SKIPPING" — only shown when the selector trims Skip films past the
      card cap. Sits as the last line of the title block (which is bottom-anchored
@@ -227,21 +227,21 @@
   }
   .title-block .also-skipping .lead { color: var(--vermillion); }
 
-  /* Poster strip — 3 inset tiles between y=1080 and y=1260, above the footer.
-     Tile group is 780px wide centered (240*3 + 30*2), starting at x=150.
-     Labels sit at y=1245, just below the 160-tall tiles. */
+  /* Poster strip — 3 inset tiles bottom-anchored above the footer (square cover:
+     tiles span y≈841–965, footer rule ≈992). Tile group is 690px wide centered
+     (210*3 + 30*2), starting at x=195 (step 240). */
   .poster-strip {
     position: absolute;
-    top: 1080px;
+    bottom: 115px;
     left: 0; right: 0;
-    height: 180px;
+    height: 124px;
     z-index: 8;
   }
   .strip-tile {
     position: absolute;
     top: 0;
-    width: 240px;
-    height: 160px;
+    width: 210px;
+    height: 124px;
     border: 1.5px solid var(--brass);
     overflow: hidden;
   }
@@ -284,7 +284,7 @@
   /* Footer mark */
   .footer {
     position: absolute;
-    bottom: 60px;
+    bottom: 50px;
     left: 70px;
     right: 70px;
     display: flex;
@@ -372,9 +372,9 @@
      chevrons clear of bottom wordmarks while staying below the corner stamp. */
   .swipe-gutter {
     position: absolute;
-    top: 300px;
+    top: 230px;
     right: 0;
-    height: 200px;
+    height: 170px;
     width: 19%;
     z-index: 9;
     pointer-events: none;
@@ -480,7 +480,7 @@
   <!-- POSTER STRIP — 3 inset tiles representing each verdict film -->
   <div class="poster-strip">
     {% for tile in posterStrip %}
-    <div class="strip-tile" style="left: {{ 150 + loop.index0 * 270 }}px; background-color: {{ tile.posterFallbackColor }};">
+    <div class="strip-tile" style="left: {{ 195 + loop.index0 * 240 }}px; background-color: {{ tile.posterFallbackColor }};">
       {% if tile.posterUrl %}
         <img src="{{ tile.posterUrl }}" class="strip-img" alt="" onerror="this.style.display='none'" />
       {% endif %}

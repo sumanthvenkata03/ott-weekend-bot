@@ -161,7 +161,9 @@ export async function renderSatVerdict(
   await renderToPNG({
     templateName: "sat-verdict-cover",
     data: coverCtx as unknown as Record<string, unknown>,
-    width: 1080, height: 1350,
+    // 1:1 square to match the 1080x1080 body cards — a mixed-ratio carousel makes
+    // Instagram crop the odd slide out (the 4:5 cover lost its masthead + footer).
+    width: 1080, height: 1080,
     outputPath: coverPath,
   });
 

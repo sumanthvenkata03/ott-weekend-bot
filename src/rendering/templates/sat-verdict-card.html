@@ -281,48 +281,66 @@
     display: block;
   }
 
-  /* Verdict stamp variants */
+  /* Verdict stamp variants — HERO treatment (Phase 6).
+     For a brand called "The Verdict," the verdict is the card's anchor: a large,
+     upright, flex-centered block in the lower-right, inside the 24px safe margin
+     and clear of the footer. ONE fixed footprint (320 x min 200) holds all three
+     labels; each is centered on BOTH axes, so "SKIP" (1 line) and the two-line
+     "MUST WATCH" / "WORTH A TRY" all sit identically issue-to-issue.
+     No per-variant <br>: line-wrapping falls out of the box width. The content
+     width fits a single stacked word ("WATCH" / "WORTH" / "A TRY") but NOT
+     "WORTH A" or "MUST WATCH", so the long labels break themselves onto two
+     balanced lines while "SKIP" stays one — purely from width, no hand-placed
+     tags. transform:none — upright reads more authoritative AND removes any
+     rotated-corner overflow past the safe margin on the longest label. */
   .verdict-stamp {
     position: absolute;
-    bottom: 130px;
+    bottom: 112px;
     right: 24px;
-    transform: rotate(-6deg);
-    padding: 12px 20px;
-    z-index: 10;
+    width: 320px;
+    min-height: 200px;
+    transform: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     text-align: center;
+    padding: 22px 20px;
+    z-index: 10;
     font-family: 'Playfair Display', serif;
     font-weight: 700;
   }
   .verdict-stamp .kicker {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
     letter-spacing: 3px;
-    margin-bottom: 2px;
+    margin-bottom: 12px;
   }
   .verdict-stamp .label {
-    font-size: 26px;
-    letter-spacing: 4px;
+    font-size: 58px;
+    letter-spacing: 2px;
+    line-height: 0.94;
   }
+  /* Color semantics preserved at hero scale — three instantly-distinct looks that
+     keep contrast on BOTH card backgrounds (mustard for must-watch/worth-a-try,
+     cream for skip): must-watch = filled vermillion/cream, worth-a-try = filled
+     ink/brass, skip = vermillion outline. Border weights thickened to stay
+     proportional to the larger footprint. */
   .verdict-must-watch {
     background: var(--vermillion);
     color: var(--cream);
-    border: 2px solid var(--cream);
-    box-shadow: inset 0 0 0 4px var(--vermillion);
+    border: 3px solid var(--cream);
+    box-shadow: inset 0 0 0 6px var(--vermillion);
   }
   .verdict-worth-a-try {
     background: var(--ink);
     color: var(--brass);
-    border: 2px solid var(--brass);
+    border: 3px solid var(--brass);
   }
   .verdict-skip {
     background: transparent;
     color: var(--vermillion);
-    border: 5px solid var(--vermillion);
-    padding: 14px 28px;
-  }
-  .verdict-skip .label {
-    font-size: 32px;
-    letter-spacing: 8px;
+    border: 7px solid var(--vermillion);
   }
 
   /* Phase 5.6 — must-watch and worth-a-try variants have a brass body bg,
@@ -381,26 +399,35 @@
   }
   .footer .meta { font-family: 'JetBrains Mono', monospace; font-size: 14px; letter-spacing: 1px; }
 
-  /* TBSI stamp — Sat Verdict seats the seal in the metadata column's MID-RIGHT
-     whitespace, above the existing verdict-stamp (bottom:130) and clear of the
-     top .platform-line. Shared visual CSS in _design-tokens.html. Note: on the
-     must-watch / worth-a-try mustard background the brass ring sits on brass —
-     the dark ink disc still reads, but contrast is softer than on cream. */
+  /* TBSI score seal — Phase 6.1: the ★ score IS the Index's brand, so it becomes
+     a LARGE wax-stamp pressed onto the poster's lower-left, not a small metadata
+     accent. Anchored to the poster's FIXED lower-left corner (left+bottom don't
+     move with density — only the poster's right edge does), so it lands cleanly
+     on the art across compact/standard/dense. Canvas-level + z-index:5 paints it
+     over the poster image; −6° tilt sells the stamped-on feel. This frees the
+     metadata column entirely for the verdict hero (the lower-right pocket now
+     holds the verdict alone). Score logic untouched — positioning wrapper only;
+     the SVG scales with the wrapper. Internal contrast (ink disc + brass ring/
+     text) keeps it legible over both dark and light poster art. */
   .tbsi-stamp-wrap {
     position: absolute;
-    bottom: 250px;
-    right: 48px;
-    width: 150px;
-    height: 150px;
+    bottom: 210px;
+    left: 44px;
+    width: 300px;
+    height: 300px;
     transform: rotate(-6deg);
     pointer-events: none;
     z-index: 5;
   }
-  /* Reserve the seal's mid-right pocket: when a seal is present, wrap the lower
-     copy (verdict one-liner + WATCH IF) before its left edge so no text runs
-     under it. Gated on tbsiScore so rating-less cards keep full-width copy. */
-  .metadata.has-seal .one-line,
-  .metadata.has-seal .watch-if { margin-right: 170px; }
+  /* Reserve the lower-right HERO pocket: wrap the lower copy (verdict one-liner +
+     WATCH IF) before the hero verdict's left edge so no text runs under it. The
+     hero verdict is ALWAYS present (every card has a verdict), so this reserve is
+     unconditional — unlike the old seal-gated reserve, which left no-seal cards'
+     copy running full-width under the stamp. The demoted seal sits higher, above
+     this copy, so it needs no text reserve of its own. The text column yields to
+     the verdict by design (it wraps to more lines / shortens). */
+  .metadata .one-line,
+  .metadata .watch-if { margin-right: 336px; }
 </style>
 </head>
 <body class="{{ card.verdictKind }} {{ density }}">
