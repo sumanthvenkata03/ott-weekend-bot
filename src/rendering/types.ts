@@ -147,6 +147,10 @@ export interface SatVerdictCardContext extends RenderBase, PlatformStyle {
   /** Grounded Verdict seal extras — see StampContext. */
   stampStar?: string;
   stampVariant?: "firm" | "early";
+  /** Phase 2 — HEAT axis (🔥), DISPLAY-ONLY buzz/popularity. Computed at render
+   *  time by computeHeat() from the Release; absent when there's no signal (no
+   *  sticker). Has ZERO bearing on the verdict/★/seal — purely editorial color. */
+  heat?: import("../content/weekend/heat.js").Heat;
 }
 
 // ============================================================

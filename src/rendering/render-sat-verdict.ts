@@ -21,6 +21,9 @@ import {
   hasLanguagesSection,
   buildStampContext,
 } from "./_shared.js";
+// HEAT axis (🔥) — DISPLAY-ONLY, computed in isolation from the verdict pipeline.
+// Reads only the release's popularity signals; cannot touch ★/verdict/seal.
+import { computeHeat } from "../content/weekend/heat.js";
 
 /**
  * Delete any stale sat-verdict PNGs for this date before re-rendering, so a
@@ -207,6 +210,10 @@ export async function renderSatVerdict(
       } : {}),
     });
     const hasSeal = stamp.stampKind === "tbsi" || stamp.stampKind === "tmdb";
+    // HEAT (🔥) — separate, display-only. Derived from the release's popularity
+    // signals ONLY; null (→ no sticker) when there's no signal. Independent of the
+    // seal/verdict above — it is never read by, and never feeds, the verdict.
+    const heat = release ? computeHeat(release) : null;
     const cardCtx: SatVerdictCardContext = {
       ...baseCtx,
       card,
@@ -216,6 +223,7 @@ export async function renderSatVerdict(
       totalSlots: cards.length,
       hasSeal,
       ...stamp,
+      ...(heat ? { heat } : {}),
     };
     const cardPath = `${outputDir}/sat-verdict-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
     await renderToPNG({

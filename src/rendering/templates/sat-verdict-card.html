@@ -134,6 +134,39 @@
     opacity: 0.7;
   }
 
+  /* HEAT sticker (🔥) — DISPLAY-ONLY buzz badge, top-left of the poster. A separate
+     visual zone from the verdict stamp / seal / "N CRITICS" badge (all on the
+     card's right), so it can never be mistaken for the score. Rendered ONLY when
+     `heat` is present (null heat → no element at all; QUIET still shows). The flame
+     is an inline SVG, not the emoji char — headless Chromium has no colour-emoji
+     font, so a literal 🔥 would render as tofu. */
+  .heat-sticker {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 14px 9px 11px;
+    background: var(--vermillion);
+    color: var(--cream);
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    border-bottom-right-radius: 6px;
+    box-shadow: 2px 2px 0 rgba(20, 16, 14, 0.28);
+  }
+  .heat-sticker .flame {
+    width: 15px;
+    height: 18px;
+    display: block;
+    flex-shrink: 0;
+  }
+  .heat-sticker .flame path { fill: var(--cream); }
+
   /* Metadata block */
   .metadata { display: flex; flex-direction: column; }
   .admit-one {
@@ -397,6 +430,13 @@
         <div class="credit">DIR · {{ card.director | upper }}</div>
         {% endif %}
       </div>
+      {# HEAT (🔥) — display-only buzz sticker; omitted entirely when heat is null. #}
+      {% if heat %}
+      <div class="heat-sticker">
+        <svg class="flame" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 6 8 7.5 8 12a4 4 0 0 0 8 0c0-1.5-.7-2.8-1.6-3.9.2 1 .1 2-.5 2.7.5-2-.6-3.8-1.9-5C12.6 5 12 3.6 12 2Z"/></svg>
+        <span>{{ heat.label }}</span>
+      </div>
+      {% endif %}
     </div>
 
     <!-- Metadata -->
