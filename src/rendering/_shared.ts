@@ -172,6 +172,33 @@ function isRecentRelease(releaseDate: string | undefined): boolean {
 }
 
 /**
+ * Phase 1 grounded-Verdict seal input. Structural (not imported from the content
+ * layer) so this rendering helper stays decoupled. The Sat Verdict job builds it
+ * from VerdictResearch; other pillars never pass it.
+ */
+export interface ResearchStampInput {
+  /** 0-10 grounded blend; null when confidence is 'none'. */
+  tbsiScore: number | null;
+  /** 0-5 star; null when confidence is 'none'. */
+  star: number | null;
+  confidence: "high" | "medium" | "low" | "none";
+  /** Audience IMDb (0-10) reused from the aggregator — the secondary arc line. */
+  audienceImdb?: number | null;
+  /** How many critic reviews backed the score — the secondary arc line. */
+  criticCount?: number;
+}
+
+/** Secondary arc text for a grounded seal: "IMDb 7.8 · 4 CRITICS" (only what exists). */
+function buildResearchRingText(rs: ResearchStampInput): string {
+  const parts: string[] = [];
+  if (typeof rs.audienceImdb === "number") parts.push(`IMDb ${rs.audienceImdb.toFixed(1)}`);
+  if (typeof rs.criticCount === "number" && rs.criticCount > 0) {
+    parts.push(`${rs.criticCount} CRITIC${rs.criticCount === 1 ? "" : "S"}`);
+  }
+  return parts.join(" · ");
+}
+
+/**
  * Resolve the honest seal state for a release (display-only — does NOT change
  * how tbsiScore is computed). Priority:
  *   1. "tbsi" — curated TBSI blend exists (release.tbsiScore defined).
@@ -180,8 +207,43 @@ function isRecentRelease(releaseDate: string | undefined): boolean {
  *   3. "new"  — no verdict yet. Recency picks the wording: a just-released /
  *               upcoming film reads "NEW", an older unrated title reads "UNRATED".
  * Always returns a stampKind, so every card shows a seal.
+ *
+ * `opts.scoreAbsenceLabel` overrides the "new"-state arc text (default
+ * "NO VERDICT YET"). Pillars where every card already carries an editorial
+ * verdict (e.g. Sat Verdict's MUST WATCH / WORTH A TRY / SKIP) pass
+ * "NO SCORE YET" so the seal reads as a missing *audience score*, not a
+ * missing verdict. Other pillars keep the default — this is opt-in per caller.
+ *
+ * `opts.research` (Sat Verdict grounded path) DRIVES the seal from real review
+ * research instead of the aggregator: it shows the ★/5 prominently with IMDb/
+ * critics as the secondary line. confidence 'none' → the NO SCORE YET state;
+ * 'low' → an "EARLY" read rather than a firm badge. When research is absent the
+ * function behaves exactly as before (every other caller is unaffected).
  */
-export function buildStampContext(release: StampInput | undefined): StampContext {
+export function buildStampContext(
+  release: StampInput | undefined,
+  opts?: { scoreAbsenceLabel?: string; research?: ResearchStampInput }
+): StampContext {
+  if (opts?.research) {
+    const rs = opts.research;
+    if (rs.confidence === "none" || rs.tbsiScore === null || rs.star === null) {
+      const recent = isRecentRelease(release?.releaseDate);
+      const absenceLabel = opts.scoreAbsenceLabel ?? "NO VERDICT YET";
+      return {
+        stampKind: "new",
+        stampLabel: recent ? "NEW" : "UNRATED",
+        stampRingText: recent ? `JUST DROPPED · ${absenceLabel}` : absenceLabel,
+      };
+    }
+    return {
+      stampKind: "tbsi",
+      stampLabel: rs.confidence === "low" ? "EARLY" : "TBSI",
+      stampScore: rs.tbsiScore.toFixed(1),
+      stampStar: rs.star.toFixed(1),
+      stampRingText: buildResearchRingText(rs),
+      stampVariant: rs.confidence === "low" ? "early" : "firm",
+    };
+  }
   if (release && release.tbsiScore !== undefined) {
     return {
       stampKind: "tbsi",
@@ -203,9 +265,10 @@ export function buildStampContext(release: StampInput | undefined): StampContext
     };
   }
   const recent = isRecentRelease(release?.releaseDate);
+  const absenceLabel = opts?.scoreAbsenceLabel ?? "NO VERDICT YET";
   return {
     stampKind: "new",
     stampLabel: recent ? "NEW" : "UNRATED",
-    stampRingText: recent ? "JUST DROPPED · NO VERDICT YET" : "NO VERDICT YET",
+    stampRingText: recent ? `JUST DROPPED · ${absenceLabel}` : absenceLabel,
   };
 }

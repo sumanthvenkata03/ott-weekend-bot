@@ -100,6 +100,23 @@
     z-index: 5;
   }
 
+  /* Top scrim — a subtle dark gradient behind the masthead row so the brand
+     name stays legible over BRIGHT hero posters (e.g. light floral art), where
+     brass-on-light was washing out. Sits above the hero image (z 2) and the
+     bottom overlay (z 5) but below the masthead text (z 10). Fades to nothing
+     by ~220px so it never reads as a heavy bar. */
+  .top-scrim {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 220px;
+    background: linear-gradient(to bottom,
+      rgba(20, 16, 14, 0.62) 0%,
+      rgba(20, 16, 14, 0.32) 55%,
+      rgba(20, 16, 14, 0.0) 100%);
+    z-index: 6;
+    pointer-events: none;
+  }
+
   /* Top masthead */
   .masthead {
     position: absolute;
@@ -114,15 +131,17 @@
   .masthead .label {
     font-family: 'Playfair Display', serif;
     font-size: 24px;
-    font-weight: 500;
+    font-weight: 700;
     letter-spacing: 4px;
     color: var(--brass);
+    text-shadow: 0 1px 4px rgba(20, 16, 14, 0.7);
   }
   .masthead .date {
     font-family: 'JetBrains Mono', monospace;
     font-size: 22px;
-    font-weight: 500;
+    font-weight: 700;
     color: var(--brass);
+    text-shadow: 0 1px 4px rgba(20, 16, 14, 0.7);
   }
 
   /* Tilted corner stamp */
@@ -190,6 +209,23 @@
     color: var(--brass);
     margin-top: 20px;
   }
+  /* "ALSO SKIPPING" — only shown when the selector trims Skip films past the
+     card cap. Sits as the last line of the title block (which is bottom-anchored
+     at y=1050, growing upward), so it never collides with the swipe cue
+     (y≈1070) or poster strip (y=1080) below. */
+  .title-block .also-skipping {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(244, 236, 220, 0.6);
+    margin-top: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .title-block .also-skipping .lead { color: var(--vermillion); }
 
   /* Poster strip — 3 inset tiles between y=1080 and y=1260, above the footer.
      Tile group is 780px wide centered (240*3 + 30*2), starting at x=150.
@@ -331,9 +367,12 @@
   /* D — chevron-trail gutter. No 2x2 grid here: pin to the canvas right edge,
      a ~200px band vertically centered over the hero (clear of corner-stamp,
      title block, strip + page-turn). z-index above the dark overlay (5). */
+  /* Seated in the hero's UPPER third (was 426 → overlapped poster title
+     treatments like "the boy", which sit at the poster's bottom). 300 keeps the
+     chevrons clear of bottom wordmarks while staying below the corner stamp. */
   .swipe-gutter {
     position: absolute;
-    top: 426px;
+    top: 300px;
     right: 0;
     height: 200px;
     width: 19%;
@@ -387,6 +426,9 @@
   <!-- DARK GRADIENT OVERLAY -->
   <div class="overlay"></div>
 
+  <!-- TOP SCRIM — keeps the masthead legible over bright posters -->
+  <div class="top-scrim"></div>
+
   <!-- D — chevron-trail gutter: translucent veil over the hero's right edge -->
   <div class="swipe-gutter">
     <svg class="chev chev-1" viewBox="0 0 36 72" width="36" height="72" aria-hidden="true">
@@ -417,9 +459,15 @@
 
   <!-- TITLE BLOCK -->
   <div class="title-block">
-    <div class="kicker">★ THE WEEKEND'S RULING ★</div>
+    <div class="kicker">★ THE WEEK'S RULING ★</div>
     <div class="headline">{{ hero.oneLineVerdict }}</div>
-    <div class="hot-take">{{ hotTake | truncate(140) }}</div>
+    {# Dek is constrained at the source (≤140 chars, complete thought). The 150
+       guard only fires on a non-compliant overshoot, and the truncate filter
+       breaks at a word boundary — never mid-word. #}
+    <div class="hot-take">{{ hotTake | truncate(150) }}</div>
+    {% if alsoSkipping and alsoSkipping.length > 0 %}
+    <div class="also-skipping"><span class="lead">★ ALSO SKIPPING ·</span> {{ alsoSkipping | join(" · ") }}{% if alsoSkippingMore > 0 %} · +{{ alsoSkippingMore }} MORE{% endif %}</div>
+    {% endif %}
   </div>
 
   <!-- A — centered swipe cue, in the gap above the poster strip -->
@@ -446,7 +494,7 @@
 
   <!-- FOOTER -->
   <div class="footer">
-    <span class="brand">★ SAT VERDICT · VOL. {{ vol }}</span>
+    <span class="brand">★ THE VERDICT · VOL. {{ vol }}</span>
     <span class="meta">{{ filmCount }} {{ "FILM" | pluralize(filmCount, "FILMS") }} · {{ weekendDates }}</span>
   </div>
 

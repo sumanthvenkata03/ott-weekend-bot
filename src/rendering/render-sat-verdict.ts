@@ -108,7 +108,8 @@ export interface RenderResult {
 export async function renderSatVerdict(
   draft: SaturdayVerdictDraft,
   issueNumber: string | number,
-  outputDir = "output/posts"
+  outputDir = "output/posts",
+  alsoSkipping: string[] = []
 ): Promise<RenderResult> {
   log.info(`Rendering Sat Verdict — Issue №${issueNumber}`);
 
@@ -139,6 +140,11 @@ export async function renderSatVerdict(
     filmTitle: c.filmTitle,
     language: c.language,
   }));
+  // ALSO SKIPPING footer: show at most ALSO_SKIPPING_MAX_NAMES titles, then a
+  // "+N MORE" tail, so a long trimmed-skip list can't overrun the single line.
+  const ALSO_SKIPPING_MAX_NAMES = 4;
+  const alsoSkippingNames = alsoSkipping.slice(0, ALSO_SKIPPING_MAX_NAMES);
+  const alsoSkippingMore = Math.max(0, alsoSkipping.length - ALSO_SKIPPING_MAX_NAMES);
   const coverCtx: SatVerdictCoverContext = {
     ...baseCtx,
     hotTake: draft.hotTake,
@@ -146,6 +152,8 @@ export async function renderSatVerdict(
     weekendDates: draft.weekendDates,
     hero,
     posterStrip,
+    alsoSkipping: alsoSkippingNames,
+    alsoSkippingMore,
   };
   await renderToPNG({
     templateName: "sat-verdict-cover",
@@ -176,9 +184,27 @@ export async function renderSatVerdict(
       hasReleased: hasReleasedSection(card),
       hasLanguages: hasLanguagesSection(card),
     });
-    // Seal state from the linked release (may be undefined → buildStampContext
-    // resolves it to the "new" pending state).
+    // Seal state. Phase 1: when the slide carries grounded research (job path),
+    // the seal is DRIVEN by it — ★/5 prominent, IMDb/critics secondary, "EARLY"
+    // for a low-confidence read, "NO SCORE YET" when nothing was found. Without
+    // research (sample/render path) it falls back to the release's aggregator
+    // rating. "NO SCORE YET" (not "NO VERDICT YET") because the card carries a
+    // verdict stamp — the missing thing is the audience score, not the verdict.
     const release = draft.releases.find(r => r.title === card.filmTitle);
+    const research = draft.verdicts[i]?.research;
+    const stamp = buildStampContext(release, {
+      scoreAbsenceLabel: "NO SCORE YET",
+      ...(research ? {
+        research: {
+          tbsiScore: research.tbsiScore,
+          star: research.star,
+          confidence: research.confidence,
+          audienceImdb: research.audienceScore,
+          criticCount: research.criticRatings.length,
+        },
+      } : {}),
+    });
+    const hasSeal = stamp.stampKind === "tbsi" || stamp.stampKind === "tmdb";
     const cardCtx: SatVerdictCardContext = {
       ...baseCtx,
       card,
@@ -186,7 +212,8 @@ export async function renderSatVerdict(
       ...platformStyle,
       density,
       totalSlots: cards.length,
-      ...buildStampContext(release),
+      hasSeal,
+      ...stamp,
     };
     const cardPath = `${outputDir}/sat-verdict-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
     await renderToPNG({
@@ -209,10 +236,12 @@ const isMainModule = import.meta.url.endsWith(
 if (isMainModule) {
   const sampleDraft: SaturdayVerdictDraft = {
     pillar: "Sat Verdict",
-    weekendDates: "May 16 — May 18, 2026",
+    // Verification-only: a Wed→Fri (3-day) range so the cover footer crop shows
+    // the narrowed window. In the live job this string is window-derived.
+    weekendDates: "Jun 17 — Jun 19, 2026",
     caption: "Three verdicts, three different calls.",
     hashtags: "#OTTReleases #Malayalam #WeekendWatch",
-    hotTake: "A quiet Malayalam film about siblings cleaning out their dead mother's house has more to say in 90 minutes than three Hindi releases combined this weekend.",
+    hotTake: "A quiet Malayalam grief drama says more in 90 minutes than three loud Hindi releases manage all week.",
     verdicts: [
       {
         filmTitle: "Pennum Porattum",
@@ -225,6 +254,26 @@ if (isMainModule) {
         whereItWins: "The sibling dynamic in the second act.",
         whereItLoses: "The first 20 minutes are slow.",
         watchSetup: "Saturday afternoon, full attention.",
+        // Verification-only sample research: grounded HIGH-confidence read so the
+        // seal renders ★4.3/5 + IMDb/critics. (Values match computeVerdictScore
+        // on these ratings; the live job computes them for real.)
+        research: {
+          found: true,
+          criticRatings: [
+            { source: "The Hindu", url: "https://www.thehindu.com/reviews/pennum-porattum", explicitScore: 4.5, sentimentScore: 4.5 },
+            { source: "Film Companion", url: "https://www.filmcompanion.in/reviews/pennum-porattum", explicitScore: 4, sentimentScore: 4 },
+          ],
+          audienceScore: 8.8,
+          buzzNote: "strong festival word-of-mouth",
+          tbsiScore: 8.6,
+          star: 4.3,
+          verdict: "Must Watch",
+          confidence: "high",
+          summaryLine: "Watch the Malayalam grief drama instead.",
+          theRead: "Critics single out the sibling dynamic and a devastating second act; the slow open is the one knock.",
+          watchIf: "Watch if you liked Joji or The Great Indian Kitchen.",
+          sources: ["The Hindu", "Film Companion"],
+        },
       },
       {
         filmTitle: "Bramayugam",
@@ -237,6 +286,24 @@ if (isMainModule) {
         whereItWins: "Mammootty's central performance and the production design.",
         whereItLoses: "Last act doesn't land its mythology.",
         watchSetup: "Night, headphones on.",
+        // Verification-only sample research: LOW-confidence (one review, no
+        // explicit score) → seal labels it "EARLY" with the ★ still shown.
+        research: {
+          found: true,
+          criticRatings: [
+            { source: "Letterboxd (early)", url: "https://letterboxd.com/film/bramayugam", explicitScore: null, sentimentScore: 3 },
+          ],
+          audienceScore: 7,
+          buzzNote: "",
+          tbsiScore: 6.4,
+          star: 3.2,
+          verdict: "Worth a Try",
+          confidence: "low",
+          summaryLine: "Atmospheric black-and-white horror, rough finish.",
+          theRead: "Early read: praised for mood and the lead turn, but only one review is in so far.",
+          watchIf: "Watch if you liked The Lighthouse or slow folk-horror.",
+          sources: ["Letterboxd"],
+        },
       },
       {
         filmTitle: "Pati Patni Aur Woh Do",
@@ -249,6 +316,24 @@ if (isMainModule) {
         whereItWins: "Tabu is still doing real work even here.",
         whereItLoses: "Script, pacing, third act, entire premise.",
         watchSetup: "Don't.",
+        // Verification-only sample research: found:false → confidence 'none' →
+        // the seal renders the "NO SCORE YET" state (no fabricated number). In
+        // the live job a found:false film isn't carded (it goes to ALSO
+        // SKIPPING); shown here only to exercise the no-score seal.
+        research: {
+          found: false,
+          criticRatings: [],
+          audienceScore: null,
+          buzzNote: "",
+          tbsiScore: null,
+          star: null,
+          verdict: null,
+          confidence: "none",
+          summaryLine: "",
+          theRead: "",
+          watchIf: "",
+          sources: [],
+        },
       },
     ],
     releases: [
@@ -264,7 +349,11 @@ if (isMainModule) {
         director: "Mathew Thomas",
         cast: ["Parvathy Thiruvothu", "Tovino Thomas"],
         synopsis: "Two siblings return home to clean out their late mother's house.",
-        posterUrl: undefined,
+        // Verification-only: a real poster on the hero so the cover render shows
+        // an actual image (not the no-poster fallback) — lets us check the
+        // masthead scrim + chevron clearance over real poster art. (Reuses the
+        // known-good Bramayugam TMDb URL; the live job uses each film's own.)
+        posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
         // Sample ratings — 4-source stamp (tbsiScore 8.2)
         tbsiScore: 8.2, tbsiSourceCount: 4,
         imdbRating: 8.8, rottenTomatoes: 87, metacritic: 74, letterboxd: 4.2,
@@ -315,7 +404,14 @@ if (isMainModule) {
   };
 
   try {
-    const result = await renderSatVerdict(sampleDraft, 42);
+    // Sample trimmed-skips (6 names) so the render exercises the cover's
+    // "ALSO SKIPPING" overflow — shows 4 names then "+2 MORE". The live job
+    // feeds the real trimmed list from selectVerdictCards. The unrated
+    // "NO SCORE YET" seal is already exercised by card 3 (Pati Patni — no
+    // ratings, older release → UNRATED).
+    const result = await renderSatVerdict(sampleDraft, 42, "output/posts", [
+      "Deewana", "Sitting", "Dark Giant", "Loafer Returns", "Nayagan 2", "Quick Cut",
+    ]);
     log.success(`\n✓ Render complete:`);
     log.success(`   Cover : ${result.coverPath}`);
     log.success(`   Cards : ${result.cardPaths.length}`);

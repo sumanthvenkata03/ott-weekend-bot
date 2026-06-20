@@ -41,7 +41,14 @@
     <circle cx="180" cy="100" r="3" class="tbsi-dot"/>
     <text class="tbsi-label" x="100" y="78"  text-anchor="middle">{{ stampLabel }}</text>
     <line x1="66" y1="87" x2="134" y2="87" class="tbsi-divider"/>
+    {# Grounded Verdict seal (stampStar set) shows the ★/5 prominently; every
+       other pillar (no stampStar) keeps the original /10 number. #}
+    {% if stampStar %}
+    <text class="tbsi-score tbsi-score--star" x="100" y="128" text-anchor="middle">&#9733;{{ stampStar }}</text>
+    <text class="tbsi-star-max" x="100" y="150" text-anchor="middle">OUT OF 5</text>
+    {% else %}
     <text class="tbsi-score" x="100" y="134" text-anchor="middle">{{ stampScore }}</text>
+    {% endif %}
   </svg>
 </div>
 {% elif stampKind == "new" %}

@@ -3,6 +3,7 @@ import { Client } from "@notionhq/client";
 import { config } from "../shared/config.js";
 import { log } from "../shared/logger.js";
 import type { Release } from "../shared/types.js";
+import type { VerdictResearch } from "../content/weekend/verdict-research.js";
 
 const notion = new Client({ auth: config.NOTION_TOKEN });
 
@@ -102,14 +103,21 @@ export interface VerdictSlide {
   language: string;
   platform: string[];
   verdict: "🔥 Must Watch" | "👀 Worth a Try" | "⏭️ Skip";
+  /** Grounded one-line verdict (research.summaryLine in the job path). */
   oneLineVerdict: string;
   watchIf: string;
-  skipIf: string;
-  whereItWins: string;
-  whereItLoses: string;
-  watchSetup: string;
+  // Phase 1: the grounded research path no longer produces these prior-based
+  // copy fields, so they're optional. The legacy/sample path may still set them.
+  skipIf?: string;
+  whereItWins?: string;
+  whereItLoses?: string;
+  watchSetup?: string;
   /** Phase 5.5 — LLM judges whether the music director is notable enough to surface on the card */
   isMusicDirectorNotable?: boolean;
+  /** Phase 1 grounded research (job path only) — seal/★/confidence + theRead +
+   *  sources. Absent on the sample/render path. Single source of truth shared by
+   *  the renderer and this Notion writer. */
+  research?: VerdictResearch;
 }
 
 export interface SaturdayVerdictDraft {
@@ -510,6 +518,28 @@ function truncate(s: string | null | undefined, max = 1900): string {
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
 }
 
+/** A bold-label + body paragraph block (e.g. "Watch if: …"). */
+function labeledParagraph(label: string, content: string) {
+  return {
+    object: "block" as const,
+    type: "paragraph" as const,
+    paragraph: {
+      rich_text: [
+        { text: { content: label }, annotations: { bold: true } },
+        { text: { content } },
+      ],
+    },
+  };
+}
+
+/** One-line grounded score summary for the Notion verdict toggle. */
+function verdictScoreLine(r: VerdictResearch): string {
+  if (r.star !== null && r.tbsiScore !== null) {
+    return `★${r.star.toFixed(1)}/5 · TBSI ${r.tbsiScore.toFixed(1)}/10 · confidence ${r.confidence} · ${r.criticRatings.length} critic(s)`;
+  }
+  return `no firm score · confidence ${r.confidence}`;
+}
+
 export interface SundaySpotlightImageUrls {
   coverFeed?: string;
   coverReel?: string;
@@ -889,91 +919,46 @@ export async function writeSaturdayVerdictToNotion(
   // Looked up dynamically so we naturally support 3-5 cards (or more) without code changes.
   const cardImageForIndex = (i: number): string | undefined => imageUrls?.[`card${i + 1}`];
 
-  // Build the verdict slides as Notion blocks — toggles so each film is collapsible
-  const verdictBlocks = draft.verdicts.flatMap((v, i) => [
-    {
-      object: "block" as const,
-      type: "toggle" as const,
-      toggle: {
-        rich_text: [{
-          text: { content: `${v.verdict}  ${v.filmTitle} (${v.language})` },
-          annotations: { bold: true },
-        }],
-        children: [
-          ...(cardImageForIndex(i) ? [externalImageBlock(cardImageForIndex(i)!)] : []),
-          {
-            object: "block" as const,
-            type: "paragraph" as const,
-            paragraph: {
-              rich_text: [
-                { text: { content: "Verdict: " }, annotations: { bold: true } },
-                { text: { content: truncate(v.oneLineVerdict, 500) } },
-              ],
+  // Build the verdict slides as Notion blocks — toggles so each film is
+  // collapsible. Grounded films (v.research) render The Read + score + sources;
+  // legacy prior-based copy blocks render only when those fields are present.
+  const verdictBlocks = draft.verdicts.flatMap((v, i) => {
+    const r = v.research;
+    return [
+      {
+        object: "block" as const,
+        type: "toggle" as const,
+        toggle: {
+          rich_text: [{
+            text: { content: `${v.verdict}  ${v.filmTitle} (${v.language})` },
+            annotations: { bold: true },
+          }],
+          children: [
+            ...(cardImageForIndex(i) ? [externalImageBlock(cardImageForIndex(i)!)] : []),
+            labeledParagraph("Verdict: ", truncate(v.oneLineVerdict, 500)),
+            ...(r && r.theRead ? [labeledParagraph("The read: ", truncate(r.theRead, 800))] : []),
+            labeledParagraph("Watch if: ", truncate(v.watchIf, 500)),
+            ...(r ? [labeledParagraph("Score: ", verdictScoreLine(r))] : []),
+            ...(r && r.sources.length > 0 ? [labeledParagraph("Sources: ", truncate(r.sources.join(", "), 1000))] : []),
+            ...(r && r.buzzNote ? [labeledParagraph("Buzz: ", truncate(r.buzzNote, 300))] : []),
+            ...(v.skipIf ? [labeledParagraph("Skip if: ", truncate(v.skipIf, 500))] : []),
+            ...(v.whereItWins ? [labeledParagraph("Where it wins: ", truncate(v.whereItWins, 500))] : []),
+            ...(v.whereItLoses ? [labeledParagraph("Where it loses: ", truncate(v.whereItLoses, 500))] : []),
+            ...(v.watchSetup ? [labeledParagraph("Watch setup: ", truncate(v.watchSetup, 300))] : []),
+            {
+              object: "block" as const,
+              type: "paragraph" as const,
+              paragraph: {
+                rich_text: [
+                  { text: { content: `Streaming on: ${v.platform.length ? v.platform.join(", ") : "TBA"}` } },
+                ],
+              },
             },
-          },
-          {
-            object: "block" as const,
-            type: "paragraph" as const,
-            paragraph: {
-              rich_text: [
-                { text: { content: "Watch if: " }, annotations: { bold: true } },
-                { text: { content: truncate(v.watchIf, 500) } },
-              ],
-            },
-          },
-          {
-            object: "block" as const,
-            type: "paragraph" as const,
-            paragraph: {
-              rich_text: [
-                { text: { content: "Skip if: " }, annotations: { bold: true } },
-                { text: { content: truncate(v.skipIf, 500) } },
-              ],
-            },
-          },
-          {
-            object: "block" as const,
-            type: "paragraph" as const,
-            paragraph: {
-              rich_text: [
-                { text: { content: "Where it wins: " }, annotations: { bold: true } },
-                { text: { content: truncate(v.whereItWins, 500) } },
-              ],
-            },
-          },
-          {
-            object: "block" as const,
-            type: "paragraph" as const,
-            paragraph: {
-              rich_text: [
-                { text: { content: "Where it loses: " }, annotations: { bold: true } },
-                { text: { content: truncate(v.whereItLoses, 500) } },
-              ],
-            },
-          },
-          {
-            object: "block" as const,
-            type: "paragraph" as const,
-            paragraph: {
-              rich_text: [
-                { text: { content: "Watch setup: " }, annotations: { bold: true } },
-                { text: { content: truncate(v.watchSetup, 300) } },
-              ],
-            },
-          },
-          {
-            object: "block" as const,
-            type: "paragraph" as const,
-            paragraph: {
-              rich_text: [
-                { text: { content: `Streaming on: ${v.platform.length ? v.platform.join(", ") : "TBA"}` } },
-              ],
-            },
-          },
-        ],
+          ],
+        },
       },
-    },
-  ]);
+    ];
+  });
 
   const response = await createNotionPage("Sat Verdict", {
     parent: { database_id: config.NOTION_RELEASES_DB_ID },

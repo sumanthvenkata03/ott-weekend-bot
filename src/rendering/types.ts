@@ -71,6 +71,13 @@ export interface StampContext {
   stampLabel?: string;
   stampScore?: string;
   stampRingText?: string;
+  /** Phase 1 grounded Verdict seal — the ★/5 value shown PROMINENTLY (e.g. "4.1").
+   *  When set, the seal renders ★{{stampStar}} (out of 5) instead of the /10
+   *  stampScore number. Only the Sat Verdict grounded path sets it; other pillars
+   *  leave it unset and the seal is unchanged. */
+  stampStar?: string;
+  /** "early" marks a low-confidence early read (vs a firm badge). */
+  stampVariant?: "firm" | "early";
 }
 
 /** A single film card on a Sat Verdict body slide */
@@ -100,6 +107,14 @@ export interface SatVerdictCoverContext extends RenderBase {
   hero: SatVerdictCard;
   /** 3-poster inset strip near the bottom of the cover — one tile per verdict film, in original verdict order, max 3 */
   posterStrip: SatVerdictPosterStripTile[];
+  /** Titles of Skip films trimmed beyond the card cap — listed in the cover's
+   *  "ALSO SKIPPING" footer so the verdict stays complete. Capped to the first
+   *  few names by the renderer; the remainder is counted in alsoSkippingMore.
+   *  Empty = no footer. */
+  alsoSkipping: string[];
+  /** Count of trimmed Skip titles beyond those shown in `alsoSkipping` — drives
+   *  the "+N MORE" tail on the footer. 0 = every trimmed skip is named. */
+  alsoSkippingMore: number;
 }
 
 /** One tile in the Sat Verdict cover poster strip */
@@ -119,12 +134,19 @@ export interface SatVerdictCardContext extends RenderBase, PlatformStyle {
   totalSlots: number;
   /** Phase 5.5 — body-density tier (compact/standard/dense) */
   density: CardDensity;
+  /** True when a SCORED seal (tbsi/tmdb) is shown, so the lower copy reserves
+   *  the seal's right-hand pocket. (Replaces the old `{% if tbsiScore %}` gate,
+   *  which never fired because tbsiScore wasn't in the card context.) */
+  hasSeal: boolean;
   /** Display-only seal — see StampContext. Resolved by buildStampContext() for
    *  every card: "tbsi" (curated blend), "tmdb" (community-avg fallback), "new". */
   stampKind: "tbsi" | "tmdb" | "new";
   stampLabel?: string;
   stampScore?: string;
   stampRingText?: string;
+  /** Grounded Verdict seal extras — see StampContext. */
+  stampStar?: string;
+  stampVariant?: "firm" | "early";
 }
 
 // ============================================================

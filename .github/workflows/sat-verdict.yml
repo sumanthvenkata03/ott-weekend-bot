@@ -2,7 +2,8 @@ name: Sat Verdict
 
 on:
   schedule:
-    - cron: "30 1 * * 6"
+    # generates the draft; target IG post ≈ 7–9 PM IST — operator posts from Notion.
+    - cron: "0 8 * * 5"
   workflow_dispatch:
 
 concurrency:

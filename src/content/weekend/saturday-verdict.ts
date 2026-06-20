@@ -1,183 +1,107 @@
 // src/content/weekend/saturday-verdict.ts
+// Phase 1 (grounded Verdicts): per-film verdicts/tiers/copy are now produced by
+// verdict-research.ts (real review aggregation). This module is SLIM — it only
+// writes the cover editorial (caption + hashtags + hot-take), and it is FED the
+// already-decided grounded calls so the cover matches them. It never decides a
+// verdict and never invents a per-film judgement.
+
 import { format, parseISO } from "date-fns";
 import { z } from "zod";
 import { callClaudeJSON } from "../claude.js";
 import { log } from "../../shared/logger.js";
-import type { Release } from "../../shared/types.js";
-import type { SaturdayVerdictDraft, VerdictSlide } from "../../delivery/notion.js";
-import { notableComposersBlock, enrichmentBlock } from "./_shared.js";
 
-const VerdictSchema = z.object({
-  filmTitle: z.string(),
-  language: z.string(),
-  platform: z.array(z.string()),
-  verdict: z.enum(["🔥 Must Watch", "👀 Worth a Try", "⏭️ Skip"]),
-  oneLineVerdict: z.string(),
-  watchIf: z.string(),
-  skipIf: z.string(),
-  whereItWins: z.string(),
-  whereItLoses: z.string(),
-  watchSetup: z.string(),
-  // .optional() is fine here: this verdict array is mapped element-by-element
-  // (not assigned wholesale to an exact-optional target), and the flag is only
-  // read in a conditional — so boolean | undefined causes no drift.
-  isMusicDirectorNotable: z.boolean().optional(),
-});
+/** Format a window (startDate, endDate ISO) into the cover's date-range label. */
+export function formatWindowDates(weekendStart: string, weekendEnd: string): string {
+  return `${format(parseISO(weekendStart), "MMM d")} — ${format(parseISO(weekendEnd), "MMM d, yyyy")}`;
+}
 
-// Sat's card-count contract folded into the schema (wrong count → retry): empty
-// (skip the weekend) OR 3–5 verdicts. The filmTitle/language/platform-match-input
-// rule is prompt guidance the renderer tolerates, so it stays out of the schema.
-const SaturdayVerdictSchema = z.object({
+/** One grounded, already-selected film handed to the cover writer (read-only). */
+export interface GroundedCoverFilm {
+  filmTitle: string;
+  language: string;
+  /** Emoji verdict string, already decided by research — must NOT be changed. */
+  verdict: string;
+  /** Grounded ★/5 (1dp) if scored, else null. */
+  star: number | null;
+  /** Grounded one-line verdict from research. */
+  summaryLine: string;
+}
+
+const CoverSchema = z.object({
   caption: z.string(),
   hashtags: z.array(z.string()),
   hotTake: z.string(),
-  verdicts: z.array(VerdictSchema).refine(
-    v => v.length === 0 || (v.length >= 3 && v.length <= 5),
-    { message: "verdicts must be empty (skip) or contain 3–5 items" }
-  ),
 });
 
-type LLMOutput = z.infer<typeof SaturdayVerdictSchema>;
-
-function releaseForPrompt(r: Release): string {
-  const lines = [
-    `Title: ${r.title}`,
-    `Language: ${r.language}`,
-    `Release date: ${r.releaseDate}`,
-    `Genres: ${r.genre.join(", ") || "—"}`,
-    `Platform: ${r.platform.length ? r.platform.join(", ") : "TBA"}`,
-    `Director: ${r.director ?? "—"}`,
-    `Cast: ${r.cast.slice(0, 3).join(", ") || "—"}`,
-    `Runtime: ${r.runtime ? `${r.runtime} min` : "—"}`,
-    r.imdbRating ? `IMDb: ${r.imdbRating} (${r.imdbVotes ?? 0} votes)` : "IMDb: not yet rated",
-  ];
-  const enr = enrichmentBlock(r);
-  if (enr) lines.push(enr);
-  lines.push(`Synopsis: ${r.synopsis}`);
-  return lines.join("\n");
+export interface VerdictCover {
+  caption: string;
+  hashtags: string;
+  hotTake: string;
 }
 
-export async function generateSaturdayVerdict(
-  releases: Release[],
+/**
+ * Write ONLY the cover editorial for the Verdict carousel, fed the grounded
+ * per-film calls (verdict + ★ + one-liner). The copy must MATCH those calls —
+ * the model does not re-judge anything here.
+ */
+export async function generateVerdictCover(
+  films: GroundedCoverFilm[],
   weekendStart: string,
   weekendEnd: string
-): Promise<SaturdayVerdictDraft> {
-  if (releases.length === 0) {
-    throw new Error("Cannot generate Saturday Verdict with zero releases");
+): Promise<VerdictCover> {
+  if (films.length === 0) {
+    throw new Error("Cannot generate Verdict cover with zero films");
   }
-  
-  const weekendDates = `${format(parseISO(weekendStart), "MMM d")} — ${format(parseISO(weekendEnd), "MMM d, yyyy")}`;
-  log.info(`Generating Saturday Verdict for ${weekendDates} (${releases.length} releases)`);
-  
-  const releaseBlocks = releases
-    .map((r, i) => `--- RELEASE ${i + 1} ---\n${releaseForPrompt(r)}`)
-    .join("\n\n");
-  
+
+  const weekendDates = formatWindowDates(weekendStart, weekendEnd);
+  log.info(`Generating Verdict cover for ${weekendDates} (${films.length} grounded films)`);
+
+  const filmBlocks = films
+    .map((f, i) => {
+      const star = f.star !== null ? `★${f.star.toFixed(1)}/5` : "no firm score";
+      return `${i + 1}. ${f.verdict} — ${f.filmTitle} (${f.language}) · ${star}\n   "${f.summaryLine}"`;
+    })
+    .join("\n");
+
   const prompt = `You are the head social media strategist for a Pan-Indian OTT + film industry Instagram page. We give VERDICTS, not vibes.
 
 PAGE IDENTITY:
 - Decision page, not info page. We tell people what to watch, what to skip, and why.
-- Pan-Indian coverage with South-heavy weighting where the films justify it
-- Confident, opinionated, conversational — like a friend texting recommendations
-- Light Hinglish where natural ("skip kar do", "weekend sorted", "kya scene hai")
+- Pan-Indian coverage with South-heavy weighting where the films justify it.
+- Confident, opinionated, conversational — like a friend texting recommendations.
+- Light Hinglish where natural ("skip kar do", "weekend sorted", "kya scene hai").
 
 CRITICAL TONE RULES:
-- NEVER hedge. "It might be good" → "It's worth a swing — here's why."
-- Take stands. If something doesn't deserve a watch, say so. "Skip" is a valid call.
-- Acknowledge weaknesses even on Must Watches. Audiences trust honest critics.
-- South-heavy: Malayalam, Tamil, Telugu, Kannada films get equal-or-greater weight than Hindi when the films are stronger.
+- NEVER hedge. Take stands. "Skip" is a valid call.
+- Acknowledge weaknesses even on the strong picks. Audiences trust honest critics.
 
 NEVER use these AI-cliche phrases: "dive into", "delve", "in today's fast-paced world", "buckle up", "look no further", "without further ado", "elevates".
 
-TASK: Generate Saturday "The Verdict" Instagram carousel post.
+TASK: Write ONLY the cover editorial for this week's "The Verdict" carousel.
 
-WEEKEND: ${weekendDates}
+RELEASE WINDOW (Wed → Fri): ${weekendDates}
 
-RELEASES TO JUDGE (${releases.length}):
+THESE VERDICTS ARE ALREADY DECIDED from real critic reviews — DO NOT change, soften, or upgrade any of them. Your copy must MATCH these calls exactly:
 
-${releaseBlocks}
-
-VERDICT SYSTEM:
-- 🔥 Must Watch — clear recommendation, prioritize watching this
-- 👀 Worth a Try — has flaws but the strengths earn a watch
-- ⏭️ Skip — don't waste the runtime
+${filmBlocks}
 
 DELIVERABLES (respond as JSON):
 
 {
-  "caption": "Under 130 words. OPENS with the boldest verdict of the week as a hook (e.g., 'Skip the Hindi blockbuster. Watch the Malayalam film instead.'). Acknowledge any controversial calls. End with 'Save this before you press play' or similar CTA.",
+  "caption": "Under 130 words. OPENS with the boldest verdict of the week as a hook (lead with whichever call above is strongest/most surprising). Reflect the actual calls above. End with 'Save this before you press play' or similar CTA.",
   "hashtags": ["10 hashtags array with # prefix"],
-  "hotTake": "One pinnable bold opinion under 200 chars — controversial but defensible. The kind of comment that triggers replies. Example: 'Mollywood made a better political thriller this week than Hindi cinema has all year.'",
-  "verdicts": [
-    {
-      "filmTitle": "<exact title from input>",
-      "language": "<exact language from input>",
-      "platform": ["<array from input — empty array if TBA>"],
-      "verdict": "🔥 Must Watch | 👀 Worth a Try | ⏭️ Skip",
-      "oneLineVerdict": "Max 12 words. Confident, specific, quotable. NOT 'A great film' — be specific.",
-      "watchIf": "Watch if you liked [X film/genre]. Be specific — name an actual comparable film or director or trope.",
-      "skipIf": "Skip if you're tired of [Y]. Name the actual fatigue point.",
-      "whereItWins": "Single specific strength. NOT 'great performances' — 'the second-act twist that recontextualizes the whole opening' kind of specific.",
-      "whereItLoses": "Single honest weakness. Even on Must Watches, find the trade-off.",
-      "watchSetup": "When/how to watch. e.g., 'Saturday night, full attention, no phone' or 'Sunday afternoon, half-watching while doing laundry is fine.'",
-      "isMusicDirectorNotable": false
-    }
-  ]
+  "hotTake": "One pinnable bold opinion that MATCHES the calls above — controversial but defensible, the kind of comment that triggers replies. HARD LIMIT: a COMPLETE single thought UNDER 140 characters (it prints in full on the cover; longer gets cut mid-sentence). Frame it as THIS WEEK'S slate (the window runs Wed–Fri) — do NOT call it 'the weekend'. Example: 'Mollywood made a better political thriller this week than Hindi cinema has all year.'"
 }
 
-${notableComposersBlock()}
+RULES:
+- Do NOT contradict the verdicts above. If the top call is a Skip, the hook can still be bold ("Nothing's a Must Watch this week — here's the one worth a try.").
+- Reference real titles from the list. Do not invent films, ratings, or quotes.`;
 
-CAST OVERLAP RULE for verdict body copy — whenever you name an actor in a
-verdict's whereItWins, watchIf, or oneLineVerdict, at least one of the
-actors you name MUST also appear in that film's "Lead cast (top-billed)"
-line from the input. Both that line and the broader "Cast:" list are
-available; reference whichever actor sells the verdict best, but make sure
-one name overlaps with leadCast so the body and the card's metadata line
-stay aligned. If leadCast already contains the recognizable name, just use
-those — don't reach into the broader cast for a less-billed actor.
+  const output = await callClaudeJSON(prompt, CoverSchema, "opus");
 
-CARD COUNT — quality over coverage:
-- Pick 3 to 5 films from the slate above. If only 3 are worth talking about, deliver 3. If 5 are, deliver 5.
-- Do NOT pad with weak Skips just to fill cards. A tight 3-card carousel beats a bloated 6-card one.
-
-VERDICT MIX — pick what the slate actually deserves:
-- Strong weekend: 1-2 Must Watch + 1-2 Worth a Try + 1 Skip
-- Average weekend: 1 Must Watch + 1-2 Worth a Try + 1-2 Skip
-- Weak weekend: 0-1 Must Watch + 1 Worth a Try + 2-3 Skip
-- Never deliver an all-Skip carousel. If the slate is that weak, deliver 1 Worth a Try (the least bad) + at most 2 Skips, OR return verdicts: [] and let the pillar skip this weekend entirely.
-
-MUST WATCH RULE:
-- At least one verdict MUST be 🔥 Must Watch IF any film legitimately qualifies. Don't withhold the call to seem balanced.
-- If NOTHING qualifies as Must Watch this weekend, that's fine — but say so in the hotTake ("No Must Watch this weekend — here's the next best thing.").
-
-OTHER:
-- If a film has no IMDb rating yet (unreleased), make your call based on director track record, cast, genre, synopsis. Be specific about why.
-- The "filmTitle", "language", "platform" fields must match the input exactly.`;
-  
-  const output = await callClaudeJSON(prompt, SaturdayVerdictSchema, "opus");
-  
-  // Map output to typed VerdictSlide[]
-  const verdicts: VerdictSlide[] = output.verdicts.map(v => ({
-    filmTitle: v.filmTitle,
-    language: v.language,
-    platform: v.platform,
-    verdict: v.verdict,
-    oneLineVerdict: v.oneLineVerdict,
-    watchIf: v.watchIf,
-    skipIf: v.skipIf,
-    whereItWins: v.whereItWins,
-    whereItLoses: v.whereItLoses,
-    watchSetup: v.watchSetup,
-    ...(v.isMusicDirectorNotable ? { isMusicDirectorNotable: true } : {}),
-  }));
-  
   return {
-    pillar: "Sat Verdict",
-    weekendDates,
     caption: output.caption,
     hashtags: output.hashtags.join(" "),
     hotTake: output.hotTake,
-    verdicts,
-    releases,
   };
 }

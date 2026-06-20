@@ -67,41 +67,79 @@ async function callClaudeCLI(prompt: string): Promise<string> {
 }
 
 /**
- * Call Claude via the Anthropic API with explicit model choice.
+ * Optional per-call overrides. `tools` enables server-side tools (e.g. the
+ * web_search tool used by grounded Verdict research) — these run ONLY on the
+ * API path; the CLI path can't execute server tools, so requesting tools without
+ * an API key throws rather than silently dropping them. Threaded through the one
+ * existing client (we never fork a second Anthropic instance).
  */
-async function callClaudeAPI(prompt: string, model: ModelChoice): Promise<string> {
+export interface CallOptions {
+  /** Server-side tools to enable (e.g. web_search). */
+  tools?: Anthropic.Messages.ToolUnion[];
+  /** Override max_tokens (default 4096). */
+  maxTokens?: number;
+}
+
+/**
+ * Call Claude via the Anthropic API with explicit model choice.
+ *
+ * Tools (when supplied) make the model run an agentic loop SERVER-SIDE within
+ * this single request: the response.content interleaves server_tool_use +
+ * web_search_tool_result + text blocks. We join only the TEXT blocks (the final
+ * answer), which is exactly the same extraction used for plain calls.
+ */
+async function callClaudeAPI(
+  prompt: string,
+  model: ModelChoice,
+  opts?: CallOptions
+): Promise<string> {
   const client = getAnthropicClient();
   const modelId = MODELS[model];
-  
+
   const response = await client.messages.create({
     model: modelId,
-    max_tokens: 4096,
+    max_tokens: opts?.maxTokens ?? 4096,
     messages: [{ role: "user", content: prompt }],
+    ...(opts?.tools && opts.tools.length > 0 ? { tools: opts.tools } : {}),
   });
-  
+
   const text = response.content
     .filter(block => block.type === "text")
     .map(block => (block as { type: "text"; text: string }).text)
     .join("\n")
     .trim();
-  
+
   const pricing = PRICING[model];
   const cost = (response.usage.input_tokens * pricing.input + response.usage.output_tokens * pricing.output) / 1_000_000;
+  // server_tool_use web search adds its own line-item cost, billed separately by
+  // the API; this estimate covers token cost only (flagged so logs aren't read
+  // as the full bill when tools are enabled).
+  const toolNote = opts?.tools && opts.tools.length > 0 ? " + web_search (billed separately)" : "";
   log.info(
     `Claude API [${model}]: ${response.usage.input_tokens} in + ${response.usage.output_tokens} out tokens ` +
-    `(~$${cost.toFixed(4)})`
+    `(~$${cost.toFixed(4)}${toolNote})`
   );
-  
+
   return text;
 }
 
 /**
  * Call Claude. Picks API (with chosen model) if ANTHROPIC_API_KEY is set, else falls back to CLI.
  * The `model` parameter is honored on API path; ignored on CLI path (CLI uses Max plan default).
+ * `opts.tools` is API-only — requesting tools without an API key throws.
  */
-export async function callClaude(prompt: string, model: ModelChoice = "sonnet"): Promise<string> {
+export async function callClaude(
+  prompt: string,
+  model: ModelChoice = "sonnet",
+  opts?: CallOptions
+): Promise<string> {
   if (config.ANTHROPIC_API_KEY) {
-    return callClaudeAPI(prompt, model);
+    return callClaudeAPI(prompt, model, opts);
+  }
+  if (opts?.tools && opts.tools.length > 0) {
+    throw new Error(
+      "Server-side tools (e.g. web_search) require ANTHROPIC_API_KEY — the CLI path can't run them."
+    );
   }
   return callClaudeCLI(prompt);
 }
