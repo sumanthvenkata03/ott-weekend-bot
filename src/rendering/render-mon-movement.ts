@@ -145,7 +145,7 @@ export async function renderMonMovement(
     arrivalCount: draft.newArrivals.length,
     gemCount: draft.hiddenGems.length,
     coverHeadline: coverSlide?.title ?? draft.weekHeadline,
-    coverSubtext: coverSlide?.body ?? "What changed in OTT this week.",
+    coverSubtext: coverSlide?.body ?? "The films worth catching up on.",
     gridItems,
   };
   await renderToPNG({

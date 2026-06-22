@@ -116,6 +116,7 @@
 
   /* Copy block */
   .copy { display: flex; flex-direction: column; position: relative; }
+  .copy-flow { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding-bottom: 60px; }
   .slot-tag {
     font-family: 'Playfair Display', serif;
     font-size: 14px;
@@ -308,14 +309,17 @@
   }
   .card-hidden-gem .streaming-rule { border-top-color: var(--bottle); }
 
-  /* Stamp — tilted, right-aligned in the flow, sits after .why-block.
-     Was absolute (bottom: 70px / right: 30px) but the 2-row info bar pushed
-     .why-body down into the stamp's zone. In-flow placement guarantees the
-     stamp can never overlap body text regardless of info-bar or body height. */
+  /* Stamp — tilted seal pinned ABSOLUTELY to the bottom-right of the copy cell.
+     Was in-flow (after .why-block), but a two-line title added enough height to
+     tip it onto the footer. Absolute bottom:0 makes the stamp content-
+     independent: it lands at the copy cell's bottom edge (card bottom:160px),
+     ~110px clear of the footer (bottom:50px) for ANY title or blurb length.
+     .copy is position:relative (the anchor); .copy-flow's overflow:hidden +
+     padding-bottom:60px keep in-flow body text above the stamp's lane. */
   .stamp {
-    align-self: flex-end;
-    margin-top: 16px;
-    margin-right: 6px;     /* keeps the rotated chip clear of the card edge */
+    position: absolute;
+    bottom: 0;
+    right: 6px;            /* keeps the rotated chip clear of the card edge */
     transform: rotate(-6deg);
     font-family: 'JetBrains Mono', monospace;
     font-size: 16px;
@@ -398,6 +402,7 @@
     </div>
 
     <div class="copy">
+      <div class="copy-flow">
       {% if slotKind == 'gem' %}
       <div class="slot-tag is-gem">★ HIDDEN GEM · {{ slotNumber }} / {{ totalSlots }} ★</div>
       {% else %}
@@ -485,6 +490,7 @@
         <div class="why-label">★ WHAT TO KNOW</div>
         {% endif %}
         <div class="why-body">{{ body | truncate(180) }}</div>
+      </div>
       </div>
       <div class="stamp {% if slotKind == 'gem' %}is-gem{% endif %}">
         {% if slotKind == 'gem' %}HIDDEN GEM{% else %}NEW ARRIVAL{% endif %}

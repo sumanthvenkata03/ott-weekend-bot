@@ -1,8 +1,8 @@
 // src/jobs/monday-movement.ts
 import { addDays, format, startOfDay } from "date-fns";
-import { ingestReleases, ingestOTTArrivals } from "../ingestion/releases/index.js";
+import { ingestReleases } from "../ingestion/releases/index.js";
 import { pickHiddenGems } from "../content/weekend/spotlight-picker.js";
-import { generateMondayMovement } from "../content/weekend/monday-movement.js";
+import { generateMondayMovement, type DeckFacts } from "../content/weekend/monday-movement.js";
 import { writeMovementToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
@@ -14,6 +14,29 @@ import { uploadPngsToR2 } from "../delivery/r2-upload.js";
 import { getIssueNumberForToday } from "../shared/issue-number.js";
 import { excludedKeysFor, recordFeatured, filmKey } from "../shared/featured-ledger.js";
 import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
+import type { Release } from "../shared/types.js";
+
+// Strictly-unique max by a numeric key: returns a film's title ONLY if exactly
+// one film holds the maximum value (a tie, or every value missing → null). The
+// copywriter may mint a "highest/most" claim only for a dimension this names, so
+// ties and gaps can never become false superlatives.
+function uniqueMaxTitle(films: Release[], key: (r: Release) => number | undefined): string | null {
+  let max = -Infinity;
+  let title: string | null = null;
+  let holders = 0;
+  for (const f of films) {
+    const v = key(f);
+    if (typeof v !== "number") continue;
+    if (v > max) {
+      max = v;
+      title = f.title;
+      holders = 1;
+    } else if (v === max) {
+      holders++;
+    }
+  }
+  return holders === 1 ? title : null;
+}
 
 async function main() {
   log.info("📰 Monday Movement job — starting");
@@ -25,37 +48,27 @@ async function main() {
   const issueNumber = getIssueNumberForToday();
 
   const today = startOfDay(new Date());
-  const weekEnd = today;                       // up to and including today
-  const weekStart = addDays(weekEnd, -7);      // last 7 days
+  const endStr = format(today, "yyyy-MM-dd");
 
-  const startStr = format(weekStart, "yyyy-MM-dd");
-  const endStr = format(weekEnd, "yyyy-MM-dd");
-
-  log.info(`Window: ${startStr} → ${endStr}`);
-
-  // Path A: OTT-arrival flagged films (release_type=4)
-  const arrivals = await ingestOTTArrivals(startStr, endStr);
-  log.info(`Confirmed OTT arrivals: ${arrivals.length}`);
-
-  // Path B: Pull a wider pool for hidden-gem picking (last 90 days)
+  // Mon Movement is the CATCH-UP pillar: no this-week arrivals anymore (Wed Drop
+  // owns ALL new OTT). Monday owns the catalog — pull a wide 90-day pool and
+  // surface the hidden gems worth pulling up now.
   const gemPoolStart = format(addDays(today, -90), "yyyy-MM-dd");
   log.info(`Fetching gem pool: ${gemPoolStart} → ${endStr}`);
   const gemPool = await ingestReleases(gemPoolStart, endStr);
   log.info(`Gem pool: ${gemPool.length} candidates`);
 
-  // Cross-pillar dedup: Mon shares a lane with Wed Drop (OTT), so drop anything
-  // that lane featured recently (excludeIssue lets a same-issue re-run ignore
-  // its own prior featuring). Catch-up framing means the overlooked, not the
-  // films midweek already covered.
+  // Cross-pillar dedup: Mon (catalog) shares the OTT lane with Wed Drop (new), so
+  // drop anything that lane featured recently (excludeIssue lets a same-issue
+  // re-run ignore its own prior featuring). Catch-up framing means the overlooked,
+  // not the films midweek already covered.
   const excluded = excludedKeysFor("mon", { excludeIssue: issueNumber });
-  const arrivalsDeduped = arrivals.filter(r => !excluded.has(filmKey(r)));
   const gemPoolDeduped = gemPool.filter(r => !excluded.has(filmKey(r)));
-  const droppedDupes = (arrivals.length - arrivalsDeduped.length) + (gemPool.length - gemPoolDeduped.length);
-  if (droppedDupes > 0) log.info(`Dedup: removed ${droppedDupes} already-featured film(s) (arrivals + gems)`);
+  const droppedDupes = gemPool.length - gemPoolDeduped.length;
+  if (droppedDupes > 0) log.info(`Dedup: removed ${droppedDupes} already-featured film(s) from the gem pool`);
 
-  // Exclude arrivals from gem candidates (don't double-feature)
-  const arrivalIds = new Set(arrivalsDeduped.map(r => r.id));
-  const gems = pickHiddenGems(gemPoolDeduped, 7, arrivalIds);
+  // Feed more candidates than we'll card (no arrivals to share the slate now).
+  const gems = pickHiddenGems(gemPoolDeduped, 12);
 
   log.info(`Top hidden gems picked:`);
   for (const g of gems) {
@@ -65,28 +78,51 @@ async function main() {
     );
   }
 
-  // Cap arrivals at 10 (carousel real-estate); LLM picks the best UP TO 10 across both buckets.
-  const featuredArrivals = arrivalsDeduped.slice(0, 10);
-
-  if (featuredArrivals.length === 0 && gems.length === 0) {
-    log.warn("No films to feature — aborting");
+  if (gems.length === 0) {
+    log.warn("No gems to feature — aborting");
     return;
   }
 
-  const draft = await generateMondayMovement(featuredArrivals, gems, startStr, endStr);
+  // Verified deck facts — the ONLY superlatives/exclusivity claims the copywriter
+  // is allowed to make. Computed over the candidate pool `gems` (a superset of
+  // what the LLM will card), so a unique max here holds for any shown subset and
+  // uniqueness is conservative: a tie in the superset yields no claim at all.
+  const topImdbTitle = uniqueMaxTitle(gems, r => r.imdbRating);
+  const topTbsiTitle = uniqueMaxTitle(gems, r => r.tbsiScore);
+  const topVotesTitle = uniqueMaxTitle(gems, r => r.imdbVotes);
+
+  const titlesByLanguage = new Map<string, string[]>();
+  for (const g of gems) {
+    const titles = titlesByLanguage.get(g.language) ?? [];
+    titles.push(g.title);
+    titlesByLanguage.set(g.language, titles);
+  }
+  const soleLanguageMap: Record<string, string> = {};
+  for (const [lang, titles] of titlesByLanguage) {
+    if (titles.length === 1) soleLanguageMap[lang] = titles[0]!;
+  }
+
+  // Build with conditional spreads so no field is ever explicitly `undefined`
+  // (strict exactOptionalPropertyTypes).
+  const deckFacts: DeckFacts = {
+    ...(topImdbTitle ? { topImdbTitle } : {}),
+    ...(topTbsiTitle ? { topTbsiTitle } : {}),
+    ...(topVotesTitle ? { topVotesTitle } : {}),
+    ...(Object.keys(soleLanguageMap).length > 0 ? { soleLanguageMap } : {}),
+  };
+
+  const draft = await generateMondayMovement([], gems, gemPoolStart, endStr, deckFacts);
 
   if (draft.slides.length === 0) {
     log.info("Mon Movement: LLM returned no worthwhile films this week — skipping pillar.");
     return;
   }
 
-  const bodySlideMix = draft.slides.filter(s => s.type === "arrival" || s.type === "gem");
-  const arrivalCount = bodySlideMix.filter(s => s.type === "arrival").length;
-  const gemCount = bodySlideMix.filter(s => s.type === "gem").length;
+  const bodySlides = draft.slides.filter(s => s.type === "arrival" || s.type === "gem");
+  log.info(`Catch-up: ${bodySlides.length} gems`);
 
   log.info(`Week headline: "${draft.weekHeadline}"`);
   log.info(`Caption (${draft.caption.length} chars): ${draft.caption.slice(0, 100)}...`);
-  log.info(`Mix: ${arrivalCount} NEW + ${gemCount} GEM (${bodySlideMix.length} body slides)`);
 
   // Render PNGs
   const dateStr = format(new Date(), "yyyy-MM-dd");
@@ -150,14 +186,12 @@ async function main() {
   const featured = [...draft.newArrivals, ...draft.hiddenGems]
     .filter(r => featuredTitles.has(r.title.trim().toLowerCase()));
 
-  // Landing verifier: each carded arrival must show an OTT date inside the 7-day
-  // arrivals window; each gem a release date inside the 90-day pool window. Flags
-  // drift loudly (log + Slack); HARD_FAIL_ON_INVALID (default off) would abort.
-  const featuredArrivalIds = new Set(draft.newArrivals.map(r => r.id));
-  const filmsForCheck = featured.map(f => ({ film: f, bucket: featuredArrivalIds.has(f.id) ? ("arrival" as const) : ("gem" as const) }));
+  // Landing verifier: every carded film is a catch-up gem now, so each must show a
+  // release date inside the 90-day pool window. Flags drift loudly (log + Slack);
+  // HARD_FAIL_ON_INVALID (default off) would abort.
+  const filmsForCheck = featured.map(f => ({ film: f, bucket: "gem" as const }));
   const manifest = buildManifest("Mon Movement", issueNumber, filmsForCheck, {
-    arrival: { start: startStr, end: endStr, dateField: "ott", label: "New Arrivals · OTT · 7d" },
-    gem: { start: gemPoolStart, end: endStr, dateField: "release", label: "Hidden Gems · 90d" },
+    gem: { start: gemPoolStart, end: endStr, dateField: "release", label: "Hidden Gems · 90d catch-up" },
   });
   log.info("\n" + manifestToLog(manifest));
   saveManifest(manifest, `output/manifests/mon-movement-${dateStr}.json`);
@@ -173,8 +207,7 @@ async function main() {
     notionUrl: url,
     metadata: {
       "Issue": String(issueNumber),
-      "Mix": `${arrivalCount} NEW · ${gemCount} GEM`,
-      "Films": String(bodySlideMix.length),
+      "Films": String(bodySlides.length),
     },
     coverImageUrl: cover.publicUrl,
     bodyCardImageUrls: cardUploads.map(u => u.publicUrl),
