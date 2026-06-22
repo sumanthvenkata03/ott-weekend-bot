@@ -7,7 +7,7 @@ import { log } from "./logger.js";
 const DB_PATH = "data/cache.sqlite";
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
-const db = new Database(DB_PATH);
+export const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
 
 db.exec(`
@@ -40,11 +40,11 @@ export async function cached<T>(
 ): Promise<T> {
   const now = Date.now();
   const row = getStmt.get(key) as { value: string; expires_at: number } | undefined;
-  
+
   if (row && row.expires_at > now) {
     return JSON.parse(row.value) as T;
   }
-  
+
   const fresh = await loader();
   setStmt.run(key, JSON.stringify(fresh), now + opts.ttlSeconds * 1000);
   return fresh;

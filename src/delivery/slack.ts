@@ -16,6 +16,7 @@ export interface DraftNotification {
   coverImageUrl?: string;             // primary cover image — inline preview
   bodyCardImageUrls?: string[];       // body card images — link buttons
   hashtags?: string;                  // space-separated #tags — rendered copy-paste-ready
+  validation?: { metaValue: string; issuesBlock?: string };  // landing-verifier summary + flagged rows
 }
 
 /**
@@ -27,7 +28,7 @@ export async function notifyDraftReady(payload: DraftNotification): Promise<void
     log.info("Slack webhook not configured — skipping notification");
     return;
   }
-  
+
   const blocks: unknown[] = [
     {
       type: "header",
@@ -45,7 +46,7 @@ export async function notifyDraftReady(payload: DraftNotification): Promise<void
       },
     },
   ];
-  
+
   if (payload.metadata && Object.keys(payload.metadata).length > 0) {
     blocks.push({
       type: "section",
@@ -54,6 +55,13 @@ export async function notifyDraftReady(payload: DraftNotification): Promise<void
         text: `*${k}:*\n${v}`,
       })),
     });
+  }
+
+  if (payload.validation) {
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: payload.validation.metaValue }] });
+    if (payload.validation.issuesBlock) {
+      blocks.push({ type: "section", text: { type: "mrkdwn", text: payload.validation.issuesBlock } });
+    }
   }
 
   if (payload.coverImageUrl) {
@@ -116,7 +124,7 @@ export async function notifyDraftReady(payload: DraftNotification): Promise<void
  */
 export async function notifyJobFailure(jobName: string, errorMessage: string): Promise<void> {
   if (!config.SLACK_WEBHOOK_URL) return;
-  
+
   try {
     await ofetch(config.SLACK_WEBHOOK_URL, {
       method: "POST",

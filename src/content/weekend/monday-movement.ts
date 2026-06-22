@@ -87,17 +87,17 @@ export async function generateMondayMovement(
   if (newArrivals.length === 0 && hiddenGems.length === 0) {
     throw new Error("Cannot generate Movement post with zero films");
   }
-  
+
   const weekLabel = `Week of ${format(parseISO(weekStart), "MMM d")} — ${format(parseISO(weekEnd), "MMM d, yyyy")}`;
   log.info(`Generating Monday Movement: ${weekLabel} (${newArrivals.length} arrivals, ${hiddenGems.length} gems)`);
-  
+
   const arrivalsBlock = newArrivals.length > 0
     ? newArrivals.map(r => releaseForPrompt(r, true)).join("\n\n")
     : "(no confirmed new OTT arrivals from TMDb this week — likely a quiet week or platforms didn't surface their adds)";
-  
+
   const gemsBlock = hiddenGems.map(r => releaseForPrompt(r, false)).join("\n\n");
-  
-  const prompt = `You are the head social media strategist for a Pan-Indian OTT + film industry Instagram page. Monday is the OTT MOVEMENT post — what changed across the Indian streaming landscape this week.
+
+  const prompt = `You are the head social media strategist for a Pan-Indian OTT + film industry Instagram page. Monday is the CATCH-UP post — the under-the-radar OTT drops the week's main coverage skipped, plus hidden gems worth pulling up. This is NOT the headline new releases (those run midweek); it's the overlooked and the evergreen.
 
 PAGE IDENTITY:
 - Pan-Indian, South-heavy. We track every platform, every language.
@@ -105,7 +105,7 @@ PAGE IDENTITY:
 - Decision page, not info page — but Monday is the most "report" of our pillars, so leans observational.
 
 CRITICAL TONE RULES:
-- Don't just list films. Find the PATTERN. The post's spine is one line: what does this week's movement say about Indian OTT right now?
+- Don't just list films. Find the PATTERN. The post's spine is one line: what do the past week's overlooked drops and catch-up picks say about Indian OTT right now?
 - Be specific. Name platforms, name languages, call out trends.
 - Acknowledge gaps. If no Tamil arrivals dropped, say so — "Tamil OTT is quiet this week."
 - NEVER use AI-cliche phrases: "dive into", "delve", "in today's fast-paced world", "buckle up", "look no further", "landscape" (overused), "elevates".
@@ -129,7 +129,7 @@ CARD COUNT + MIX — quality over coverage:
 DELIVERABLES (respond as JSON):
 
 {
-  "weekHeadline": "ONE bold line. The post's spine. Pattern-recognition statement about what this week's movement reveals. e.g., 'Three Malayalam thrillers landed this week and not one Hindi drama. Mollywood is running the genre clock.'",
+  "weekHeadline": "ONE bold line. The post's spine. Pattern-recognition statement about what the past week's overlooked drops and catch-up picks reveal. e.g., 'The Malayalam thriller everyone scrolled past last week is quietly the best thing on Prime right now — and three more slipped by with it.'",
   "caption": "Under 140 words. Open with the weekHeadline or a variant. Walk through 2-3 specific arrivals with one-line takes. Mention 1-2 hidden gems. End with CTA: 'Save this. DM us if you've watched any.'",
   "hashtags": ["10-12 hashtags array with # prefix"],
   "carouselSlides": [
@@ -168,7 +168,7 @@ Acceptable headline shapes:
 - Frame the contrast directly: "Telugu Prime Video's loud week vs. Mollywood's quiet excellence"
 
 Not acceptable: headline that only mentions arrivals when gems exist, or only mentions gems when arrivals exist.`;
-  
+
   const output = await callClaudeJSON(prompt, MonMovementSchema, "sonnet");
 
   // Runtime guard: design contract is 4–10 body slides (arrival + gem types

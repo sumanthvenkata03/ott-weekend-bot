@@ -13,6 +13,8 @@ import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
 import { getIssueNumberForToday } from "../shared/issue-number.js";
 import { EDITION_META, type WedDropEdition } from "../shared/wed-drop-edition.js";
+import { excludedKeysFor, recordFeatured, filmKey, type PillarKey } from "../shared/featured-ledger.js";
+import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
 
 /**
  * Produce ONE Wed Drop edition end-to-end from its own (un-merged) pool:
@@ -30,11 +32,23 @@ async function produceEdition(
   const meta = EDITION_META[edition];
   log.info(`\n— ${meta.notionTitle} — ${pool.length} candidate(s) in pool —`);
 
+  // Cross-pillar dedup: drop any film this edition's lane featured recently.
+  // OTT shares Mon Movement's lane (the real collision); Theatrical is its own.
+  const pillarKey: PillarKey = edition === "ott" ? "wed-ott" : "wed-theatrical";
+  const excluded = excludedKeysFor(pillarKey, { excludeIssue: issueNumber });
+  const deduped = pool.filter(r => !excluded.has(filmKey(r)));
+  const droppedDupes = pool.length - deduped.length;
+  if (droppedDupes > 0) log.info(`  Dedup: dropped ${droppedDupes} already-featured film(s) from the ${edition} pool`);
+  if (deduped.length === 0) {
+    log.info(`  ${meta.notionTitle}: every candidate was featured recently — edition skipped.`);
+    return;
+  }
+
   // Per-edition candidate cap: sort THIS pool by popularity, feed up to 40 so
   // a large pool can still reach MAX_WED_DROP_FILMS (or skip) without the tail
   // being crowded out — 40 comfortably exceeds the 15 cap with headroom, and the
   // popularity sort means the strongest survive if a pool is ever huge.
-  const featured = [...pool]
+  const featured = [...deduped]
     .sort((a, b) => (b.tmdbPopularity ?? 0) - (a.tmdbPopularity ?? 0))
     .slice(0, 40);
   log.info(`  Feeding ${featured.length} ${edition} candidates to the LLM (picks up to ${MAX_WED_DROP_FILMS} or skips)`);
@@ -52,6 +66,18 @@ async function produceEdition(
 
   // Render PNGs (edition-scoped filenames: wed-drop-{slug}-{date}-…).
   const dateStr = format(new Date(), "yyyy-MM-dd");
+
+  // Landing verifier: every carded film must show the right kind of date inside
+  // this edition's window — OTT date for "Now Streaming", theatrical date for
+  // "In Theaters". Flags drift loudly; HARD_FAIL_ON_INVALID (off) would abort.
+  const vbucket = edition === "ott" ? ("ott" as const) : ("theatrical" as const);
+  const manifest = buildManifest(`Wed Drop · ${meta.slackLabel}`, issueNumber,
+    draft.releases.map(f => ({ film: f, bucket: vbucket })),
+    { [vbucket]: { start: windowStart, end: windowEnd, dateField: vbucket === "ott" ? "ott" : "theatrical", label: meta.notionTitle } });
+  log.info("\n" + manifestToLog(manifest));
+  saveManifest(manifest, `output/manifests/wed-drop-${meta.slug}-${dateStr}.json`);
+  assertOrFlag(manifest);
+
   log.info(`  Rendering PNGs (Issue ${issueNumber})...`);
   const renderResult = await renderWedDrop(draft, issueNumber, edition, "output/posts");
 
@@ -118,7 +144,12 @@ async function produceEdition(
     coverImageUrl: cover.publicUrl,
     bodyCardImageUrls: cardUploads.map(u => u.publicUrl),
     hashtags: enrichedHashtags,
+    validation: manifestToSlack(manifest),
   });
+
+  // Log the films actually placed on this edition's published cards so a
+  // colliding pillar (Mon Movement shares the OTT lane) can't re-feature them.
+  recordFeatured(draft.releases, pillarKey, issueNumber);
 
   log.success(`✅ ${meta.notionTitle} delivered — Notion page: ${url}`);
   log.success(`   Cover: ${cover.publicUrl}`);

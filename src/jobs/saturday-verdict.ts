@@ -27,6 +27,7 @@ import { renderSatVerdict } from "../rendering/render-sat-verdict.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
 import { getIssueNumberForToday } from "../shared/issue-number.js";
+import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
 
 // ── Grounded-research dials (Phase 1) ──
 /** Deep-research (web search) only the top N films by importance; the rest get
@@ -208,7 +209,7 @@ async function main(deliver = true) {
   }
 
   purgeExpired();
-  
+
   const { startDate, endDate } = pickVerdictWindow(new Date());
   log.info(`Target window (Wed → Fri): ${startDate} → ${endDate}`);
 
@@ -341,6 +342,16 @@ async function main(deliver = true) {
   const issueNumber = getIssueNumberForToday();
   const dateStr = format(today, "yyyy-MM-dd");
 
+  // Landing verifier: every carded verdict film must show a release date inside
+  // the Wed→Fri verdict window. Flags drift loudly (log + Slack); the carded set
+  // is draft.releases (the selected films). HARD_FAIL_ON_INVALID (off) would abort.
+  const manifest = buildManifest("Sat Verdict", issueNumber,
+    draft.releases.map(f => ({ film: f, bucket: "verdict" as const })),
+    { verdict: { start: startDate, end: endDate, dateField: "release", label: "Verdict · Wed→Fri" } });
+  log.info("\n" + manifestToLog(manifest));
+  saveManifest(manifest, `output/manifests/sat-verdict-${dateStr}.json`);
+  assertOrFlag(manifest);
+
   log.info(`Rendering PNGs (Issue ${issueNumber})...`);
   const renderResult = await renderSatVerdict(draft, issueNumber, "output/posts", alsoSkipping);
 
@@ -417,6 +428,7 @@ async function main(deliver = true) {
     coverImageUrl: cover.publicUrl,
     bodyCardImageUrls: cardUploads.map(u => u.publicUrl),
     hashtags: enrichedHashtags,
+    validation: manifestToSlack(manifest),
   });
 
   log.success(`\n✅ Sat Verdict PREVIEW delivered — Notion page: ${url}`);

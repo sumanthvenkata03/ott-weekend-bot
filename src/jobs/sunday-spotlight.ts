@@ -12,6 +12,7 @@ import { renderSunSpotlight } from "../rendering/render-sun-spotlight.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
 import { getIssueNumberForToday } from "../shared/issue-number.js";
+import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
 
 /**
  * Sunday Spotlight runs on Sunday morning, targeting the just-passed weekend.
@@ -65,6 +66,17 @@ async function main() {
   const issueNumber = getIssueNumberForToday();
   const dateStr = format(today, "yyyy-MM-dd");
 
+  // Landing verifier: the spotlight pick is chosen ONLY from the weekend-window
+  // pool (no out-of-window catalog reach), so this is a HARD window — a pick
+  // whose release date falls outside the weekend is genuine discover/detail
+  // drift. Flags loudly (log + Slack); HARD_FAIL_ON_INVALID (off) would abort.
+  const manifest = buildManifest("Sun Spotlight", issueNumber,
+    [{ film, bucket: "spotlight" as const }],
+    { spotlight: { start: startDate, end: endDate, dateField: "release", label: "Spotlight · weekend" } });
+  log.info("\n" + manifestToLog(manifest));
+  saveManifest(manifest, `output/manifests/sun-spotlight-${dateStr}.json`);
+  assertOrFlag(manifest);
+
   log.info(`Rendering PNGs (Issue ${issueNumber})...`);
   const renderResult = await renderSunSpotlight(draft, today, issueNumber, "output/posts");
 
@@ -117,6 +129,7 @@ async function main() {
     coverImageUrl: coverFeed.publicUrl,
     bodyCardImageUrls: [card1.publicUrl, card2.publicUrl],
     hashtags: enrichedHashtags,
+    validation: manifestToSlack(manifest),
   });
 
   log.success(`\n✅ Sun Spotlight ${issueNumber} delivered`);
