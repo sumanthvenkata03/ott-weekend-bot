@@ -1,14 +1,15 @@
 // src/research/registry.ts
-// Central list of research sources. Keyed sources (youtube now; reddit, brave
-// later) are added by pushing them into SOURCES — availableSources() then
+// Central list of research sources. Keyed sources (youtube, tavily now; reddit,
+// brave later) are added by pushing them into SOURCES — availableSources() then
 // filters by each source's isAvailable() (key presence), so an unkeyed
 // environment simply runs the no-key sources.
 import type { ResearchSource } from "./types.js";
 import { wikipedia } from "./sources/wikipedia.js";
 import { googleNews } from "./sources/googleNews.js";
 import { youtube } from "./sources/youtube.js";
+import { tavily } from "./sources/tavily.js";
 
-const SOURCES: ResearchSource[] = [wikipedia, googleNews, youtube];
+const SOURCES: ResearchSource[] = [wikipedia, googleNews, youtube, tavily];
 
 export function allSources(): ResearchSource[] {
   return SOURCES;

@@ -41,7 +41,7 @@ export interface ConsolidateOptions {
 // (overlooked) films legitimately omit most fields, and the prompt tells the
 // model to omit what the sources don't support — a required field would make a
 // correctly-omitted value fail validation and (after one retry) throw.
-const SOURCE_NAMES = ["wikipedia", "googleNews", "reddit", "youtube", "brave"] as const;
+const SOURCE_NAMES = ["wikipedia", "googleNews", "reddit", "youtube", "brave", "tavily"] as const;
 const SourceNameSchema = z.enum(SOURCE_NAMES);
 const ConfidenceSchema = z.enum(["high", "medium", "low"]);
 
@@ -146,7 +146,7 @@ TASK — separate FACTS from SIGNAL, both traceable to the sources:
 - SIGNAL (interpreted): criticalReception (summarize the consensus WITH its nuance — if reviews are mixed, say "mixed"; do NOT round up to "acclaimed"), audienceBuzz (chatter/anticipation), discoverability (widely seen vs overlooked — use evidence like YouTube trailer view counts and news volume), controversies (legal/plagiarism/etc., ONLY if in the sources), notes (other noteworthy signal, as a short list).
 
 PROVENANCE + CONFIDENCE — for EVERY field you output:
-- "sources": the array of source names supporting the value (e.g. ["wikipedia"] or ["googleNews","youtube"]). Use ONLY these names: wikipedia, googleNews, youtube, reddit, brave.
+- "sources": the array of source names supporting the value (e.g. ["wikipedia"] or ["googleNews","youtube"]). Use ONLY these names: wikipedia, googleNews, youtube, tavily.
 - "confidence": "high" = authoritative source (Wikipedia/structured) OR multiple sources agree; "medium" = a single decent source; "low" = thin/indirect/conflicting.
 - "note" (optional): a short caveat when data is thin or sources disagree.
 

@@ -1,7 +1,7 @@
 // src/research/types.ts
 // Shared shapes for the internal research module. No I/O here — pure types.
 
-export type SourceName = "wikipedia" | "googleNews" | "reddit" | "youtube" | "brave";
+export type SourceName = "wikipedia" | "googleNews" | "reddit" | "youtube" | "brave" | "tavily";
 
 /** facts = encyclopedic/ground-truth, signal = buzz/coverage, both = either. */
 export type SourceKind = "facts" | "signal" | "both";
