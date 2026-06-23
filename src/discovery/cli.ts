@@ -1,6 +1,6 @@
 // src/discovery/cli.ts
 // Usage: tsx src/discovery/cli.ts <from> <to> [lang,lang,...]
-//   from/to = ISO yyyy-mm-dd (inclusive). Languages default to all 7.
+//   from/to = ISO yyyy-mm-dd (inclusive). Languages default to all 8.
 // Prints the union film list plus a stats summary that spells out the
 // miss-detection (films only one net found).
 import "dotenv/config";
@@ -20,7 +20,7 @@ const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
 // Accept either an ISO 639-1 code (te, ta, …) or a full name (Telugu, …).
 const CODE_TO_LANGUAGE: Record<string, string> = {
   te: "Telugu", ta: "Tamil", ml: "Malayalam", kn: "Kannada",
-  hi: "Hindi", bn: "Bengali", mr: "Marathi",
+  hi: "Hindi", bn: "Bengali", mr: "Marathi", pa: "Punjabi",
 };
 const NAME_BY_LOWER = new Map(SUPPORTED_LANGUAGES.map((n) => [n.toLowerCase(), n]));
 
@@ -44,11 +44,17 @@ function tag(f: DiscoveredFilm): string {
   return f.foundIn[0] ?? "?";
 }
 
+// theatrical → thea, digital → digi, both → both, (wikipedia-only) → blank.
+function relTag(f: DiscoveredFilm): string {
+  if (!f.releaseType) return "";
+  return f.releaseType === "theatrical" ? "thea" : f.releaseType === "digital" ? "digi" : "both";
+}
+
 function line(f: DiscoveredFilm): string {
   const date = f.releaseDate ?? "????-??-??";
   const approx = f.approximateDate ? "~" : " ";
   const year = f.year ?? "????";
-  return `  ${approx}${date}  ${String(year)}  [${tag(f).padEnd(9)}]  ${f.title}`;
+  return `  ${approx}${date}  ${String(year)}  [${tag(f).padEnd(9)}]  ${relTag(f).padEnd(4)}  ${f.title}`;
 }
 
 async function main(): Promise<void> {

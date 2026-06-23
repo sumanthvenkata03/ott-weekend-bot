@@ -20,7 +20,7 @@ import {
 } from "date-fns";
 import { cached } from "../../shared/cache.js";
 import { log } from "../../shared/logger.js";
-import type { DiscoveredFilm } from "../types.js";
+import type { DiscoveredFilm, WikiCoverage, WikiNetResult } from "../types.js";
 import { normalizeTitle } from "../normalize.js";
 
 // 6h — year-lists change slowly within a window.
@@ -44,7 +44,9 @@ interface WikiParseResponse {
  * Fetch the rendered HTML of a list page via the MediaWiki parse API.
  * Cached through the shared SQLite cache. Returns "" for a missing page
  * (cached — it won't appear soon); rethrows transient fetch errors so the
- * caller's try/catch can degrade to [] without poisoning the cache.
+ * caller's try/catch can degrade to [] without poisoning the cache. The
+ * caller decides how to LOG a missing page (mild vs loud) — kept silent here
+ * so logging is consistent regardless of cache hit/miss.
  */
 async function fetchListHtml(page: string): Promise<string> {
   return cached<string>(
@@ -63,11 +65,9 @@ async function fetchListHtml(page: string): Promise<string> {
         retry: 2,
         retryDelay: 500,
       });
-      if (res.error) {
-        // Definitive "page doesn't exist" — cache "" so we don't refetch it.
-        log.warn(`Wikipedia: page missing "${page}" (${res.error.code})`);
-        return "";
-      }
+      // Definitive "page doesn't exist" — return "" (cached; the caller maps
+      // this to the "missing" status).
+      if (res.error) return "";
       const text = res.parse?.text;
       // A 200 with no parse.text is a transient/unexpected shape, not a
       // permanent 404. Throw so cached() does NOT persist it — the caller
@@ -298,32 +298,41 @@ function yearsInRange(from: string, to: string): number[] {
 }
 
 /**
- * Wikipedia net entry point. For each language × each year the range
- * touches, fetch and parse the list page. Never throws — a failed page
- * contributes [] and is logged.
+ * Wikipedia net entry point. For each language × each year the range touches,
+ * fetch and parse the list page, recording per-(language, year) coverage with
+ * a status so discover() can tell "no page yet" (mild) from "page existed but
+ * parsed 0" (loud — the silent-parser-break class). Never throws.
  */
 export async function discoverWikipedia(
   languages: string[],
   from: string,
   to: string
-): Promise<DiscoveredFilm[]> {
+): Promise<WikiNetResult> {
   const years = yearsInRange(from, to);
-  const out: DiscoveredFilm[] = [];
+  const films: DiscoveredFilm[] = [];
+  const coverage: WikiCoverage[] = [];
   for (const language of languages) {
     for (const year of years) {
       const page = `List of ${language} films of ${year}`;
       try {
         const htmlStr = await fetchListHtml(page);
-        const { films, skipped } = parsePage(htmlStr, language, year, page, from, to);
+        if (htmlStr === "") {
+          coverage.push({ language, year, status: "missing", count: 0 });
+          log.info(`  Wikipedia [${language}/${year}] no list page (not created yet)`);
+          continue;
+        }
+        const { films: pageFilms, skipped } = parsePage(htmlStr, language, year, page, from, to);
+        films.push(...pageFilms);
+        coverage.push({ language, year, status: "ok", count: pageFilms.length });
         log.info(
-          `  Wikipedia [${language}/${year}] ${films.length} in range` +
+          `  Wikipedia [${language}/${year}] ${pageFilms.length} in range` +
             (skipped ? ` (${skipped} rows skipped)` : "")
         );
-        out.push(...films);
       } catch (err) {
+        coverage.push({ language, year, status: "error", count: 0 });
         log.warn(`Wikipedia fetch/parse failed for "${page}"`, err instanceof Error ? err.message : err);
       }
     }
   }
-  return out;
+  return { films, coverage };
 }

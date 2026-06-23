@@ -8,12 +8,21 @@
 /** The independent discovery nets. */
 export type DiscoverySource = "tmdb" | "wikipedia";
 
+/**
+ * How TMDb surfaced a film in the date range:
+ *  - "theatrical": matched the primary_release_date pass
+ *  - "digital":    matched only the with_release_type=4 (OTT) pass
+ *  - "both":       matched both passes (same tmdbId)
+ */
+export type ReleaseType = "theatrical" | "digital" | "both";
+
 /** Per-net raw detail kept on a merged film (for provenance/debugging). */
 export interface TmdbSourceDetail {
   tmdbId: number;
   title: string;
   releaseDate?: string;
   language?: string;
+  releaseType?: ReleaseType;
 }
 
 export interface WikipediaSourceDetail {
@@ -35,9 +44,13 @@ export interface DiscoveredFilm {
   language?: string;
   /** ISO yyyy-mm-dd when concrete; first-of-month when approximate. */
   releaseDate?: string;
-  /** True when only a month was known (day inferred) — date is fuzzy. */
+  /** True when the date is fuzzy (month-only, or a digital hit dated by its TMDb primary date). */
   approximateDate?: boolean;
+  /** Theatrical / digital / both — only set for films the TMDb net found. */
+  releaseType?: ReleaseType;
   tmdbId?: number;
+  /** Human-readable caveat (e.g. why a date is approximate). */
+  note?: string;
   /** Which nets surfaced this film. */
   foundIn: DiscoverySource[];
   /** Raw per-net details for provenance. */
@@ -53,6 +66,32 @@ export interface DiscoveryQuery {
   to: string;
   /** Human language names (e.g. ["Telugu","Tamil"]). */
   languages: string[];
+}
+
+/** Per-(language, year) coverage from the TMDb net. */
+export interface TmdbCoverage {
+  language: string;
+  year: number;
+  count: number;
+}
+
+/** Per-(language, year) coverage from the Wikipedia net. */
+export interface WikiCoverage {
+  language: string;
+  year: number;
+  /** "ok" = page existed & parsed; "missing" = 404/not created; "error" = fetch/parse threw. */
+  status: "ok" | "missing" | "error";
+  count: number;
+}
+
+/** A net's result: the films it found plus its per-(language, year) coverage. */
+export interface TmdbNetResult {
+  films: DiscoveredFilm[];
+  coverage: TmdbCoverage[];
+}
+export interface WikiNetResult {
+  films: DiscoveredFilm[];
+  coverage: WikiCoverage[];
 }
 
 /** Coverage statistics — the "miss detection" lives here. */
