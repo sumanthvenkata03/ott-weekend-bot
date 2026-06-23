@@ -19,7 +19,7 @@ const tmdbFetchRaw = throttle(<T = unknown>(path: string, params: Record<string,
   return ofetch<T>(url.toString(), { retry: 2, retryDelay: 500 });
 });
 
-function tmdbFetchCached<T>(path: string, params: Record<string, string>, ttlSeconds: number): Promise<T> {
+export function tmdbFetchCached<T>(path: string, params: Record<string, string>, ttlSeconds: number): Promise<T> {
   const key = `tmdb:${path}:${new URLSearchParams(params).toString()}`;
   return cached(key, () => tmdbFetchRaw<T>(path, params), { ttlSeconds });
 }

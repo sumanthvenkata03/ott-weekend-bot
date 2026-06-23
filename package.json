@@ -18,7 +18,8 @@
     "render:sun-spotlight": "tsx src/rendering/render-sun-spotlight.ts",
     "thumbnails": "tsx src/rendering/generate-thumbnails.ts",
     "research": "tsx src/research/cli.ts",
-    "research:consolidate": "tsx src/research/consolidate-cli.ts"
+    "research:consolidate": "tsx src/research/consolidate-cli.ts",
+    "discover": "tsx src/discovery/cli.ts"
   },
   "keywords": [],
   "author": "",
@@ -41,6 +42,7 @@
     "date-fns-tz": "^3.2.0",
     "dotenv": "^17.4.2",
     "fast-xml-parser": "^5.9.3",
+    "node-html-parser": "^8.0.3",
     "nunjucks": "^3.2.4",
     "ofetch": "^1.5.1",
     "p-throttle": "^8.1.0",
