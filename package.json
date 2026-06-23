@@ -17,7 +17,8 @@
     "render:mon-movement": "tsx src/rendering/render-mon-movement.ts",
     "render:sun-spotlight": "tsx src/rendering/render-sun-spotlight.ts",
     "thumbnails": "tsx src/rendering/generate-thumbnails.ts",
-    "research": "tsx src/research/cli.ts"
+    "research": "tsx src/research/cli.ts",
+    "research:consolidate": "tsx src/research/consolidate-cli.ts"
   },
   "keywords": [],
   "author": "",

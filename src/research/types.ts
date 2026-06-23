@@ -55,3 +55,68 @@ export interface ResearchSource {
   isAvailable(): boolean;
   query(q: ResearchQuery): Promise<RawSourceResult>;
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Consolidation (Step 3) — the LLM turns a ResearchResult into this structured,
+// provenance-tagged shape. DATA ONLY: no caption, no editorial voice. Every
+// field carries which source(s) support it and a confidence. All facts/signal
+// fields are OPTIONAL — overlooked films are legitimately sparse; a missing
+// field means "not found in the sources", never "fabricate it".
+// ──────────────────────────────────────────────────────────────────────────
+
+export type Confidence = "high" | "medium" | "low";
+
+/** A single consolidated value with provenance + confidence. */
+export interface ConsolidatedField<T> {
+  value: T;
+  /** Which source(s) the value was drawn from. */
+  sources: SourceName[];
+  confidence: Confidence;
+  /** Optional caveat (e.g. thin/indirect/conflicting). */
+  note?: string;
+}
+
+/** Objective, verifiable facts — each traceable to a provided source. */
+export interface ConsolidatedFacts {
+  title?: ConsolidatedField<string>;
+  year?: ConsolidatedField<number>;
+  languages?: ConsolidatedField<string[]>;
+  director?: ConsolidatedField<string>;
+  cast?: ConsolidatedField<string[]>;
+  musicDirector?: ConsolidatedField<string>;
+  releaseDate?: ConsolidatedField<string>;
+  runtime?: ConsolidatedField<string>;
+  genres?: ConsolidatedField<string[]>;
+  synopsis?: ConsolidatedField<string>;
+  boxOffice?: ConsolidatedField<string>;
+}
+
+/** Interpreted signal — reception nuance, buzz, discoverability, controversies. */
+export interface ConsolidatedSignal {
+  criticalReception?: ConsolidatedField<string>;
+  audienceBuzz?: ConsolidatedField<string>;
+  discoverability?: ConsolidatedField<string>;
+  controversies?: ConsolidatedField<string>;
+  notes?: ConsolidatedField<string[]>;
+}
+
+/** An item the model judged to be about a DIFFERENT film/topic (name-drop). */
+export interface DiscardedItem {
+  title?: string;
+  url?: string;
+  source: SourceName;
+  reason: string;
+}
+
+export interface ConsolidatedResearch {
+  query: { title: string; year?: number };
+  facts: ConsolidatedFacts;
+  signal: ConsolidatedSignal;
+  discarded: DiscardedItem[];
+  /** Model id that produced this (reflects the FIRST consolidation). */
+  model: string;
+  /** ISO timestamp of the FIRST consolidation (so staleness is visible). */
+  consolidatedAt: string;
+  /** True when served from cache (stamped fresh each call, not cached itself). */
+  cached?: boolean;
+}
