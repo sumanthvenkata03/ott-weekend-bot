@@ -1,0 +1,9 @@
+<!-- SYNTHETIC. Miniature repro of the January bug: MediaWiki TemplateStyles
+  inject a <style> block INSIDE the first month cell (ts-vertical-text). Without
+  stripping <style> first, cleanText reads ".mw-parser-output...JANUARY" and the
+  month lookup fails -> the film is SILENTLY DROPPED. With stripping, JANUARY
+  resolves -> StyleJan @ 2026-01-07. -->
+<table class="wikitable">
+<tr><th colspan="2">Opening</th><th>Title</th><th>Ref.</th></tr>
+<tr><td><style data-mw-deduplicate="TemplateStyles:r1038841319">.mw-parser-output .ts-vertical-text{writing-mode:vertical-rl}</style><span class="ts-vertical-text">JANUARY</span></td><td>7</td><td><i>StyleJan</i></td><td></td></tr>
+</table>

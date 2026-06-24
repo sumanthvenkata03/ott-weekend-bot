@@ -3,6 +3,7 @@
 // dedupes the candidates, and reports per-net coverage so we can SEE what
 // each net missed. Purely algorithmic — no LLM.
 
+import { parseISO, isValid } from "date-fns";
 import { log } from "../shared/logger.js";
 import { discoverTmdb } from "./sources/tmdbDiscover.js";
 import { discoverWikipedia } from "./sources/wikipediaList.js";
@@ -21,6 +22,10 @@ const ALL_LANGUAGES = [
 
 export const SUPPORTED_LANGUAGES = ALL_LANGUAGES;
 
+// Strict ISO yyyy-mm-dd — the DiscoveryQuery contract (and cli.ts) require this
+// exact shape. Used to reject lenient inputs parseISO would otherwise accept.
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
  * Dedupe key: normalized title + language + year. Language is REQUIRED — two
  * distinct films sharing a title+year in different languages (e.g. Drishyam 3
@@ -28,7 +33,7 @@ export const SUPPORTED_LANGUAGES = ALL_LANGUAGES;
  * The TMDb side is already deduped by tmdbId upstream; this key handles the
  * cross-net union (a film one net found by title also matches the other net).
  */
-function dedupeKey(f: DiscoveredFilm): string {
+export function dedupeKey(f: DiscoveredFilm): string {
   return `${f.normalizedTitle}|${f.language ?? ""}|${f.year ?? ""}`;
 }
 
@@ -81,7 +86,7 @@ function mergeInto(target: DiscoveredFilm, incoming: DiscoveredFilm): void {
 }
 
 /** Union + dedupe a flat candidate list into one merged film per key. */
-function unionFilms(candidates: DiscoveredFilm[]): DiscoveredFilm[] {
+export function unionFilms(candidates: DiscoveredFilm[]): DiscoveredFilm[] {
   const byKey = new Map<string, DiscoveredFilm>();
   for (const c of candidates) {
     const key = dedupeKey(c);
@@ -140,10 +145,34 @@ function crossNetGuard(tmdbCoverage: TmdbCoverage[], wikiCoverage: WikiCoverage[
 }
 
 /**
+ * Validate the query's date range. discover() is an internal API boundary — it
+ * must NOT trust its caller (the CLI guards this too, but a direct caller may
+ * not). We require strict yyyy-mm-dd format AND a real calendar date: the regex
+ * rejects lenient/partial inputs that parseISO would silently accept ("2026",
+ * "2026-6-1"), while isValid rejects well-formatted-but-impossible dates
+ * ("2026-02-30", which parseISO returns as an Invalid Date rather than rolling
+ * over). from == to (a single-day range) is allowed. Throws on any violation.
+ */
+function validateRange(from: string, to: string): void {
+  if (!ISO_DATE_RE.test(from)) throw new Error(`discover: invalid date "${from}" (expected yyyy-mm-dd)`);
+  if (!ISO_DATE_RE.test(to)) throw new Error(`discover: invalid date "${to}" (expected yyyy-mm-dd)`);
+  const fromDate = parseISO(from);
+  const toDate = parseISO(to);
+  if (!isValid(fromDate)) throw new Error(`discover: invalid date "${from}" (expected yyyy-mm-dd)`);
+  if (!isValid(toDate)) throw new Error(`discover: invalid date "${to}" (expected yyyy-mm-dd)`);
+  if (fromDate.getTime() > toDate.getTime()) {
+    throw new Error(`discover: "from" (${from}) must be on or before "to" (${to})`);
+  }
+}
+
+/**
  * Discover films released in [from,to] for the given languages by unioning
- * the TMDb and Wikipedia nets. Never throws on a single net failure.
+ * the TMDb and Wikipedia nets. Throws on an invalid date range (bad format,
+ * impossible calendar date, or from>to); never throws on a single net failure.
  */
 export async function discover(query: DiscoveryQuery): Promise<DiscoveryResult> {
+  validateRange(query.from, query.to);
+
   const languages = query.languages.length > 0 ? query.languages : ALL_LANGUAGES;
   log.info(`Discovery: ${query.from} → ${query.to} · ${languages.join(", ")}`);
 

@@ -1,0 +1,13 @@
+<!-- SYNTHETIC. A page that EXISTS but has NO "Opening" date table: only a
+  Box-office (Rank...) table and an "Upcoming releases" (Title...) table. Both
+  are skipped by the firstHeader.startsWith("opening") guard -> 0 films, 0
+  skipped. discoverWikipedia maps this to status "ok" count 0 (the loud
+  cross-net-guard case when TMDb found >0). -->
+<table class="wikitable">
+<tr><th>Rank</th><th>Title</th><th>Worldwide gross</th><th>Ref.</th></tr>
+<tr><td>1</td><td><i>BigHit</i></td><td>100 crore</td><td>[1]</td></tr>
+</table>
+<table class="wikitable">
+<tr><th>Title</th><th>Director</th><th>Cast</th><th>Status</th></tr>
+<tr><td><i>UpcomingFilm</i></td><td>Someone</td><td>A, B</td><td>Filming</td></tr>
+</table>

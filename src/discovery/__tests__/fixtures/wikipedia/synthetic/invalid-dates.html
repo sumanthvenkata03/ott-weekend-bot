@@ -1,0 +1,11 @@
+<!-- SYNTHETIC. Calendar-invalid dates: Feb 29 in a non-leap year and April 31.
+  isoFor() round-trips through new Date() and rejects the rollover, so the parser
+  falls back to a month-only APPROXIMATE date (first-of-month) rather than emitting
+  a bogus ISO string that would be silently dropped downstream. Single free-text
+  "Opening" column (colspan=1) -> resolveSingle path; parsePage is called with
+  year=2027 (non-leap). -->
+<table class="wikitable">
+<tr><th>Opening</th><th>Title</th><th>Ref.</th></tr>
+<tr><td>29 February 2027</td><td><i>FebTwentyNine</i></td><td></td></tr>
+<tr><td>31 April 2026</td><td><i>AprilThirtyOne</i></td><td></td></tr>
+</table>

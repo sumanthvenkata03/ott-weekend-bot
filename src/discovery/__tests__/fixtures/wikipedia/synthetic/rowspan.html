@@ -1,0 +1,14 @@
+<!-- SYNTHETIC. Mirrors the real "Opening" table layout (see telugu-2026.json):
+  colspan=2 "Opening" header over a MONTH cell + DAY cell, both using rowspan.
+  Pins the core rowspan hazard:
+   - JANUARY spans 3 rows (rowspan=3); day 5 spans 2 rows (rowspan=2).
+   - Alpha + Bravo (same day, trailing row has FEWER physical cells) -> both 2026-01-05.
+   - Charlie -> 2026-01-06 (month carried, new day).
+   - FEBRUARY -> month rowspan terminates correctly; Delta must NOT inherit JANUARY. -->
+<table class="wikitable">
+<tr><th colspan="2">Opening</th><th>Title</th><th>Director</th><th>Ref.</th></tr>
+<tr><td rowspan="3">JANUARY</td><td rowspan="2">5</td><td><i>Alpha</i></td><td>Dir A</td><td>[1]</td></tr>
+<tr><td><i>Bravo</i></td><td>Dir B</td><td>[2]</td></tr>
+<tr><td>6</td><td><i>Charlie</i></td><td>Dir C</td><td>[3]</td></tr>
+<tr><td>FEBRUARY</td><td>10</td><td><i>Delta</i></td><td>Dir D</td><td>[4]</td></tr>
+</table>

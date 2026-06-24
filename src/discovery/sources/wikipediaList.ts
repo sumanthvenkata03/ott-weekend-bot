@@ -207,13 +207,13 @@ function resolveSingle(dateEl: HTMLElement | null | undefined, year: number): Re
   return { monthIndex, approximate: true };
 }
 
-interface ParseTally {
+export interface ParseTally {
   films: DiscoveredFilm[];
   skipped: number;
 }
 
 /** Parse one already-fetched page's HTML for films within [from,to]. */
-function parsePage(htmlStr: string, language: string, year: number, page: string, from: string, to: string): ParseTally {
+export function parsePage(htmlStr: string, language: string, year: number, page: string, from: string, to: string): ParseTally {
   const films: DiscoveredFilm[] = [];
   let skipped = 0;
   if (!htmlStr) return { films, skipped };
