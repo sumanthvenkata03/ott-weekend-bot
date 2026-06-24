@@ -6,6 +6,7 @@ import { generateWednesdayDrop, MAX_WED_DROP_FILMS } from "../content/weekend/we
 import { writeWednesdayDropToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
+import { config } from "../shared/config.js";
 import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
 import { buildHashtags } from "../shared/hashtags.js";
 import { renderWedDrop } from "../rendering/render-wed-drop.js";
@@ -15,6 +16,9 @@ import { getIssueNumberForToday } from "../shared/issue-number.js";
 import { EDITION_META, type WedDropEdition } from "../shared/wed-drop-edition.js";
 import { excludedKeysFor, recordFeatured, filmKey, type PillarKey } from "../shared/featured-ledger.js";
 import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
+import { reconcileEdition } from "../reconcile/run.js";
+import { decideGate, writeReview } from "../reconcile/gate.js";
+import type { ReconcileResult } from "../reconcile/types.js";
 
 /**
  * Produce ONE Wed Drop edition end-to-end from its own (un-merged) pool:
@@ -155,10 +159,35 @@ async function produceEdition(
   log.success(`   Cover: ${cover.publicUrl}`);
 }
 
+/** Parse `--approve <hash>` / `--approve=<hash>` from argv (gate resume token). */
+function parseApproveArg(argv: string[]): string | undefined {
+  const i = argv.indexOf("--approve");
+  if (i !== -1 && argv[i + 1]) return argv[i + 1];
+  const eq = argv.find(a => a.startsWith("--approve="));
+  if (eq) return eq.slice("--approve=".length);
+  return undefined;
+}
+
+/** One-line reconciliation summary for the job log. */
+function reconcileSummary(r: ReconcileResult): string {
+  const added = r.reconciled
+    .filter(f => f.status === "confirmed" && f.foundIn.length === 1 && f.foundIn[0] === "ai-net")
+    .map(f => f.title);
+  return (
+    `  Reconcile [${r.pillar}]: ${r.counts.total} films — ` +
+    `${r.counts.green}🟢 / ${r.counts.yellow}🟡 / ${r.counts.red}🔴 · ` +
+    `added by AI net: ${r.counts.addedByAiNet}${added.length ? ` (${added.join(", ")})` : ""} · ` +
+    `rejected: ${r.rejected.length}`
+  );
+}
+
 async function main() {
   log.info("🎬 Wednesday Drop job — starting");
 
   purgeExpired();
+
+  // Gate resume token (binds approval to the exact reviewed list).
+  const approveHash = parseApproveArg(process.argv.slice(2));
 
   // Two deliberately different windows, both anchored on the CURRENT calendar
   // week (Mon..Sun, weekStartsOn: 1):
@@ -187,28 +216,55 @@ async function main() {
   ]);
   log.info(`Candidates: ${theatrical.length} theatrical (In Theaters) + ${ott.length} OTT (Now Streaming)`);
 
-  if (theatrical.length === 0 && ott.length === 0) {
-    log.warn("No releases in either pool this week — aborting");
-    return;
-  }
-
   // 2. Both editions share ONE issue number (it's a pure function of today's
   //    date — see issue-number.ts — so calling the producer twice can't
   //    double-increment it).
   const issueNumber = getIssueNumberForToday();
 
-  // 3. Publish each non-empty edition independently. An edition with an empty
-  //    pool, or one the LLM declines (0 picks), publishes nothing.
-  if (theatrical.length > 0) {
-    await produceEdition("theatrical", theatrical, issueNumber, startDate, endDate);
-  } else {
-    log.info("In Theaters: no theatrical openings this week — edition skipped.");
+  // 3. RECONCILE — augment each TMDb pool with the AI-search net, resolve every
+  //    lead to a TMDb id, and emit one provenance-tagged, tiered list per
+  //    edition. AUGMENT-ONLY: every TMDb candidate survives; the AI net can only
+  //    ADD films and annotate tier. Exactly ONE LLM extraction per edition.
+  log.info("\n🔎 Reconciliation — cross-checking TMDb pools against the AI-search net...");
+  const results: ReconcileResult[] = [
+    await reconcileEdition("theatrical", theatrical, startDate, endDate),
+    await reconcileEdition("ott", ott, ottStartDate, endDate),
+  ];
+  for (const r of results) log.info(reconcileSummary(r));
+
+  // 4. GATE — block render behind human approval. The first run writes the
+  //    "Wed Drop — REVIEW" artifact and STOPS; a re-run with `--approve <hash>`
+  //    renders only if the reviewed list still hashes the same. 🔴 never renders.
+  const decision = decideGate(results, {
+    ...(approveHash ? { approveHash } : {}),
+    autoPassGreen: config.RECONCILE_AUTOPASS_GREEN,
+  });
+  log.info(`\n🚦 Gate: ${decision.mode} — ${decision.reason}`);
+
+  if (!decision.proceed) {
+    await writeReview(results, decision.hash);
+    log.warn(
+      `\n⛔ Wed Drop GATED (hash ${decision.hash}). Review written; NOTHING rendered or published.\n` +
+      `   Approve with:  npm run job:wednesday -- --approve ${decision.hash}`
+    );
+    return;
   }
 
-  if (ott.length > 0) {
-    await produceEdition("ott", ott, issueNumber, ottStartDate, endDate);
+  // 5. Approved (or auto-passed) — render only the approved (renderable) pools.
+  log.success(`✅ Gate cleared (${decision.mode}, hash ${decision.hash}) — rendering approved editions.`);
+  const thePool = decision.renderable.theatrical ?? [];
+  const ottPool = decision.renderable.ott ?? [];
+
+  if (thePool.length > 0) {
+    await produceEdition("theatrical", thePool, issueNumber, startDate, endDate);
   } else {
-    log.info("Now Streaming: no OTT arrivals this week — edition skipped.");
+    log.info("In Theaters: no approved/renderable films this week — edition skipped.");
+  }
+
+  if (ottPool.length > 0) {
+    await produceEdition("ott", ottPool, issueNumber, ottStartDate, endDate);
+  } else {
+    log.info("Now Streaming: no approved/renderable films this week — edition skipped.");
   }
 
   log.success(`\n✅ Wed Drop run complete (Issue №${issueNumber}).`);

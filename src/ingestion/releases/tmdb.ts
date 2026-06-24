@@ -147,13 +147,15 @@ const PROVIDER_MAP: Record<string, Platform> = {
   "Planet Marathi": "Planet Marathi",
 };
 
-function mapLanguage(iso: string): Language {
+/** Map a TMDb ISO 639-1 code to our Language enum ("Other" when unmapped). */
+export function mapLanguage(iso: string): Language {
   return LANGUAGE_MAP[iso] ?? "Other";
 }
 function mapProvider(name: string): Platform | null {
   return PROVIDER_MAP[name] ?? null;
 }
-function posterUrl(path: string | null): string | undefined {
+/** Build a w500 TMDb poster URL from a poster_path (undefined when null). */
+export function posterUrl(path: string | null): string | undefined {
   return path ? `https://image.tmdb.org/t/p/w500${path}` : undefined;
 }
 function backdropUrl(path: string | null): string | undefined {
@@ -166,10 +168,10 @@ export async function discoverIndianReleases(
   endDate: string
 ): Promise<Release[]> {
   log.info(`Fetching TMDb releases ${startDate} → ${endDate}`);
-  
+
   const langs = ["hi", "te", "ta", "ml", "kn", "mr", "bn", "pa"];
   const all: Release[] = [];
-  
+
   for (const lang of langs) {
     try {
       const response = await tmdbFetchCached<unknown>(
@@ -184,10 +186,10 @@ export async function discoverIndianReleases(
         },
         6 * 60 * 60   // 6 hour TTL for discover results
       );
-      
+
       const parsed = TMDbDiscoverResponseSchema.parse(response);
       log.info(`  [${lang}] found ${parsed.results.length} releases`);
-      
+
       for (const m of parsed.results) {
         all.push({
           id: `tmdb-${m.id}`,
@@ -216,7 +218,7 @@ export async function discoverIndianReleases(
       log.warn(`Failed to fetch ${lang} releases`, err instanceof Error ? err.message : err);
     }
   }
-  
+
   log.success(`TMDb: total ${all.length} Indian releases found`);
   return all;
 }
@@ -234,10 +236,10 @@ export async function discoverIndianOTTArrivals(
   endDate: string
 ): Promise<Release[]> {
   log.info(`Fetching TMDb OTT arrivals ${startDate} → ${endDate}`);
-  
+
   const langs = ["hi", "te", "ta", "ml", "kn", "mr", "bn", "pa"];
   const all: Release[] = [];
-  
+
   for (const lang of langs) {
     try {
       const response = await tmdbFetchCached<unknown>(
@@ -253,12 +255,12 @@ export async function discoverIndianOTTArrivals(
         },
         6 * 60 * 60
       );
-      
+
       const parsed = TMDbDiscoverResponseSchema.parse(response);
       if (parsed.results.length > 0) {
         log.info(`  [${lang}] ${parsed.results.length} OTT arrivals`);
       }
-      
+
       for (const m of parsed.results) {
         all.push({
           id: `tmdb-${m.id}`,
@@ -287,7 +289,7 @@ export async function discoverIndianOTTArrivals(
       log.warn(`OTT arrivals fetch failed for ${lang}`, err instanceof Error ? err.message : err);
     }
   }
-  
+
   log.success(`TMDb OTT arrivals: ${all.length} films`);
   return all;
 }
@@ -430,14 +432,14 @@ export async function getStreamingPlatforms(tmdbId: number): Promise<Platform[]>
     const parsed = TMDbProvidersResponseSchema.parse(response);
     const india = parsed.results?.["IN"];
     if (!india) return [];
-    
+
     // Combine all access modes (subscription / free / ads — skip rent/buy for OTT page focus)
     const providers = [
       ...(india.flatrate ?? []),
       ...(india.free ?? []),
       ...(india.ads ?? []),
     ];
-    
+
     const platforms: Platform[] = [];
     const seen = new Set<Platform>();
     for (const p of providers) {
@@ -451,5 +453,129 @@ export async function getStreamingPlatforms(tmdbId: number): Promise<Platform[]>
   } catch (err) {
     log.warn(`Failed to fetch providers for TMDb ${tmdbId}`, err instanceof Error ? err.message : err);
     return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Title search (READ-ONLY addition) — resolve an AI-net lead to a TMDb id and
+// tell MOVIE from TV/series. Pure GET via tmdbFetchCached (no new key, no write,
+// no mutation). Used by the reconciliation layer:
+//   - a movie hit ⇒ the lead is a real film (id + canonical title + poster);
+//   - a /search/tv hit with NO qualifying movie ⇒ the caller treats it as a
+//     series and rejects it.
+// We do NOT filter by year at the API (recall first) — the caller does the ±1yr
+// disambiguation off `year`, which is what avoids the "wrong-year same-title"
+// trap (e.g. 2019 Blast vs 2026 Blast). `year`/`language` here only RANK hits.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TMDbSearchMovieResultSchema = z.object({
+  id: z.number(),
+  title: z.string(),
+  original_title: z.string().optional(),
+  original_language: z.string().optional(),
+  release_date: z.string().optional().default(""),
+  poster_path: z.string().nullable().optional(),
+});
+const TMDbSearchTvResultSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  original_name: z.string().optional(),
+  original_language: z.string().optional(),
+  first_air_date: z.string().optional().default(""),
+  poster_path: z.string().nullable().optional(),
+});
+const TMDbSearchMovieResponseSchema = z.object({
+  results: z.array(TMDbSearchMovieResultSchema),
+});
+const TMDbSearchTvResponseSchema = z.object({
+  results: z.array(TMDbSearchTvResultSchema),
+});
+
+export interface TmdbTitleHit {
+  id: number;
+  title: string;
+  releaseDate?: string;
+  posterPath?: string;
+  year?: number;
+  originalLanguage?: string;
+}
+export interface TmdbTitleSearch {
+  movie: TmdbTitleHit[];
+  tv: TmdbTitleHit[];
+}
+
+function yearFromDate(d: string): number | undefined {
+  const y = Number.parseInt(d.slice(0, 4), 10);
+  return Number.isFinite(y) && y > 1900 ? y : undefined;
+}
+
+/** Rank hits: closeness to `year` first, then original_language match. */
+function rankHits(hits: TmdbTitleHit[], year?: number, langIso?: string): TmdbTitleHit[] {
+  return [...hits].sort((a, b) => {
+    if (year !== undefined) {
+      const da = a.year !== undefined ? Math.abs(a.year - year) : 999;
+      const db = b.year !== undefined ? Math.abs(b.year - year) : 999;
+      if (da !== db) return da - db;
+    }
+    if (langIso) {
+      const la = a.originalLanguage === langIso ? 0 : 1;
+      const lb = b.originalLanguage === langIso ? 0 : 1;
+      if (la !== lb) return la - lb;
+    }
+    return 0;
+  });
+}
+
+const NAME_TO_ISO: Record<string, string> = {
+  telugu: "te", tamil: "ta", malayalam: "ml", kannada: "kn",
+  hindi: "hi", bengali: "bn", marathi: "mr", punjabi: "pa",
+};
+
+/**
+ * Search TMDb for a title across movies AND TV. Returns BOTH lists so the caller
+ * can resolve a film id and detect that a lead is actually a series. Never throws
+ * — returns empty lists on failure.
+ */
+export async function searchTitleTmdb(
+  title: string,
+  opts: { year?: number; language?: string } = {}
+): Promise<TmdbTitleSearch> {
+  const TTL = 7 * 24 * 60 * 60; // 7 days — search results are stable
+  const langIso = opts.language ? NAME_TO_ISO[opts.language.trim().toLowerCase()] : undefined;
+  try {
+    const [movieRaw, tvRaw] = await Promise.all([
+      tmdbFetchCached<unknown>("/search/movie", { query: title, include_adult: "false", region: "IN" }, TTL),
+      tmdbFetchCached<unknown>("/search/tv", { query: title, include_adult: "false" }, TTL),
+    ]);
+    const movieParsed = TMDbSearchMovieResponseSchema.parse(movieRaw);
+    const tvParsed = TMDbSearchTvResponseSchema.parse(tvRaw);
+
+    const movie: TmdbTitleHit[] = movieParsed.results.map(m => {
+      const y = m.release_date ? yearFromDate(m.release_date) : undefined;
+      return {
+        id: m.id,
+        title: m.title,
+        ...(m.release_date ? { releaseDate: m.release_date } : {}),
+        ...(m.poster_path ? { posterPath: m.poster_path } : {}),
+        ...(y !== undefined ? { year: y } : {}),
+        ...(m.original_language ? { originalLanguage: m.original_language } : {}),
+      };
+    });
+    const tv: TmdbTitleHit[] = tvParsed.results.map(t => {
+      const y = t.first_air_date ? yearFromDate(t.first_air_date) : undefined;
+      return {
+        id: t.id,
+        title: t.name,
+        ...(t.first_air_date ? { releaseDate: t.first_air_date } : {}),
+        ...(t.poster_path ? { posterPath: t.poster_path } : {}),
+        ...(y !== undefined ? { year: y } : {}),
+        ...(t.original_language ? { originalLanguage: t.original_language } : {}),
+      };
+    });
+
+    return { movie: rankHits(movie, opts.year, langIso), tv: rankHits(tv, opts.year, langIso) };
+  } catch (err) {
+    log.warn(`searchTitleTmdb failed for "${title}"`, err instanceof Error ? err.message : err);
+    return { movie: [], tv: [] };
   }
 }

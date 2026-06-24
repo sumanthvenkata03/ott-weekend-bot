@@ -2,23 +2,31 @@
 import "dotenv/config";
 import { z } from "zod";
 
+// Parse a boolean-ish env string WITHOUT z.coerce.boolean (which treats any
+// non-empty string — including "false" — as true). Only "true"/"1" are truthy.
+const boolFromEnv = z
+  .string()
+  .optional()
+  .default("false")
+  .transform((s) => s.toLowerCase() === "true" || s === "1");
+
 const ConfigSchema = z.object({
   // LLM — using Claude Code CLI, no API key
-  
+
   // Releases
   TMDB_API_KEY: z.string().min(1, "TMDB_API_KEY missing in .env"),
   OMDB_API_KEY: z.string().min(1, "OMDB_API_KEY missing in .env"),
   // Optional richer ratings source — if unset, MDBList is skipped and OMDb
   // supplies ratings. Must NOT hard-exit when missing.
   MDBLIST_API_KEY: z.string().optional(),
-  
+
   // News (later weeks, optional for now)
   YOUTUBE_API_KEY: z.string().optional(),
   SLACK_WEBHOOK_URL: z.string().url().optional(),
   REDDIT_CLIENT_ID: z.string().optional(),
   REDDIT_CLIENT_SECRET: z.string().optional(),
   REDDIT_USER_AGENT: z.string().optional(),
-  
+
   // Notion
   NOTION_TOKEN: z.string().min(1, "NOTION_TOKEN missing in .env"),
   NOTION_RELEASES_DB_ID: z.string().min(1, "NOTION_RELEASES_DB_ID missing in .env"),
@@ -39,6 +47,11 @@ const ConfigSchema = z.object({
   IMPORTANCE_THRESHOLD: z.coerce.number().default(55),
   MAX_NEWS_POSTS_PER_DAY: z.coerce.number().default(6),
   SOUTH_INDUSTRY_BOOST: z.coerce.number().default(1.3),
+
+  // Reconciliation layer — when true, an all-🟢 Wed Drop edition may render
+  // unattended; ANY 🟡/🔴 still forces the manual --approve gate. Default false:
+  // the gate stops everything until a human approves the reviewed list.
+  RECONCILE_AUTOPASS_GREEN: boolFromEnv,
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
