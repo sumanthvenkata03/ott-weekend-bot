@@ -9,24 +9,38 @@
 //     rejected). autoPassGreen (default false): an ALL-🟢 edition may render
 //     unattended; ANY 🟡/🔴 forces the manual gate. 🔴 NEVER renders.
 //
-//   - writeReview() is the only I/O: a "Wed Drop — REVIEW" Notion page (new page,
-//     NOT bolted onto the post) + a Slack message (reusing notifyDraftReady's
-//     validation block). Per film: title, language, pillar, platform, date +
-//     dateSource, tier, foundIn nets, a CLICKABLE source link, conflict/dupe/
-//     ambiguous detail, and the TMDb-resolved title + poster + year + cast so a
-//     bad match is visible at a glance.
+//   - writeReview() is the only I/O. It delivers the "Wed Drop — REVIEW" artifact:
+//       * Notion: a new page with EVERY film across both editions, written in
+//         ≤100-block batches (create + blocks.children.append) so it never trips
+//         Notion's 100-children-per-request cap, for any candidate count.
+//       * Slack: a COMPACT ping (per-tier counts, AI-net-added names, AI-review
+//         tally + flags, rejected count, the approve hash, and a button to the
+//         Notion page) — bounded well under Slack's limits.
+//     Both writers FAIL SOFT and INDEPENDENTLY; writeReview ALWAYS surfaces the
+//     approve hash + a safety line.
+//
+//   The AI-review verdict (f.aiReview) is ADVISORY: it renders next to the tier
+//   but feeds NOTHING here — not the hash, not the decision, not renderableFor.
 
 import { createHash } from "node:crypto";
 import { Client } from "@notionhq/client";
+import { ofetch } from "ofetch";
 import { config } from "../shared/config.js";
 import { log } from "../shared/logger.js";
-import { notifyDraftReady } from "../delivery/slack.js";
 import type { Release } from "../shared/types.js";
 import type { WedDropEdition } from "../shared/wed-drop-edition.js";
 import { EDITION_META } from "../shared/wed-drop-edition.js";
-import type { ReconciledFilm, ReconcileResult, Tier } from "./types.js";
+import type { AiVerdict, ReconciledFilm, ReconcileResult, Tier } from "./types.js";
 
 const TIER_EMOJI: Record<Tier, string> = { green: "🟢", yellow: "🟡", red: "🔴" };
+// Distinct AI-review glyphs — ❓/unavailable must read as "needs your eyes", NOT a pass.
+const AI_GLYPH: Record<AiVerdict, string> = {
+  confirm: "✅",
+  doubt: "⚠️",
+  reject: "🛑",
+  unverified: "❓",
+  unavailable: "⚠️",
+};
 
 export interface GateOptions {
   /** Hash supplied via `--approve <hash>` (binds approval to the reviewed list). */
@@ -46,7 +60,12 @@ export interface GateDecision {
 
 // ── Pure hashing ────────────────────────────────────────────────────────────
 
-/** Canonical, timestamp-free fingerprint of one film for the gate hash. */
+/**
+ * Canonical, timestamp-free fingerprint of one film for the gate hash. The
+ * advisory AI-review verdict is DELIBERATELY excluded — it's non-deterministic
+ * (web search) and must not churn the hash. A future auto-demote would act
+ * through `tier` (already hashed), so safety never needs the verdict text.
+ */
 function filmFingerprint(f: ReconciledFilm): string {
   return [
     f.pillar,
@@ -133,41 +152,52 @@ function filmLine(f: ReconciledFilm): string {
   return `${parts.filter(Boolean).join(" ")}${flags.length ? ` — ${flags.join(" | ")}` : ""}`;
 }
 
+function textRun(content: string) {
+  return { text: { content: content.slice(0, 1900) } };
+}
+function linkRun(label: string, url: string) {
+  return { text: { content: label.slice(0, 200), link: { url } } };
+}
+
 function paragraph(text: string) {
   return {
     object: "block" as const,
     type: "paragraph" as const,
-    paragraph: { rich_text: [{ text: { content: text.slice(0, 1900) } }] },
+    paragraph: { rich_text: [textRun(text)] },
   };
 }
 function heading(text: string) {
   return {
     object: "block" as const,
     type: "heading_2" as const,
-    heading_2: { rich_text: [{ text: { content: text.slice(0, 1900) } }] },
+    heading_2: { rich_text: [textRun(text)] },
   };
 }
 function imageBlock(url: string) {
   return { object: "block" as const, type: "image" as const, image: { type: "external" as const, external: { url } } };
 }
 
-/** One reconciled film → a paragraph + (if resolved) a TMDb provenance line + poster. */
+/** AI-review rich-text runs appended to a film's line: " · 🛑 AI-review: … [source]". */
+function aiReviewRuns(f: ReconciledFilm): unknown[] {
+  if (!f.aiReview) return [];
+  const ar = f.aiReview;
+  const runs: unknown[] = [textRun(` · ${AI_GLYPH[ar.verdict]} AI-review: ${ar.reason} `)];
+  if (ar.sourceUrl) runs.push(linkRun("[source]", ar.sourceUrl));
+  return runs;
+}
+
+/** One reconciled film → its line (tier + reconcile source + AI verdict) + (if confirmed) a TMDb line + poster. */
 function filmBlocks(f: ReconciledFilm): unknown[] {
-  const blocks: unknown[] = [];
+  const runs: unknown[] = [textRun(filmLine(f))];
   if (f.sourceUrl) {
-    blocks.push({
-      object: "block" as const,
-      type: "paragraph" as const,
-      paragraph: {
-        rich_text: [
-          { text: { content: filmLine(f) + "  " } },
-          { text: { content: "source", link: { url: f.sourceUrl } } },
-        ],
-      },
-    });
-  } else {
-    blocks.push(paragraph(filmLine(f)));
+    runs.push(textRun("  "));
+    runs.push(linkRun("source", f.sourceUrl));
   }
+  runs.push(...aiReviewRuns(f));
+
+  const blocks: unknown[] = [
+    { object: "block" as const, type: "paragraph" as const, paragraph: { rich_text: runs } },
+  ];
   if (f.status === "confirmed") {
     const tmdb = [
       `TMDb: ${f.resolvedTitle ?? "?"}`,
@@ -181,46 +211,11 @@ function filmBlocks(f: ReconciledFilm): unknown[] {
   return blocks;
 }
 
-async function createReviewPage(title: string, children: unknown[]): Promise<string> {
-  const args = {
-    parent: { database_id: config.NOTION_RELEASES_DB_ID },
-    properties: {
-      Name: { title: [{ text: { content: title.slice(0, 1900) } }] },
-      Status: { status: { name: "Draft" } },
-      Pillar: { select: { name: "Wed Drop" } },
-      Verdict: { select: { name: "Pending" } },
-    },
-    children,
-  } as Parameters<typeof notion.pages.create>[0];
-  try {
-    const res = await notion.pages.create(args);
-    return (res as { url?: string }).url ?? "(no URL)";
-  } catch (err) {
-    const status = (err as { status?: number }).status;
-    if (status === 429 || (typeof status === "number" && status >= 500)) {
-      await new Promise((r) => setTimeout(r, 1500));
-      const res = await notion.pages.create(args);
-      return (res as { url?: string }).url ?? "(no URL)";
-    }
-    throw err;
-  }
-}
-
-/**
- * Write the "Wed Drop — REVIEW" artifact (Notion page + Slack) and return the
- * Notion URL. Called by the job ONLY when the gate is blocked (i.e. the job is
- * about to STOP and render nothing).
- */
-export async function writeReview(results: ReconcileResult[], hash: string): Promise<string> {
-  const win = results[0]?.window;
-  const windowLabel = win ? `${win.start} → ${win.end}` : "";
-  const pageTitle = `Wed Drop — REVIEW — ${windowLabel} — ${hash}`;
-
+/** Flatten both editions into the full Notion block list (any length). */
+function buildReviewBlocks(results: ReconcileResult[], hash: string): unknown[] {
   const children: unknown[] = [
     paragraph(`Reconciliation review · hash ${hash} · re-run with: npm run job:wednesday -- --approve ${hash}`),
   ];
-  const flaggedForSlack: string[] = [];
-
   for (const r of results) {
     const meta = EDITION_META[r.pillar];
     children.push(heading(`${meta.notionTitle} — ${r.counts.green}🟢 / ${r.counts.yellow}🟡 / ${r.counts.red}🔴 (added by AI net: ${r.counts.addedByAiNet})`));
@@ -229,44 +224,225 @@ export async function writeReview(results: ReconcileResult[], hash: string): Pro
     for (const tier of order) {
       for (const f of r.reconciled.filter((x) => x.tier === tier)) {
         for (const b of filmBlocks(f)) children.push(b);
-        if (f.tier !== "green") flaggedForSlack.push(`${TIER_EMOJI[f.tier]} *${f.title}* (${meta.slackLabel}) — ${f.reasons.join("; ")}`);
       }
     }
     if (r.rejected.length > 0) {
-      children.push(heading(`Rejected — series / non-film (${r.rejected.length})`));
+      children.push(heading(`Rejected — series / non-film / non-Indian (${r.rejected.length})`));
       for (const rej of r.rejected) children.push(paragraph(`🚫 ${rej.title ?? "(untitled)"} — ${rej.reason}`));
     }
   }
+  return children;
+}
 
-  let url = "(notion disabled)";
+// ── Notion delivery (≤100-block batches) ────────────────────────────────────
+
+const NOTION_MAX_CHILDREN = 100;
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+function transientNotion(err: unknown): boolean {
+  const status = (err as { status?: number }).status;
+  return status === 429 || (typeof status === "number" && status >= 500 && status <= 599);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Create the review page with the first ≤100 blocks, then append the remainder
+ * in ≤100-block batches. Robust to any candidate count (200+). Each request
+ * retries once on a transient (429 / 5xx) error. Returns the page URL.
+ */
+async function createReviewPageChunked(title: string, allChildren: unknown[]): Promise<string> {
+  const batches = chunk(allChildren, NOTION_MAX_CHILDREN);
+  const firstBatch = batches[0] ?? [];
+
+  const createArgs = {
+    parent: { database_id: config.NOTION_RELEASES_DB_ID },
+    properties: {
+      Name: { title: [{ text: { content: title.slice(0, 1900) } }] },
+      Status: { status: { name: "Draft" } },
+      Pillar: { select: { name: "Wed Drop" } },
+      Verdict: { select: { name: "Pending" } },
+    },
+    children: firstBatch,
+  } as Parameters<typeof notion.pages.create>[0];
+
+  let page: { id: string; url?: string };
   try {
-    url = await createReviewPage(pageTitle, children);
-    log.success(`Review page written: ${url}`);
+    page = (await notion.pages.create(createArgs)) as { id: string; url?: string };
+  } catch (err) {
+    if (!transientNotion(err)) throw err;
+    await sleep(1500);
+    page = (await notion.pages.create(createArgs)) as { id: string; url?: string };
+  }
+
+  for (const batch of batches.slice(1)) {
+    const appendArgs = { block_id: page.id, children: batch } as Parameters<typeof notion.blocks.children.append>[0];
+    try {
+      await notion.blocks.children.append(appendArgs);
+    } catch (err) {
+      if (!transientNotion(err)) throw err;
+      await sleep(1500);
+      await notion.blocks.children.append(appendArgs);
+    }
+  }
+
+  return page.url ?? "";
+}
+
+// ── Slack delivery (compact ping) ───────────────────────────────────────────
+
+const SLACK_TEXT_MAX = 2900; // safely under Slack's 3000-char section-text limit
+
+function isHttpUrl(u: string | undefined): u is string {
+  return !!u && /^https?:\/\//i.test(u);
+}
+
+/** AI-net-only confirmed discoveries (the films TMDb discovery missed). */
+function aiAddedNames(results: ReconcileResult[]): string[] {
+  return results.flatMap((r) =>
+    r.reconciled
+      .filter((f) => f.status === "confirmed" && f.foundIn.length === 1 && f.foundIn[0] === "ai-net")
+      .map((f) => f.title)
+  );
+}
+
+/** Per-edition AI-review tally, e.g. " · AI: 1🛑 2⚠️ 1❓". Empty when no film was reviewed. */
+function aiTally(r: ReconcileResult): string {
+  const reviewed = r.reconciled.filter((f) => (f.tier === "green" || f.tier === "yellow") && f.aiReview);
+  if (reviewed.length === 0) return "";
+  const c: Record<AiVerdict, number> = { confirm: 0, doubt: 0, reject: 0, unverified: 0, unavailable: 0 };
+  for (const f of reviewed) c[f.aiReview!.verdict] += 1;
+  const parts: string[] = [];
+  if (c.reject) parts.push(`${c.reject}🛑`);
+  if (c.doubt) parts.push(`${c.doubt}⚠️`);
+  if (c.unverified) parts.push(`${c.unverified}❓`);
+  if (c.unavailable) parts.push(`${c.unavailable}⚠️unavail`);
+  if (c.confirm) parts.push(`${c.confirm}✅`);
+  return parts.length ? ` · AI: ${parts.join(" ")}` : "";
+}
+
+/** Films the AI flagged for a closer look (everything but a clean ✅). */
+function aiFlaggedNames(results: ReconcileResult[]): string[] {
+  return results.flatMap((r) =>
+    r.reconciled
+      .filter((f) => f.aiReview && f.aiReview.verdict !== "confirm")
+      .map((f) => `${AI_GLYPH[f.aiReview!.verdict]} ${f.title}`)
+  );
+}
+
+function truncList(names: string[], max = 8): string {
+  if (names.length === 0) return "—";
+  if (names.length <= max) return names.join(", ");
+  return `${names.slice(0, max).join(", ")} +${names.length - max} more`;
+}
+
+function section(text: string) {
+  return { type: "section", text: { type: "mrkdwn", text: text.slice(0, SLACK_TEXT_MAX) } };
+}
+
+/**
+ * Post a COMPACT review ping. Never sends per-film blocks (the full detail is in
+ * Notion). The "Open review in Notion" button is attached ONLY when a valid page
+ * URL exists; otherwise the message states the page wasn't created — we never
+ * pass a non-URL as a button url. Throws on a non-2xx webhook response (the
+ * caller fails soft). No-op when no webhook is configured.
+ */
+async function postReviewToSlack(
+  results: ReconcileResult[],
+  hash: string,
+  windowLabel: string,
+  notionUrl: string
+): Promise<void> {
+  if (!config.SLACK_WEBHOOK_URL) {
+    log.info("Slack webhook not configured — skipping review ping");
+    return;
+  }
+
+  const editionLines = results.map((r) => {
+    const m = EDITION_META[r.pillar];
+    return `*${m.slackLabel}:* ${r.counts.green}🟢 / ${r.counts.yellow}🟡 / ${r.counts.red}🔴 · +${r.counts.addedByAiNet} AI · ${r.rejected.length} rejected${aiTally(r)}`;
+  });
+  const flagged = aiFlaggedNames(results);
+
+  const blocks: unknown[] = [
+    { type: "header", text: { type: "plain_text", text: "🕵️ Wed Drop — REVIEW", emoji: true } },
+    section(`*Reconciliation review · ${windowLabel}*\nRender is GATED — nothing published until approved.`),
+    section(editionLines.join("\n")),
+    section(`*AI net added:* ${truncList(aiAddedNames(results))}`),
+    ...(flagged.length ? [section(`*AI-review — verify these:* ${truncList(flagged)}`)] : []),
+    section(`*Approve:*\n\`\`\`npm run job:wednesday -- --approve ${hash}\`\`\``),
+  ];
+
+  if (isHttpUrl(notionUrl)) {
+    blocks.push({
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "Open review in Notion", emoji: true },
+          url: notionUrl,
+          style: "primary",
+        },
+      ],
+    });
+  } else {
+    blocks.push(section(":warning: Notion review page was NOT created — check job logs; the full per-film review is unavailable."));
+  }
+
+  await ofetch(config.SLACK_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { blocks, text: "🕵️ Wed Drop — REVIEW" },
+  });
+  log.success("Review Slack ping sent");
+}
+
+/**
+ * Write the "Wed Drop — REVIEW" artifact and return the Notion page URL (empty
+ * string when the Notion write failed). Called by the job ONLY when the gate is
+ * blocked. Notion and Slack are delivered independently and fail soft; the
+ * approve hash and a safety verdict are ALWAYS printed to the console so the
+ * operator can tell whether it's safe to approve.
+ */
+export async function writeReview(results: ReconcileResult[], hash: string): Promise<string> {
+  const win = results[0]?.window;
+  const windowLabel = win ? `${win.start} → ${win.end}` : "";
+  const pageTitle = `Wed Drop — REVIEW — ${windowLabel} — ${hash}`;
+  const children = buildReviewBlocks(results, hash);
+
+  // 1) NOTION — chunked create + append. Fail soft.
+  let notionUrl = "";
+  try {
+    notionUrl = await createReviewPageChunked(pageTitle, children);
+    log.success(`Review written to Notion (${children.length} blocks): ${notionUrl}`);
   } catch (err) {
     log.error("Review Notion write failed", err instanceof Error ? err.message : err);
   }
 
-  const totals = results.reduce(
-    (a, r) => ({ green: a.green + r.counts.green, yellow: a.yellow + r.counts.yellow, red: a.red + r.counts.red, added: a.added + r.counts.addedByAiNet }),
-    { green: 0, yellow: 0, red: 0, added: 0 }
-  );
-  const issuesBlock =
-    `*Reconciliation — hash \`${hash}\`*\nRe-run to publish: \`npm run job:wednesday -- --approve ${hash}\`` +
-    (flaggedForSlack.length ? `\n${flaggedForSlack.join("\n")}` : "\nAll films 🟢.");
+  // 2) SLACK — compact ping. Independent of Notion. Fail soft.
+  let slackOk = true;
+  try {
+    await postReviewToSlack(results, hash, windowLabel, notionUrl);
+  } catch (err) {
+    slackOk = false;
+    log.warn("Review Slack ping failed", err instanceof Error ? err.message : err);
+  }
 
-  await notifyDraftReady({
-    pillar: "Wed Drop — REVIEW",
-    emoji: "🕵️",
-    title: `Reconciliation review · ${windowLabel}`,
-    subtitle: "Render is GATED — nothing published until approved.",
-    notionUrl: url,
-    metadata: {
-      Hash: hash,
-      "🟢 / 🟡 / 🔴": `${totals.green} / ${totals.yellow} / ${totals.red}`,
-      "Added by AI net": String(totals.added),
-    },
-    validation: { metaValue: `Gate: review before publishing · hash ${hash}`, issuesBlock },
-  });
+  // 3) ALWAYS surface the hash + a safety verdict keyed to what actually landed.
+  if (isHttpUrl(notionUrl)) {
+    log.success(`Review written to Notion: ${notionUrl} — review it, then approve ${hash}.`);
+    if (!slackOk) log.warn("Slack ping skipped/failed — use the Notion page above (review is intact).");
+  } else {
+    log.error(`⚠ REVIEW NOT AVAILABLE (Notion write failed) — do NOT approve blind. Fix and re-run.`);
+    log.error(`   gate hash ${hash} — withheld pending a readable review.`);
+  }
 
-  return url;
+  return isHttpUrl(notionUrl) ? notionUrl : "";
 }

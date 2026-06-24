@@ -69,6 +69,29 @@ export type ReconStatus = "confirmed" | "unverified" | "series-rejected";
 export type LandingStatus = "pass" | "warn" | "fail";
 
 /**
+ * AI-review verdict (advisory). The first FOUR come from the search-grounded
+ * model; "unavailable" is set by fail-soft code when the review call errors.
+ *   confirm     — search corroborates the release + date
+ *   doubt       — search found a reason for concern (cite sourceUrl)
+ *   reject      — search shows it is NOT releasing as claimed (cite sourceUrl)
+ *   unverified  — search returned nothing usable ("couldn't confirm", no source)
+ *   unavailable — the review call failed; verify manually (NEVER a pass)
+ */
+export type AiVerdict = "confirm" | "doubt" | "reject" | "unverified" | "unavailable";
+
+/**
+ * Advisory AI-review annotation. It ANNOTATES ONLY: it never changes tier,
+ * excludes a film, or feeds the gate hash. The reviewer may FLAG a wrong
+ * date/cast in `reason` but must NOT rewrite the film's date/cast/title.
+ */
+export interface AiReviewVerdict {
+  verdict: AiVerdict;
+  reason: string;
+  /** A real URL found via search — required for doubt/reject; absent for unverified/unavailable. */
+  sourceUrl?: string;
+}
+
+/**
  * One reconciled, provenance-tagged, tiered film — the review payload AND the
  * unit the gate decides on. `release` is the Release record fed to the renderer
  * (absent for unverified / series — they carry title + source only).
@@ -108,6 +131,13 @@ export interface ReconciledFilm {
   posterUrl?: string;
   cast?: string[];
   year?: number;
+
+  /**
+   * AI-review annotation (advisory; OUTSIDE the gate hash). Attached after
+   * tiering, on the review run only, for 🟢/🟡 films. Never consulted by
+   * assignTier / decideGate / renderableFor — it only renders into the review.
+   */
+  aiReview?: AiReviewVerdict;
 
   // The renderer-bound record (absent for unverified / series).
   release?: Release;

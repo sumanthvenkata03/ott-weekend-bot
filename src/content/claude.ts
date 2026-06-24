@@ -98,11 +98,16 @@ export async function callClaude(
  * self-heals instead of throwing a TypeError deep inside a generator. If the
  * retry also fails we throw a descriptive Error (zod issues + a raw snippet) so
  * the job's Slack failure alert is actionable.
+ *
+ * `opts` is threaded straight to callClaude — pass `{ webSearch: true }` to ground
+ * this JSON call via the Max CLI's WebSearch/WebFetch tools. Omitting opts keeps
+ * today's behavior (web search OFF).
  */
 export async function callClaudeJSON<T>(
   prompt: string,
   schema: z.ZodType<T>,
-  model: ModelChoice = "opus"
+  model: ModelChoice = "opus",
+  opts?: CallOptions
 ): Promise<T> {
   const baseInstruction = `
 
@@ -112,7 +117,7 @@ CRITICAL: Respond with ONLY valid JSON. No prose before or after. No markdown co
   const attempt = async (
     fullPrompt: string
   ): Promise<{ ok: true; value: T } | { ok: false; reason: string; raw: string }> => {
-    const raw = await callClaude(fullPrompt, model);
+    const raw = await callClaude(fullPrompt, model, opts);
 
     const cleaned = raw
       .replace(/^```(?:json)?\s*/i, "")
