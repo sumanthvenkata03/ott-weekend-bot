@@ -40,9 +40,6 @@ const SEARCH_DEPTH = "basic";      // 1 credit (advanced = 2)
 const MAX_RESULTS = 6;             // per query
 const MAX_SNIPPETS = 48;           // cap fed to the extractor (prompt bound)
 
-// OTT services we probe per language (kept small to stay low-cost).
-const OTT_PLATFORMS = ["Netflix", "Prime Video", "JioHotstar", "Aha", "SonyLIV"];
-
 interface TavilyResult {
   title?: string;
   url?: string;
@@ -97,7 +94,20 @@ async function tavilySearch(query: string): Promise<Snippet[]> {
   }
 }
 
-/** Per-edition, per-language (+ per-platform for OTT) discovery queries. */
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/** "YYYY-MM-DD" → "Month YYYY", derived from the WINDOW start (never today) so it
+ *  stays correct across month boundaries. Falls back to the raw year on a bad parse. */
+function monthYearOf(isoDate: string): string {
+  const m = Number.parseInt(isoDate.slice(5, 7), 10);
+  const y = isoDate.slice(0, 4);
+  return m >= 1 && m <= 12 ? `${MONTHS[m - 1]} ${y}` : y;
+}
+
+/** Per-edition, per-language discovery queries (+ roundup/platform probes for OTT). */
 export function buildQueries(pillar: string, languages: string[], window: BucketWindow): string[] {
   const dates = `${window.start} to ${window.end}`;
   const qs: string[] = [];
@@ -107,13 +117,24 @@ export function buildQueries(pillar: string, languages: string[], window: Bucket
     }
     qs.push(`Indian films releasing in theatres this weekend ${dates}`);
   } else {
+    // OTT: target editorial "this week's OTT releases" ROUNDUP pages (which LIST
+    // each week's drops, Blast-class included) — NOT single-platform catalog
+    // browses, which returned global/platform pages that never named this week's
+    // Indian films. Roundup templates per language, a few cross-language roundups,
+    // plus DATED this-week platform-announcement probes (never a catalog browse).
+    const month = monthYearOf(window.start);
     for (const lang of languages) {
-      qs.push(`new ${lang} movie streaming OTT release India ${dates}`);
-      for (const plat of OTT_PLATFORMS) {
-        qs.push(`new ${lang} movie streaming on ${plat} ${dates}`);
-      }
+      qs.push(`${lang} OTT releases this week ${month}`);
+      qs.push(`new ${lang} movie streaming this week India ${dates}`);
+      qs.push(`${lang} movie OTT release this week Netflix Prime JioHotstar ${dates}`);
     }
+    qs.push(`Indian movies OTT release this week ${dates}`);
+    qs.push(`Tamil Telugu Malayalam Hindi OTT releases this week ${month}`);
     qs.push(`new Indian movies OTT digital release this week ${dates}`);
+    // A film can be platform-announced before editorial roundups aggregate it
+    // (the Blast/Netflix case) — dated, this-week, not a catalog browse.
+    qs.push(`Netflix India new movie this week ${dates}`);
+    qs.push(`JioHotstar new movie this week ${dates}`);
   }
   return qs;
 }
