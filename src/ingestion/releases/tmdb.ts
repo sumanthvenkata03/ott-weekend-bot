@@ -59,10 +59,24 @@ const TMDbSpokenLanguageSchema = z.object({
   iso_639_1: z.string(),
   english_name: z.string().optional(),
 });
+const TMDbGenreSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+});
 const TMDbMovieDetailsSchema = z.object({
   id: z.number(),
   original_language: z.string(),
   spoken_languages: z.array(TMDbSpokenLanguageSchema),
+  // Widened (Step 2 discovery→Release backfill) — these ride on the SAME
+  // /movie/{id} response getCreditsAndLanguages already fetches (zero new API
+  // calls). They let enrich populate the poster/synopsis/genre/popularity fields
+  // that the lean discovery net deliberately doesn't carry.
+  poster_path: z.string().nullable().optional(),
+  overview: z.string().optional(),
+  genres: z.array(TMDbGenreSchema).optional(),
+  popularity: z.number().optional(),
+  vote_average: z.number().optional(),
+  vote_count: z.number().optional(),
 });
 
 // Credits — for cast (by billing order) + crew (find composer) (Phase 5.5)
@@ -342,6 +356,16 @@ export interface CreditsAndLanguages {
     theatrical?: string;
     ott?: string;
   };
+  // Step 2 backfill — sourced from the SAME /movie/{id} response (zero new
+  // calls). Populate the Release fields the lean discovery net doesn't carry.
+  // The old ingest path already has these from the discover row, so enrich only
+  // applies them to lean discovery stubs (gated on a missing tmdbPopularity).
+  posterUrl?: string;
+  synopsis?: string;
+  genre?: string[];
+  tmdbPopularity?: number;
+  tmdbVoteAverage?: number;
+  tmdbVoteCount?: number;
 }
 
 /**
@@ -414,6 +438,15 @@ export async function getCreditsAndLanguages(tmdbId: number): Promise<CreditsAnd
     };
     if (composer) result.musicDirector = composer.name;
     if (releaseDates) result.releaseDates = releaseDates;
+
+    // Step 2 backfill fields — from the same details response, no extra fetch.
+    const poster = posterUrl(details.poster_path ?? null);
+    if (poster) result.posterUrl = poster;
+    if (details.overview) result.synopsis = details.overview;
+    if (details.genres && details.genres.length > 0) result.genre = details.genres.map((g) => g.name);
+    if (typeof details.popularity === "number") result.tmdbPopularity = details.popularity;
+    if (typeof details.vote_average === "number") result.tmdbVoteAverage = details.vote_average;
+    if (typeof details.vote_count === "number") result.tmdbVoteCount = details.vote_count;
     return result;
   } catch (err) {
     log.warn(

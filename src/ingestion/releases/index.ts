@@ -150,6 +150,12 @@ function reconcileAudioOriginal(
  * Pulls top-2 billed cast, music composer, and { original, dubbed } language
  * structure from TMDb in one helper call per film. Returns release records
  * with leadCast/musicDirector/audioLanguages spread in when available.
+ *
+ * Step 2 — also BACKFILLS poster/synopsis/genre/popularity from the same
+ * /movie/{id} response, but ONLY for lean discovery stubs. The discriminator is
+ * a missing `tmdbPopularity`: the old ingest path ALWAYS sets it from the
+ * discover row, so `needsBackfill` is false there and that path's output is
+ * byte-identical; a discovery stub carries no tmdbPopularity, so it gets filled.
  */
 async function enrichWithCreditsAndLanguages(releases: Release[]): Promise<Release[]> {
   return Promise.all(
@@ -159,15 +165,75 @@ async function enrichWithCreditsAndLanguages(releases: Release[]): Promise<Relea
       // Trust the discover-derived language for the original track; keep TMDb's
       // spoken_languages for dubbed. See reconcileAudioOriginal for the why.
       const audioLanguages = reconcileAudioOriginal(data.audioLanguages, r.language);
+
+      // Only lean discovery stubs lack tmdbPopularity; the old discover row
+      // always sets it. Gate ALL backfill on this so the old path is untouched.
+      const needsBackfill = r.tmdbPopularity === undefined;
+
       return {
         ...r,
         ...(data.leadCast.length > 0 ? { leadCast: data.leadCast } : {}),
         ...(data.musicDirector ? { musicDirector: data.musicDirector } : {}),
         ...(audioLanguages ? { audioLanguages } : {}),
         ...(data.releaseDates ? { releaseDates: data.releaseDates } : {}),
+        // Backfill — discovery stubs only; never overwrites an existing value.
+        ...(needsBackfill && data.posterUrl && !r.posterUrl ? { posterUrl: data.posterUrl } : {}),
+        ...(needsBackfill && data.synopsis && !r.synopsis ? { synopsis: data.synopsis } : {}),
+        ...(needsBackfill && data.genre && data.genre.length > 0 && r.genre.length === 0 ? { genre: data.genre } : {}),
+        ...(needsBackfill && data.tmdbPopularity !== undefined ? { tmdbPopularity: data.tmdbPopularity } : {}),
+        ...(needsBackfill && data.tmdbVoteAverage !== undefined && r.tmdbVoteAverage === undefined ? { tmdbVoteAverage: data.tmdbVoteAverage } : {}),
+        ...(needsBackfill && data.tmdbVoteCount !== undefined && r.tmdbVoteCount === undefined ? { tmdbVoteCount: data.tmdbVoteCount } : {}),
       };
     })
   );
+}
+
+/**
+ * Step 2 — the SHARED enrichment seam. Takes a list of Release "stubs" (at least
+ * { tmdbId, title, language, releaseDate }) and runs the full enrichment chain:
+ *   1. resolve IMDb IDs        (getImdbId)
+ *   2. streaming platforms     (getStreamingPlatforms — JustWatch via TMDb)
+ *   3. credits + audio + /movie/{id} backfill (getCreditsAndLanguages)
+ *   4. ratings                 (MDBList primary + OMDb gap-fill + TBSI score)
+ *
+ * This is the ONE enrichment path: ingestReleases, ingestOTTArrivals AND the new
+ * discovery-backed getCandidates() all call it, so enrichment is never
+ * duplicated. The stages are lifted verbatim from the previous in-function code.
+ */
+export async function enrichReleases(stubs: Release[]): Promise<Release[]> {
+  if (stubs.length === 0) return stubs;
+
+  // 1. Resolve IMDb IDs
+  log.info(`Resolving IMDb IDs for ${stubs.length} releases...`);
+  const withImdb = await Promise.all(
+    stubs.map(async r => {
+      if (!r.tmdbId) return r;
+      const imdbId = await getImdbId(r.tmdbId);
+      return { ...r, imdbId: imdbId ?? undefined };
+    })
+  );
+  log.info(`  IMDb IDs found: ${withImdb.filter(r => r.imdbId).length}/${stubs.length}`);
+
+  // 2. Fetch streaming platforms (JustWatch via TMDb)
+  log.info(`Fetching streaming platforms (JustWatch via TMDb)...`);
+  const withPlatforms = await Promise.all(
+    withImdb.map(async r => {
+      if (!r.tmdbId) return r;
+      const platforms = await getStreamingPlatforms(r.tmdbId);
+      return { ...r, platform: platforms };
+    })
+  );
+  log.info(`  Streaming on at least 1 platform: ${withPlatforms.filter(r => r.platform.length > 0).length}/${stubs.length}`);
+
+  // 3. Credits + audio language structure (+ Step 2 poster/synopsis/genre/popularity backfill)
+  log.info(`Fetching credits + audio languages...`);
+  const withCredits = await enrichWithCreditsAndLanguages(withPlatforms);
+  const enrichedCount = withCredits.filter(r => r.leadCast || r.musicDirector || r.audioLanguages).length;
+  log.info(`  Credits/audio enrichment: ${enrichedCount}/${stubs.length}`);
+
+  // 4. Enrich ratings — MDBList primary + OMDb gap-fill (+ Phase 5.7 audio merge)
+  log.info(`Enriching ratings with MDBList + OMDb...`);
+  return enrichWithRatings(withCredits);
 }
 
 export async function ingestReleases(
@@ -177,38 +243,9 @@ export async function ingestReleases(
   // 1. Discover
   const releases = await discoverIndianReleases(startDate, endDate);
   if (releases.length === 0) return releases;
-  
-  // 2. Resolve IMDb IDs
-  log.info(`Resolving IMDb IDs for ${releases.length} releases...`);
-  const withImdb = await Promise.all(
-    releases.map(async r => {
-      if (!r.tmdbId) return r;
-      const imdbId = await getImdbId(r.tmdbId);
-      return { ...r, imdbId: imdbId ?? undefined };
-    })
-  );
-  log.info(`  IMDb IDs found: ${withImdb.filter(r => r.imdbId).length}/${releases.length}`);
-  
-  // 3. Fetch streaming platforms (JustWatch via TMDb)
-  log.info(`Fetching streaming platforms (JustWatch via TMDb)...`);
-  const withPlatforms = await Promise.all(
-    withImdb.map(async r => {
-      if (!r.tmdbId) return r;
-      const platforms = await getStreamingPlatforms(r.tmdbId);
-      return { ...r, platform: platforms };
-    })
-  );
-  log.info(`  Streaming on at least 1 platform: ${withPlatforms.filter(r => r.platform.length > 0).length}/${releases.length}`);
 
-  // 3.5. Phase 5.5 — enrich with TMDb credits + audio language structure
-  log.info(`Fetching credits + audio languages...`);
-  const withCredits = await enrichWithCreditsAndLanguages(withPlatforms);
-  const enrichedCount = withCredits.filter(r => r.leadCast || r.musicDirector || r.audioLanguages).length;
-  log.info(`  Credits/audio enrichment: ${enrichedCount}/${releases.length}`);
-
-  // 4. Enrich ratings — MDBList primary + OMDb gap-fill (+ Phase 5.7 audio merge)
-  log.info(`Enriching ratings with MDBList + OMDb...`);
-  const enriched = await enrichWithRatings(withCredits);
+  // 2-4. Shared enrichment seam (IMDb → platforms → credits/audio → ratings).
+  const enriched = await enrichReleases(releases);
 
   const ratedCount = enriched.filter(r => r.imdbRating !== undefined).length;
   log.success(
@@ -230,31 +267,7 @@ export async function ingestOTTArrivals(
 ): Promise<Release[]> {
   const releases = await discoverIndianOTTArrivals(startDate, endDate);
   if (releases.length === 0) return releases;
-  
-  log.info(`Resolving IMDb IDs for ${releases.length} arrivals...`);
-  const withImdb = await Promise.all(
-    releases.map(async r => {
-      if (!r.tmdbId) return r;
-      const imdbId = await getImdbId(r.tmdbId);
-      return { ...r, imdbId: imdbId ?? undefined };
-    })
-  );
-  
-  log.info(`Fetching streaming platforms...`);
-  const withPlatforms = await Promise.all(
-    withImdb.map(async r => {
-      if (!r.tmdbId) return r;
-      const platforms = await getStreamingPlatforms(r.tmdbId);
-      return { ...r, platform: platforms };
-    })
-  );
 
-  // Phase 5.5 — credits + audio languages
-  log.info(`Fetching credits + audio languages...`);
-  const withCredits = await enrichWithCreditsAndLanguages(withPlatforms);
-
-  log.info(`Enriching ratings with MDBList + OMDb...`);
-  const enriched = await enrichWithRatings(withCredits);
-
-  return enriched;
+  // Shared enrichment seam — identical chain as ingestReleases.
+  return enrichReleases(releases);
 }
