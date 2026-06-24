@@ -187,6 +187,27 @@ describe("discoverWikipedia — fetch + coverage status", () => {
     expect(warn).toHaveBeenCalled();
   });
 
+  it("🔒 transient API error (ratelimited) -> loader THROWS -> status 'error', NOT cached as 'missing'", async () => {
+    // A non-existence error code is transient: it must degrade to 'error' (and,
+    // in production, NOT be persisted by cached()) so a later run retries —
+    // never be mistaken for a genuinely absent page.
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    const ratelimited: WikiParseResponse = { error: { code: "ratelimited", info: "Too many requests." } };
+    mockOfetch.mockImplementation(wikiOfetch({ "List of Telugu films of 2026": ratelimited }) as never);
+    const { films, coverage } = await discoverWikipedia(["Telugu"], ...FULL_2026);
+    expect(films).toEqual([]);
+    expect(coverage).toEqual([{ language: "Telugu", year: 2026, status: "error", count: 0 }]);
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("🔒 genuine-absence code (missingtitle) still -> '' -> status 'missing'", async () => {
+    const missing: WikiParseResponse = { error: { code: "missingtitle", info: "The page you specified doesn't exist." } };
+    mockOfetch.mockImplementation(wikiOfetch({ "List of Telugu films of 2026": missing }) as never);
+    const { films, coverage } = await discoverWikipedia(["Telugu"], ...FULL_2026);
+    expect(films).toEqual([]);
+    expect(coverage).toEqual([{ language: "Telugu", year: 2026, status: "missing", count: 0 }]);
+  });
+
   it("🔒 page exists but parses 0 films -> status 'ok' with count 0 (the silent-parser-break signal)", async () => {
     const resp: WikiParseResponse = { parse: { title: "x", text: readSyntheticHtml("parsed-zero.html") } };
     mockOfetch.mockImplementation(wikiOfetch({ "List of Telugu films of 2026": resp }) as never);

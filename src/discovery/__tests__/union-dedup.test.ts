@@ -126,6 +126,18 @@ describe("unionFilms — must NOT merge (🔒 wrong-merge guards)", () => {
     const b = film({ title: "Same", found: "tmdb", language: "Telugu", year: 2026, tmdbId: 5, releaseType: "both" });
     expect(unionFilms([a, b])).toHaveLength(1);
   });
+
+  it("🔒 same title|language|year but DIFFERENT tmdbIds do NOT merge — both survive, flagged possibleDistinct", () => {
+    // A remake / same-title same-year namesake. The old behavior dropped the
+    // 2nd film and its tmdbId; the guard keeps both and flags the collision.
+    const a = film({ title: "Vikalpa", found: "tmdb", language: "Telugu", year: 2026, tmdbId: 100 });
+    const b = film({ title: "Vikalpa", found: "tmdb", language: "Telugu", year: 2026, tmdbId: 200 });
+    expect(dedupeKey(a)).toBe(dedupeKey(b)); // same base key…
+    const out = unionFilms([a, b]);
+    expect(out).toHaveLength(2); // …but NOT merged
+    expect(out.map((f) => f.tmdbId).sort((x, y) => (x ?? 0) - (y ?? 0))).toEqual([100, 200]); // both ids survive
+    expect(out.every((f) => f.possibleDistinct === true)).toBe(true); // both flagged
+  });
 });
 
 describe("unionFilms — date preference & stats inputs", () => {

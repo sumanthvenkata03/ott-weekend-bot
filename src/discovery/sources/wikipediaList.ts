@@ -65,9 +65,18 @@ async function fetchListHtml(page: string): Promise<string> {
         retry: 2,
         retryDelay: 500,
       });
-      // Definitive "page doesn't exist" — return "" (cached; the caller maps
-      // this to the "missing" status).
-      if (res.error) return "";
+      // Discriminate the MediaWiki error code. Only a genuinely absent page
+      // (missingtitle / nosuchpageid) is a permanent "no page" — return ""
+      // (cached; the caller maps this to the "missing" status). ANY other code
+      // (ratelimited, maxlag, readonly, …) is TRANSIENT: throw so cached() does
+      // NOT persist it (a thrown loader is never written), the caller degrades
+      // to status "error", and a later run retries instead of being stuck on a
+      // cached "missing" for the full TTL.
+      if (res.error) {
+        const code = res.error.code;
+        if (code === "missingtitle" || code === "nosuchpageid") return "";
+        throw new Error(`Wikipedia: API error "${code}" for "${page}" (${res.error.info})`);
+      }
       const text = res.parse?.text;
       // A 200 with no parse.text is a transient/unexpected shape, not a
       // permanent 404. Throw so cached() does NOT persist it — the caller

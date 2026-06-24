@@ -92,7 +92,30 @@ export function unionFilms(candidates: DiscoveredFilm[]): DiscoveredFilm[] {
     const key = dedupeKey(c);
     const existing = byKey.get(key);
     if (existing) {
-      mergeInto(existing, c);
+      // Over-merge guard: two films sharing title|language|year but carrying
+      // DIFFERENT non-undefined tmdbIds are distinct films (a remake, or a
+      // same-title same-year namesake). Merging would silently drop the
+      // newcomer and its tmdbId. Keep BOTH — re-home the newcomer under a
+      // tmdbId-scoped key — and flag both so the collision is surfaced, not
+      // swallowed. (Identical ids, or an undefined id on either side, still
+      // merge as before — that is a genuine duplicate / cross-net match.)
+      if (existing.tmdbId !== undefined && c.tmdbId !== undefined && existing.tmdbId !== c.tmdbId) {
+        existing.possibleDistinct = true;
+        const altKey = `${key}|tmdb:${c.tmdbId}`;
+        const altExisting = byKey.get(altKey);
+        if (altExisting) {
+          mergeInto(altExisting, c);
+        } else {
+          byKey.set(altKey, {
+            ...c,
+            possibleDistinct: true,
+            foundIn: [...c.foundIn],
+            perSource: { ...c.perSource },
+          });
+        }
+      } else {
+        mergeInto(existing, c);
+      }
     } else {
       // Clone so we never mutate the source-net arrays.
       byKey.set(key, {

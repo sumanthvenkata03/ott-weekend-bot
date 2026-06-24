@@ -2,7 +2,6 @@
 import { ofetch } from "ofetch";
 import pThrottle from "p-throttle";
 import { z } from "zod";
-import { config } from "../../shared/config.js";
 import { log } from "../../shared/logger.js";
 import { cached } from "../../shared/cache.js";
 import type { Release, Language, Platform } from "../../shared/types.js";
@@ -11,8 +10,15 @@ const BASE_URL = "https://api.themoviedb.org/3";
 const throttle = pThrottle({ limit: 4, interval: 1000 });
 
 const tmdbFetchRaw = throttle(<T = unknown>(path: string, params: Record<string, string> = {}) => {
+  // Read the key at CALL time, never at module load — importing this module must
+  // stay side-effect-free so any consumer (e.g. src/discovery) can pull it in
+  // without a missing key killing the process. The throw lives HERE, on the
+  // fetch path, not at top level. (The job pipeline still imports shared/config
+  // directly, so production keeps its fail-fast startup validation.)
+  const apiKey = process.env.TMDB_API_KEY;
+  if (!apiKey) throw new Error("TMDB_API_KEY is not set");
   const url = new URL(`${BASE_URL}${path}`);
-  url.searchParams.set("api_key", config.TMDB_API_KEY);
+  url.searchParams.set("api_key", apiKey);
   for (const [k, v] of Object.entries(params)) {
     url.searchParams.set(k, v);
   }

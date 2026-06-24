@@ -51,6 +51,14 @@ export interface DiscoveredFilm {
   tmdbId?: number;
   /** Human-readable caveat (e.g. why a date is approximate). */
   note?: string;
+  /**
+   * Set when this film shares its dedupe key (normalizedTitle|language|year)
+   * with another film carrying a DIFFERENT tmdbId — i.e. they are almost
+   * certainly distinct films (a remake / same-title same-year namesake) that
+   * the union refused to merge. Both colliding films carry the flag so the
+   * collision can be surfaced rather than silently swallowed.
+   */
+  possibleDistinct?: boolean;
   /** Which nets surfaced this film. */
   foundIn: DiscoverySource[];
   /** Raw per-net details for provenance. */
