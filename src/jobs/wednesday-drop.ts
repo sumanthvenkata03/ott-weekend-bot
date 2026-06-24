@@ -18,6 +18,7 @@ import { excludedKeysFor, recordFeatured, filmKey, type PillarKey } from "../sha
 import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
 import { reconcileEdition } from "../reconcile/run.js";
 import { decideGate, writeReview } from "../reconcile/gate.js";
+import { capPoolForSelector } from "../reconcile/select.js";
 import type { ReconcileResult } from "../reconcile/types.js";
 
 /**
@@ -48,13 +49,13 @@ async function produceEdition(
     return;
   }
 
-  // Per-edition candidate cap: sort THIS pool by popularity, feed up to 40 so
-  // a large pool can still reach MAX_WED_DROP_FILMS (or skip) without the tail
-  // being crowded out — 40 comfortably exceeds the 15 cap with headroom, and the
-  // popularity sort means the strongest survive if a pool is ever huge.
-  const featured = [...deduped]
-    .sort((a, b) => (b.tmdbPopularity ?? 0) - (a.tmdbPopularity ?? 0))
-    .slice(0, 40);
+  // Per-edition candidate cap (capPoolForSelector): the popularity slice applies
+  // ONLY to the TMDb-pool portion — AI-net finds are CAP-EXEMPT so they always
+  // reach the LLM selector instead of being amputated by the popularity sort
+  // (they carry no tmdbPopularity and would otherwise sink below the cut). The
+  // LLM remains the editorial filter (picks up to MAX or skips); this only
+  // guarantees AI finds reach its INPUT, not that they get published.
+  const featured = capPoolForSelector(deduped);
   log.info(`  Feeding ${featured.length} ${edition} candidates to the LLM (picks up to ${MAX_WED_DROP_FILMS} or skips)`);
 
   // Generate the edition's draft via Claude.

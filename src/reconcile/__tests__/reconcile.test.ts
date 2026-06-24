@@ -2,13 +2,15 @@
 // OFFLINE regression suite for the reconciliation core + gate. TMDb access is
 // injected as plain mock functions, so nothing here touches the network, the
 // LLM, or .env. Run with: npx vitest run --dir src/reconcile
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { reconcile, type ReconcileDeps } from "../reconcile.js";
 import { computeDropHash, decideGate } from "../gate.js";
+import { capPoolForSelector, AI_FIND_CEILING, SELECTOR_POOL_TARGET } from "../select.js";
 import type { ExtractedFilm, ReconcileResult } from "../types.js";
 import type { Release } from "../../shared/types.js";
 import type { BucketWindow } from "../../shared/post-validator.js";
 import type { TmdbTitleHit, TmdbTitleSearch } from "../../ingestion/releases/tmdb.js";
+import { log } from "../../shared/logger.js";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 function makeRelease(p: Partial<Release> & { tmdbId: number; title: string }): Release {
@@ -240,6 +242,66 @@ describe("Date-fail reason is the precise assessDates reason", () => {
     const f = r.reconciled[0]!;
     expect(f.tier).toBe("red");
     expect(f.reasons.some((x) => x.includes("2026-05-01") && x.includes("outside window"))).toBe(true);
+  });
+});
+
+// ── Pre-cap exemption (capPoolForSelector) ──────────────────────────────────
+describe("capPoolForSelector — AI finds reach the LLM selector in a >40 pool", () => {
+  function poolFilm(id: number, pop: number): Release {
+    return makeRelease({ tmdbId: id, title: `Pool ${id}`, tmdbPopularity: pop, sources: ["tmdb"] });
+  }
+  function aiRelease(id: number, pop?: number): Release {
+    return makeRelease({
+      tmdbId: id, title: `AI ${id}`, sources: ["ai-net", "tmdb-search"],
+      ...(pop !== undefined ? { tmdbPopularity: pop } : {}),
+    });
+  }
+
+  it("keeps ALL K ai-net finds in a >40 pool; slices the pool portion to 40-K (total ≤ 40)", () => {
+    const pool = Array.from({ length: 45 }, (_, i) => poolFilm(1000 + i, i + 1)); // pop 1..45
+    const aiFinds = [aiRelease(1), aiRelease(2, 0), aiRelease(3)];                // 3 finds
+    const out = capPoolForSelector([...pool, ...aiFinds]);
+    expect(out.filter((r) => r.sources.includes("ai-net"))).toHaveLength(3);     // all K survive
+    expect(out.filter((r) => !r.sources.includes("ai-net"))).toHaveLength(37);   // 40 - K pool
+    expect(out.length).toBe(40);
+    for (const id of [1, 2, 3]) expect(out.some((r) => r.tmdbId === id)).toBe(true);
+  });
+
+  it("still cuts a low-popularity POOL film when the pool exceeds its slice", () => {
+    const pool = Array.from({ length: 45 }, (_, i) => poolFilm(1000 + i, i + 1)); // pop 1..45
+    const aiFinds = [aiRelease(1), aiRelease(2), aiRelease(3)];
+    const out = capPoolForSelector([...pool, ...aiFinds]);
+    expect(out.some((r) => r.tmdbId === 1000)).toBe(false); // pop 1 — cut
+    expect(out.some((r) => r.tmdbId === 1044)).toBe(true);  // pop 45 — kept
+  });
+
+  it("pathological K>ceiling: keeps exactly 40 ai finds (top by popularity), evicts the pool, warns loudly", () => {
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => {});
+    const aiFinds = Array.from({ length: 41 }, (_, i) => aiRelease(2000 + i, i)); // pop 0..40
+    const pool = [poolFilm(9000, 100), poolFilm(9001, 99)];
+    const out = capPoolForSelector([...aiFinds, ...pool]);
+    expect(out).toHaveLength(AI_FIND_CEILING);                       // exactly 40
+    expect(out.every((r) => r.sources.includes("ai-net"))).toBe(true); // pool fully evicted
+    expect(out.some((r) => r.tmdbId === 2000)).toBe(false);          // pop 0 ai find dropped
+    expect(out.some((r) => r.tmdbId === 2040)).toBe(true);           // pop 40 kept
+    expect(warnSpy).toHaveBeenCalledOnce();
+    warnSpy.mockRestore();
+  });
+
+  it("an ai-net find with undefined tmdbPopularity still survives (exempt regardless of popularity)", () => {
+    const pool = Array.from({ length: 41 }, (_, i) => poolFilm(1000 + i, i + 1));
+    const out = capPoolForSelector([...pool, aiRelease(7)]);          // ai 7 has no popularity
+    expect(out.some((r) => r.tmdbId === 7)).toBe(true);
+    expect(out.length).toBe(SELECTOR_POOL_TARGET);
+  });
+
+  it("a tmdb-only film is NOT treated as an AI find (still subject to the slice)", () => {
+    const aiZero = aiRelease(7, 0);                                  // zero-pop AI find — exempt
+    const tmdbZero = poolFilm(8000, 0);                             // zero-pop TMDb film — not exempt
+    const pool = Array.from({ length: 40 }, (_, i) => poolFilm(1000 + i, i + 1)); // pop 1..40
+    const out = capPoolForSelector([aiZero, tmdbZero, ...pool]);
+    expect(out.some((r) => r.tmdbId === 7)).toBe(true);              // AI zero-pop survives
+    expect(out.some((r) => r.tmdbId === 8000)).toBe(false);         // TMDb zero-pop cut
   });
 });
 
