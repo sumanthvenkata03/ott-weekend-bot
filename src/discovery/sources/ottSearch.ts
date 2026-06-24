@@ -30,7 +30,6 @@ import { searchTitleTmdb, type TmdbTitleHit } from "../../ingestion/releases/tmd
 import { normalizeTitle } from "../normalize.js";
 import { resolveTitleToTmdb, languageForCode, INDIAN_LANG_CODES } from "./resolveTitle.js";
 import type { BucketWindow } from "../../shared/post-validator.js";
-import type { WedDropEdition } from "../../shared/wed-drop-edition.js";
 import type { DateConflictExtraction, ExtractedFilm, ExtractionResult, RejectedExtraction } from "../../reconcile/types.js";
 import type { DiscoveredFilm } from "../types.js";
 
@@ -99,7 +98,7 @@ async function tavilySearch(query: string): Promise<Snippet[]> {
 }
 
 /** Per-edition, per-language (+ per-platform for OTT) discovery queries. */
-export function buildQueries(pillar: WedDropEdition, languages: string[], window: BucketWindow): string[] {
+export function buildQueries(pillar: string, languages: string[], window: BucketWindow): string[] {
   const dates = `${window.start} to ${window.end}`;
   const qs: string[] = [];
   if (pillar === "theatrical") {
@@ -150,7 +149,7 @@ const ExtractionSchema = z.object({
 });
 
 function buildExtractionPrompt(
-  pillar: WedDropEdition,
+  pillar: string,
   window: BucketWindow,
   snippets: Snippet[]
 ): string {
@@ -221,7 +220,7 @@ function dedupeSnippets(snippets: Snippet[]): Snippet[] {
  * and reconcile (via the ai-net.ts re-export).
  */
 export async function runAiNet(
-  pillar: WedDropEdition,
+  pillar: string,
   languages: string[],
   window: BucketWindow
 ): Promise<ExtractionResult> {

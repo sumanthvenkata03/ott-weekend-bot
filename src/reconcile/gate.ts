@@ -42,6 +42,31 @@ const AI_GLYPH: Record<AiVerdict, string> = {
   unavailable: "⚠️",
 };
 
+/**
+ * Per-pillar labels for the review artifact, so the gate isn't welded to Wed Drop
+ * copy. Wednesday passes WED_DROP_LABELS (the exact historical strings); any other
+ * pillar passes its own. `labelFor` resolves a pillar VALUE to display titles,
+ * defaulting (in WED_DROP_LABELS) to EDITION_META for the wed editions.
+ */
+export interface GateLabels {
+  /** Review page title prefix + Slack header body, e.g. "Wed Drop — REVIEW". */
+  reviewTitle: string;
+  /** Approve command shown in the review, e.g. "npm run job:wednesday -- --approve". */
+  approveCommand: string;
+  /** Notion "Pillar" select value, e.g. "Wed Drop". */
+  notionPillar: string;
+  /** pillar value → display titles (EDITION_META-backed for the wed editions). */
+  labelFor: (pillar: string) => { notionTitle: string; slackLabel: string };
+}
+
+/** Wednesday's labels — reproduce today's EXACT strings (the regression anchor). */
+export const WED_DROP_LABELS: GateLabels = {
+  reviewTitle: "Wed Drop — REVIEW",
+  approveCommand: "npm run job:wednesday -- --approve",
+  notionPillar: "Wed Drop",
+  labelFor: (p) => EDITION_META[p as WedDropEdition] ?? { notionTitle: p, slackLabel: p },
+};
+
 export interface GateOptions {
   /** Hash supplied via `--approve <hash>` (binds approval to the reviewed list). */
   approveHash?: string;
@@ -54,7 +79,7 @@ export interface GateDecision {
   mode: "auto" | "approved" | "blocked";
   hash: string;
   /** Renderable Release records per edition (🔴 always excluded). */
-  renderable: Partial<Record<WedDropEdition, Release[]>>;
+  renderable: Partial<Record<string, Release[]>>;
   reason: string;
 }
 
@@ -114,13 +139,13 @@ export function decideGate(results: ReconcileResult[], opts: GateOptions): GateD
   const allGreen = results.every((r) => r.counts.total > 0 && r.counts.yellow === 0 && r.counts.red === 0);
 
   if (opts.autoPassGreen && allGreen) {
-    const renderable: Partial<Record<WedDropEdition, Release[]>> = {};
+    const renderable: Partial<Record<string, Release[]>> = {};
     for (const r of results) renderable[r.pillar] = renderableFor(r, true);
     return { proceed: true, mode: "auto", hash, renderable, reason: "autoPassGreen: every edition is all-🟢" };
   }
 
   if (opts.approveHash && opts.approveHash === hash) {
-    const renderable: Partial<Record<WedDropEdition, Release[]>> = {};
+    const renderable: Partial<Record<string, Release[]>> = {};
     for (const r of results) renderable[r.pillar] = renderableFor(r, false);
     return { proceed: true, mode: "approved", hash, renderable, reason: `approved hash ${hash} — rendering 🟢+🟡 (🔴 excluded)` };
   }
@@ -211,13 +236,13 @@ function filmBlocks(f: ReconciledFilm): unknown[] {
   return blocks;
 }
 
-/** Flatten both editions into the full Notion block list (any length). */
-function buildReviewBlocks(results: ReconcileResult[], hash: string): unknown[] {
+/** Flatten all results into the full Notion block list (any length). */
+function buildReviewBlocks(results: ReconcileResult[], hash: string, labels: GateLabels): unknown[] {
   const children: unknown[] = [
-    paragraph(`Reconciliation review · hash ${hash} · re-run with: npm run job:wednesday -- --approve ${hash}`),
+    paragraph(`Reconciliation review · hash ${hash} · re-run with: ${labels.approveCommand} ${hash}`),
   ];
   for (const r of results) {
-    const meta = EDITION_META[r.pillar];
+    const meta = labels.labelFor(r.pillar);
     children.push(heading(`${meta.notionTitle} — ${r.counts.green}🟢 / ${r.counts.yellow}🟡 / ${r.counts.red}🔴 (added by AI net: ${r.counts.addedByAiNet})`));
     // Order: red, yellow, green — surface the problems first.
     const order: Tier[] = ["red", "yellow", "green"];
@@ -258,7 +283,7 @@ function sleep(ms: number): Promise<void> {
  * in ≤100-block batches. Robust to any candidate count (200+). Each request
  * retries once on a transient (429 / 5xx) error. Returns the page URL.
  */
-async function createReviewPageChunked(title: string, allChildren: unknown[]): Promise<string> {
+async function createReviewPageChunked(title: string, allChildren: unknown[], notionPillar: string): Promise<string> {
   const batches = chunk(allChildren, NOTION_MAX_CHILDREN);
   const firstBatch = batches[0] ?? [];
 
@@ -267,7 +292,7 @@ async function createReviewPageChunked(title: string, allChildren: unknown[]): P
     properties: {
       Name: { title: [{ text: { content: title.slice(0, 1900) } }] },
       Status: { status: { name: "Draft" } },
-      Pillar: { select: { name: "Wed Drop" } },
+      Pillar: { select: { name: notionPillar } },
       Verdict: { select: { name: "Pending" } },
     },
     children: firstBatch,
@@ -358,7 +383,8 @@ async function postReviewToSlack(
   results: ReconcileResult[],
   hash: string,
   windowLabel: string,
-  notionUrl: string
+  notionUrl: string,
+  labels: GateLabels
 ): Promise<void> {
   if (!config.SLACK_WEBHOOK_URL) {
     log.info("Slack webhook not configured — skipping review ping");
@@ -366,18 +392,18 @@ async function postReviewToSlack(
   }
 
   const editionLines = results.map((r) => {
-    const m = EDITION_META[r.pillar];
+    const m = labels.labelFor(r.pillar);
     return `*${m.slackLabel}:* ${r.counts.green}🟢 / ${r.counts.yellow}🟡 / ${r.counts.red}🔴 · +${r.counts.addedByAiNet} AI · ${r.rejected.length} rejected${aiTally(r)}`;
   });
   const flagged = aiFlaggedNames(results);
 
   const blocks: unknown[] = [
-    { type: "header", text: { type: "plain_text", text: "🕵️ Wed Drop — REVIEW", emoji: true } },
+    { type: "header", text: { type: "plain_text", text: `🕵️ ${labels.reviewTitle}`, emoji: true } },
     section(`*Reconciliation review · ${windowLabel}*\nRender is GATED — nothing published until approved.`),
     section(editionLines.join("\n")),
     section(`*AI net added:* ${truncList(aiAddedNames(results))}`),
     ...(flagged.length ? [section(`*AI-review — verify these:* ${truncList(flagged)}`)] : []),
-    section(`*Approve:*\n\`\`\`npm run job:wednesday -- --approve ${hash}\`\`\``),
+    section(`*Approve:*\n\`\`\`${labels.approveCommand} ${hash}\`\`\``),
   ];
 
   if (isHttpUrl(notionUrl)) {
@@ -399,7 +425,7 @@ async function postReviewToSlack(
   await ofetch(config.SLACK_WEBHOOK_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: { blocks, text: "🕵️ Wed Drop — REVIEW" },
+    body: { blocks, text: `🕵️ ${labels.reviewTitle}` },
   });
   log.success("Review Slack ping sent");
 }
@@ -411,16 +437,20 @@ async function postReviewToSlack(
  * approve hash and a safety verdict are ALWAYS printed to the console so the
  * operator can tell whether it's safe to approve.
  */
-export async function writeReview(results: ReconcileResult[], hash: string): Promise<string> {
+export async function writeReview(
+  results: ReconcileResult[],
+  hash: string,
+  labels: GateLabels = WED_DROP_LABELS
+): Promise<string> {
   const win = results[0]?.window;
   const windowLabel = win ? `${win.start} → ${win.end}` : "";
-  const pageTitle = `Wed Drop — REVIEW — ${windowLabel} — ${hash}`;
-  const children = buildReviewBlocks(results, hash);
+  const pageTitle = `${labels.reviewTitle} — ${windowLabel} — ${hash}`;
+  const children = buildReviewBlocks(results, hash, labels);
 
   // 1) NOTION — chunked create + append. Fail soft.
   let notionUrl = "";
   try {
-    notionUrl = await createReviewPageChunked(pageTitle, children);
+    notionUrl = await createReviewPageChunked(pageTitle, children, labels.notionPillar);
     log.success(`Review written to Notion (${children.length} blocks): ${notionUrl}`);
   } catch (err) {
     log.error("Review Notion write failed", err instanceof Error ? err.message : err);
@@ -429,7 +459,7 @@ export async function writeReview(results: ReconcileResult[], hash: string): Pro
   // 2) SLACK — compact ping. Independent of Notion. Fail soft.
   let slackOk = true;
   try {
-    await postReviewToSlack(results, hash, windowLabel, notionUrl);
+    await postReviewToSlack(results, hash, windowLabel, notionUrl, labels);
   } catch (err) {
     slackOk = false;
     log.warn("Review Slack ping failed", err instanceof Error ? err.message : err);

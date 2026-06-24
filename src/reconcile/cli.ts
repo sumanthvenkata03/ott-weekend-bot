@@ -12,7 +12,8 @@
 import "dotenv/config";
 
 import { ingestReleases, ingestOTTArrivals } from "../ingestion/releases/index.js";
-import { reconcileEdition, RECONCILE_LANGUAGES } from "./run.js";
+import { editionWindow, RECONCILE_LANGUAGES } from "./run.js";
+import { verifyCandidates } from "./verify.js";
 import { decideGate, computeDropHash, writeReview } from "./gate.js";
 import type { ReconciledFilm, ReconcileResult } from "./types.js";
 
@@ -108,8 +109,8 @@ async function main(): Promise<void> {
 
   console.log("\nRunning AI-search net + reconcile (2 LLM extractions)...");
   const results: ReconcileResult[] = [
-    await reconcileEdition("theatrical", theatrical, from, to, languages),
-    await reconcileEdition("ott", ott, from, to, languages),
+    await verifyCandidates(theatrical, { pillar: "theatrical", window: editionWindow("theatrical", from, to), languages }),
+    await verifyCandidates(ott, { pillar: "ott", window: editionWindow("ott", from, to), languages }),
   ];
 
   for (const r of results) printResult(r);

@@ -25,7 +25,6 @@
 // net can only ADD films and annotate tier, never remove a TMDb candidate.
 
 import type { Release } from "../shared/types.js";
-import type { WedDropEdition } from "../shared/wed-drop-edition.js";
 import type { TmdbTitleHit, TmdbTitleSearch } from "../ingestion/releases/tmdb.js";
 import { qualifyingDate, inWindow } from "../shared/post-validator.js";
 import type { BucketWindow, ManifestRow } from "../shared/post-validator.js";
@@ -55,7 +54,7 @@ export interface ReconcileDeps {
 }
 
 export interface ReconcileInput {
-  pillar: WedDropEdition;
+  pillar: string;
   tmdbPool: Release[];
   aiFilms: ExtractedFilm[];
   window: BucketWindow;
@@ -241,7 +240,7 @@ function buildFromPool(
   r: Release,
   ai: AiResolution | undefined,
   window: BucketWindow,
-  pillar: WedDropEdition,
+  pillar: string,
   rankByTmdbId: Map<number, number>,
   cap: number
 ): ReconciledFilm {
@@ -295,7 +294,7 @@ function buildFromPool(
   return f;
 }
 
-function buildFromNewAi(res: AiResolution, window: BucketWindow, pillar: WedDropEdition): ReconciledFilm {
+function buildFromNewAi(res: AiResolution, window: BucketWindow, pillar: string): ReconciledFilm {
   const hit = res.hit!;
   const ai = res.ai;
   const language = languageForCode(hit.originalLanguage);
@@ -356,7 +355,7 @@ function buildFromNewAi(res: AiResolution, window: BucketWindow, pillar: WedDrop
   };
 }
 
-function buildUnverified(res: AiResolution, pillar: WedDropEdition): ReconciledFilm {
+function buildUnverified(res: AiResolution, pillar: string): ReconciledFilm {
   // Title + source ONLY. No date, platform, language, cast, or poster — nothing
   // that would be fabricated. Hard-pinned 🔴.
   const ai = res.ai;

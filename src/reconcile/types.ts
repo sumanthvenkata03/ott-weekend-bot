@@ -8,7 +8,6 @@
 // fields), and is hard-pinned 🔴 (cannot pass the gate, even in auto mode).
 
 import type { Release } from "../shared/types.js";
-import type { WedDropEdition } from "../shared/wed-drop-edition.js";
 
 /** Review tier. green = clean + cross-net corroborated, yellow = one issue, red = blocked. */
 export type Tier = "green" | "yellow" | "red";
@@ -101,7 +100,10 @@ export interface ReconciledFilm {
   tmdbId?: number;
   title: string;              // display title (TMDb canonical when resolved, else AI title)
   language: string;
-  pillar: WedDropEdition;
+  // Pillar LABEL — value-stable widen from WedDropEdition to string so any pillar
+  // can be verified. Wednesday keeps the exact values "theatrical"/"ott", so the
+  // gate hash (filmFingerprint joins this) is unchanged.
+  pillar: string;
 
   // AI-net contributed (title / platform / date / source only)
   platform?: string;
@@ -153,7 +155,7 @@ export interface ReconcileCounts {
 }
 
 export interface ReconcileResult {
-  pillar: WedDropEdition;
+  pillar: string;
   window: { start: string; end: string };
   reconciled: ReconciledFilm[];          // full annotated list (augment-only; nothing dropped)
   rejected: RejectedExtraction[];        // series / non-film / non-Indian-language

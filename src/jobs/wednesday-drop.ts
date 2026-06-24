@@ -16,9 +16,10 @@ import { getIssueNumberForToday } from "../shared/issue-number.js";
 import { EDITION_META, type WedDropEdition } from "../shared/wed-drop-edition.js";
 import { excludedKeysFor, recordFeatured, filmKey, type PillarKey } from "../shared/featured-ledger.js";
 import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
-import { reconcileEdition } from "../reconcile/run.js";
+import { editionWindow, RECONCILE_LANGUAGES } from "../reconcile/run.js";
+import { verifyCandidates } from "../reconcile/verify.js";
 import { annotateWithAiReview } from "../reconcile/ai-review.js";
-import { decideGate, writeReview } from "../reconcile/gate.js";
+import { decideGate, writeReview, WED_DROP_LABELS } from "../reconcile/gate.js";
 import { capPoolForSelector } from "../reconcile/select.js";
 import type { ReconcileResult } from "../reconcile/types.js";
 
@@ -228,9 +229,13 @@ async function main() {
   //    edition. AUGMENT-ONLY: every TMDb candidate survives; the AI net can only
   //    ADD films and annotate tier. Exactly ONE LLM extraction per edition.
   log.info("\n🔎 Reconciliation — cross-checking TMDb pools against the AI-search net...");
+  // Shared verification surface (Step 4) — identical to the prior reconcileEdition:
+  // same pillar values ("theatrical"/"ott"), same editionWindow, same languages,
+  // same default cap (40) and live deps. AI-review stays OFF here (Wednesday runs
+  // it explicitly on the blocked run below), so the gate hash is unchanged.
   const results: ReconcileResult[] = [
-    await reconcileEdition("theatrical", theatrical, startDate, endDate),
-    await reconcileEdition("ott", ott, ottStartDate, endDate),
+    await verifyCandidates(theatrical, { pillar: "theatrical", window: editionWindow("theatrical", startDate, endDate), languages: RECONCILE_LANGUAGES }),
+    await verifyCandidates(ott, { pillar: "ott", window: editionWindow("ott", ottStartDate, endDate), languages: RECONCILE_LANGUAGES }),
   ];
   for (const r of results) log.info(reconcileSummary(r));
 
@@ -255,7 +260,7 @@ async function main() {
     // returns the Notion URL ("" if that write failed). Key the stop message to
     // delivery so the operator never sees "approve" guidance for a review that
     // doesn't exist.
-    const reviewUrl = await writeReview(annotated, decision.hash);
+    const reviewUrl = await writeReview(annotated, decision.hash, WED_DROP_LABELS);
     if (reviewUrl) {
       log.warn(
         `\n⛔ Wed Drop GATED (hash ${decision.hash}). NOTHING rendered or published.\n` +
