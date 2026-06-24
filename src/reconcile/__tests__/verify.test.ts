@@ -13,6 +13,7 @@ vi.mock("../../ingestion/releases/tmdb.js", () => ({
 }));
 
 import { verifyCandidates } from "../verify.js";
+import { RECONCILE_LANGUAGES } from "../run.js";
 import { runAiNet } from "../ai-net.js";
 import { annotateWithAiReview } from "../ai-review.js";
 import type { Release } from "../../shared/types.js";
@@ -76,5 +77,10 @@ describe("verifyCandidates — composes AI net + reconcile core", () => {
     const result = await verifyCandidates([makeRelease({ tmdbId: 1, title: "X" })], { pillar: "ott", window: OTT_WIN, aiReview: true, deps: noDeps });
     expect(annotateWithAiReview).toHaveBeenCalledTimes(1);
     expect(annotateWithAiReview).toHaveBeenCalledWith([result]);
+  });
+
+  it("🔒 language align (5a): the default AI-net corroboration set is the full 8 (find-8/verify-8)", () => {
+    expect(RECONCILE_LANGUAGES).toHaveLength(8);
+    expect(RECONCILE_LANGUAGES).toEqual(expect.arrayContaining(["Bengali", "Marathi", "Punjabi"]));
   });
 });

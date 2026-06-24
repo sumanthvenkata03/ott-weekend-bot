@@ -1,6 +1,6 @@
 // src/jobs/wednesday-drop.ts
 import { addDays, endOfWeek, format, startOfDay, startOfWeek } from "date-fns";
-import { ingestReleases, ingestOTTArrivals } from "../ingestion/releases/index.js";
+import { getCandidates } from "../discovery/candidates.js";
 import type { Release } from "../shared/types.js";
 import { generateWednesdayDrop, MAX_WED_DROP_FILMS } from "../content/weekend/wednesday-drop.js";
 import { writeWednesdayDropToNotion } from "../delivery/notion.js";
@@ -211,11 +211,15 @@ async function main() {
 
   log.info(`Theatrical window: ${startDate} → ${endDate}  |  OTT window: ${ottStartDate} → ${endDate}`);
 
-  // 1. Ingest the two pools SEPARATELY — they are NOT merged. Each becomes its
-  //    own independent edition (theatrical = In Theaters, ott = Now Streaming).
+  // 1. FIND the two pools SEPARATELY via the shared discovery surface (Step 5a) —
+  //    NOT merged. Each becomes its own independent edition (theatrical = In
+  //    Theaters, ott = Now Streaming). getCandidates(intent:"ott") now also runs
+  //    the AI-search OTT net (Step 3), so press-confirmed OTT releases TMDb's
+  //    release_type=4 misses (the Blast case) finally surface in a real drop.
+  //    Languages default to the full 8 (find-8); verify-corroborate is also 8.
   const [theatrical, ott] = await Promise.all([
-    ingestReleases(startDate, endDate),       // THEATRICAL — Wed→Sun (this weekend's openings)
-    ingestOTTArrivals(ottStartDate, endDate), // OTT — Mon→Sun (this week's drops, streamable all weekend)
+    getCandidates({ from: startDate, to: endDate, intent: "theatrical" }),       // THEATRICAL — Wed→Sun
+    getCandidates({ from: ottStartDate, to: endDate, intent: "ott" }),           // OTT — Mon→Sun (+ AI-search recall)
   ]);
   log.info(`Candidates: ${theatrical.length} theatrical (In Theaters) + ${ott.length} OTT (Now Streaming)`);
 

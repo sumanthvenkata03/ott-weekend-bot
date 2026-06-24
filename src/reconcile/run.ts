@@ -7,8 +7,15 @@
 import type { BucketWindow } from "../shared/post-validator.js";
 import { EDITION_META, type WedDropEdition } from "../shared/wed-drop-edition.js";
 
-/** South-first default language set (matches the discovery + content house style). */
-export const RECONCILE_LANGUAGES = ["Telugu", "Tamil", "Malayalam", "Hindi", "Kannada"];
+/**
+ * AI-net corroboration language set. Step 5a widened this to the FULL 8 supported
+ * Indian languages so verify-corroborate matches discovery's finding set
+ * (find-8 / verify-8). Cost is only more CACHED Tavily queries — the LLM
+ * extraction stays ONE batched call per edition, so the ≤2-call/drop budget is
+ * unchanged. Tier consequence: Bengali/Marathi/Punjabi films can now reach 🟢
+ * (cross-net corroborated) instead of being forced 🟡 (single-net).
+ */
+export const RECONCILE_LANGUAGES = ["Telugu", "Tamil", "Malayalam", "Kannada", "Hindi", "Bengali", "Marathi", "Punjabi"];
 
 /** Build the edition's landing window (hard window; ott vs theatrical dateField). */
 export function editionWindow(
