@@ -127,6 +127,26 @@ describe("unionFilms — must NOT merge (🔒 wrong-merge guards)", () => {
     expect(unionFilms([a, b])).toHaveLength(1);
   });
 
+  it("🔒 same tmdbId but DIFFERENT dedupeKey (year) → merged to ONE (Blast theatrical-2025 vs ott-2026)", () => {
+    // The cross-release-type case: the TMDb digital pass dates a film by its
+    // primary (2025) date while the AI-OTT net dates it by the press OTT (2026)
+    // date — different dedupeKeys, but a shared tmdbId means ONE film.
+    const a = film({ title: "Blast", found: "tmdb", language: "Tamil", year: 2025, tmdbId: 55555, releaseType: "theatrical" });
+    const b = film({ title: "Blast", found: "tmdb", language: "Tamil", year: 2026, tmdbId: 55555, releaseType: "digital" });
+    expect(dedupeKey(a)).not.toBe(dedupeKey(b)); // different keys (year differs)…
+    const out = unionFilms([a, b]);
+    expect(out).toHaveLength(1);                  // …but the shared tmdbId collapses them
+    expect(out[0]?.tmdbId).toBe(55555);
+  });
+
+  it("🔒 the tmdbId-merge does NOT collapse the possibleDistinct case (DIFFERENT ids, same title → still TWO + flagged)", () => {
+    const a = film({ title: "Vimanam", found: "tmdb", language: "Telugu", year: 2026, tmdbId: 301 });
+    const b = film({ title: "Vimanam", found: "tmdb", language: "Telugu", year: 2026, tmdbId: 302 });
+    const out = unionFilms([a, b]);
+    expect(out).toHaveLength(2); // distinct ids ⇒ never merged by the tmdbId pass
+    expect(out.every((f) => f.possibleDistinct === true)).toBe(true);
+  });
+
   it("🔒 same title|language|year but DIFFERENT tmdbIds do NOT merge — both survive, flagged possibleDistinct", () => {
     // A remake / same-title same-year namesake. The old behavior dropped the
     // 2nd film and its tmdbId; the guard keeps both and flags the collision.

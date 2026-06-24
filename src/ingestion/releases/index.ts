@@ -146,6 +146,26 @@ function reconcileAudioOriginal(
 }
 
 /**
+ * Merge TMDb-derived release dates over a stub's existing ones WITHOUT clobbering
+ * a press-sourced ott date. TMDb wins per-field when present; a blank TMDb ott
+ * falls back to the stub's press ott — the Blast rescue (mirrors the reconcile
+ * layer's assessDates precedence). For the OLD ingest path the stub has no
+ * releaseDates, so this returns exactly TMDb's — output stays identical.
+ */
+function mergeReleaseDates(
+  existing: { theatrical?: string; ott?: string } | undefined,
+  incoming: { theatrical?: string; ott?: string } | undefined
+): { theatrical?: string; ott?: string } | undefined {
+  const theatrical = incoming?.theatrical ?? existing?.theatrical;
+  const ott = incoming?.ott ?? existing?.ott;
+  if (!theatrical && !ott) return undefined;
+  return {
+    ...(theatrical ? { theatrical } : {}),
+    ...(ott ? { ott } : {}),
+  };
+}
+
+/**
  * Phase 5.5 — apply credits + audio-language enrichment to a release list.
  * Pulls top-2 billed cast, music composer, and { original, dubbed } language
  * structure from TMDb in one helper call per film. Returns release records
@@ -170,12 +190,16 @@ async function enrichWithCreditsAndLanguages(releases: Release[]): Promise<Relea
       // always sets it. Gate ALL backfill on this so the old path is untouched.
       const needsBackfill = r.tmdbPopularity === undefined;
 
+      // Merge (not overwrite) release dates so a press-sourced ott date on an
+      // AI-OTT discovery stub survives a TMDb response that only has theatrical.
+      const mergedReleaseDates = mergeReleaseDates(r.releaseDates, data.releaseDates);
+
       return {
         ...r,
         ...(data.leadCast.length > 0 ? { leadCast: data.leadCast } : {}),
         ...(data.musicDirector ? { musicDirector: data.musicDirector } : {}),
         ...(audioLanguages ? { audioLanguages } : {}),
-        ...(data.releaseDates ? { releaseDates: data.releaseDates } : {}),
+        ...(mergedReleaseDates ? { releaseDates: mergedReleaseDates } : {}),
         // Backfill — discovery stubs only; never overwrites an existing value.
         ...(needsBackfill && data.posterUrl && !r.posterUrl ? { posterUrl: data.posterUrl } : {}),
         ...(needsBackfill && data.synopsis && !r.synopsis ? { synopsis: data.synopsis } : {}),

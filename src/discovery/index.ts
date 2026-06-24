@@ -59,6 +59,12 @@ function mergeInto(target: DiscoveredFilm, incoming: DiscoveredFilm): void {
   }
   if (target.language === undefined && incoming.language) target.language = incoming.language;
 
+  // AI-OTT carry-through — the press-sourced fields TMDb doesn't supply. Prefer
+  // an existing value (don't clobber); fill from incoming when absent.
+  if (target.ottDate === undefined && incoming.ottDate !== undefined) target.ottDate = incoming.ottDate;
+  if (target.platform === undefined && incoming.platform !== undefined) target.platform = incoming.platform;
+  if (target.sourceUrl === undefined && incoming.sourceUrl !== undefined) target.sourceUrl = incoming.sourceUrl;
+
   // Prefer a concrete date over an approximate one.
   const targetApprox = !!target.approximateDate;
   const incomingApprox = !!incoming.approximateDate;
@@ -125,7 +131,26 @@ export function unionFilms(candidates: DiscoveredFilm[]): DiscoveredFilm[] {
       });
     }
   }
-  return [...byKey.values()];
+
+  // Second pass — collapse entries that share a non-undefined tmdbId but landed
+  // under DIFFERENT dedupe keys. This is the cross-release-type case: the same
+  // film dated theatrical-2025 by one pass and ott-2026 by the AI-OTT net keys
+  // differently on year, yet a shared tmdbId means it is ONE film. Same id ⇒
+  // merge. It can NEVER collapse the possibleDistinct case (those carry DIFFERENT
+  // ids by definition, so they never collide here), so Step 1's split holds.
+  const byId = new Map<number, DiscoveredFilm>();
+  const out: DiscoveredFilm[] = [];
+  for (const f of byKey.values()) {
+    if (f.tmdbId === undefined) { out.push(f); continue; }
+    const existing = byId.get(f.tmdbId);
+    if (existing) {
+      mergeInto(existing, f);
+    } else {
+      byId.set(f.tmdbId, f);
+      out.push(f);
+    }
+  }
+  return out;
 }
 
 function sortFilms(films: DiscoveredFilm[]): DiscoveredFilm[] {
@@ -216,7 +241,7 @@ export async function discover(query: DiscoveryQuery): Promise<DiscoveryResult> 
   // Cross-net sanity guard (silent-drop detection).
   crossNetGuard(tmdb.coverage, wiki.coverage);
 
-  const perNet: Record<DiscoverySource, number> = {
+  const perNet: Partial<Record<DiscoverySource, number>> = {
     tmdb: tmdbFilms.length,
     wikipedia: wikiFilms.length,
   };

@@ -5,8 +5,11 @@
 // independent "nets" — TMDb discover + Wikipedia year-lists — and flags
 // what each net missed. No LLM, purely additive to the rest of the app.
 
-/** The independent discovery nets. */
-export type DiscoverySource = "tmdb" | "wikipedia";
+/** The independent discovery nets.
+ *  - "tmdb" / "wikipedia": the algorithmic nets (no LLM).
+ *  - "ai-ott": the AI-search OTT net (Tavily + Claude extract → TMDb resolve) —
+ *    finds press-confirmed OTT releases TMDb's release_type=4 net misses. */
+export type DiscoverySource = "tmdb" | "wikipedia" | "ai-ott";
 
 /**
  * How TMDb surfaced a film in the date range:
@@ -59,6 +62,14 @@ export interface DiscoveredFilm {
    * collision can be surfaced rather than silently swallowed.
    */
   possibleDistinct?: boolean;
+  /** Press-sourced OTT (digital) release date from the AI-search net — the date
+   *  TMDb's release_type=4 net misses (the Blast case). Maps to
+   *  Release.releaseDates.ott during adaptation. */
+  ottDate?: string;
+  /** OTT platform name from the AI-search net (e.g. "Netflix"), when stated. */
+  platform?: string;
+  /** A supporting source URL from the AI-search net (provenance). */
+  sourceUrl?: string;
   /** Which nets surfaced this film. */
   foundIn: DiscoverySource[];
   /** Raw per-net details for provenance. */
@@ -104,7 +115,9 @@ export interface WikiNetResult {
 
 /** Coverage statistics — the "miss detection" lives here. */
 export interface DiscoveryStats {
-  perNet: Record<DiscoverySource, number>;
+  // Partial: a given run only populates the nets it ran (discover() reports tmdb
+  // + wikipedia; the ai-ott net is unioned in later at the getCandidates layer).
+  perNet: Partial<Record<DiscoverySource, number>>;
   unionCount: number;
   onlyInTmdb: number;
   onlyInWikipedia: number;

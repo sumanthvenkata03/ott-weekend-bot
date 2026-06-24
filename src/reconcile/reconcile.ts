@@ -24,12 +24,13 @@
 // AUGMENT-ONLY: every original TMDb candidate survives in `reconciled`; the AI
 // net can only ADD films and annotate tier, never remove a TMDb candidate.
 
-import type { Release, Language } from "../shared/types.js";
+import type { Release } from "../shared/types.js";
 import type { WedDropEdition } from "../shared/wed-drop-edition.js";
 import type { TmdbTitleHit, TmdbTitleSearch } from "../ingestion/releases/tmdb.js";
 import { qualifyingDate, inWindow } from "../shared/post-validator.js";
 import type { BucketWindow, ManifestRow } from "../shared/post-validator.js";
 import { normalizeTitle } from "../discovery/normalize.js";
+import { resolveTitleToTmdb, languageForCode, INDIAN_LANG_CODES } from "../discovery/sources/resolveTitle.js";
 import type {
   ExtractedFilm,
   LandingStatus,
@@ -42,27 +43,9 @@ import type {
 const DAY = 24 * 60 * 60 * 1000;
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
-// The eight Indian languages we cover (TMDb ISO 639-1 codes). The guard rejects
-// any NEW ai-net film whose resolved TMDb original_language is not in this set.
-const INDIAN_LANG_CODES = new Set(["te", "ta", "ml", "hi", "kn", "bn", "mr", "pa"]);
-
-// Language display-name → TMDb ISO 639-1 code, and the reverse. Local copy (no
-// import from the I/O tmdb modules) keeps this file pure.
-const NAME_TO_CODE: Record<string, string> = {
-  telugu: "te", tamil: "ta", malayalam: "ml", kannada: "kn",
-  hindi: "hi", bengali: "bn", marathi: "mr", punjabi: "pa",
-};
-const CODE_TO_LANGUAGE: Record<string, Language> = {
-  te: "Telugu", ta: "Tamil", ml: "Malayalam", kn: "Kannada",
-  hi: "Hindi", mr: "Marathi", bn: "Bengali", pa: "Punjabi",
-};
-
-function codeForLanguage(name: string | undefined): string | undefined {
-  return name ? NAME_TO_CODE[name.trim().toLowerCase()] : undefined;
-}
-function languageForCode(iso: string | undefined): Language {
-  return (iso && CODE_TO_LANGUAGE[iso.toLowerCase()]) || "Other";
-}
+// INDIAN_LANG_CODES + languageForCode (and the ±1yr resolve below) now live in
+// the shared, pure discovery/sources/resolveTitle.ts — ONE implementation used by
+// both this reconcile core and discovery's OTT search. Imported above.
 
 // ── Injected TMDb access (real in run.ts, mocked in tests) ──────────────────
 export interface ReconcileDeps {
@@ -217,40 +200,35 @@ async function resolveAiFilm(
   windowYear: number,
   poolByTmdbId: Map<number, Release>
 ): Promise<AiResolution> {
-  // The LLM's own series flag is authoritative-to-reject (belt) — /search/tv is
-  // the suspenders.
-  if (ai.isSeries) return { ai, kind: "series", ambiguous: false };
+  // The LLM's own series flag is authoritative-to-reject (belt; resolveTitleToTmdb
+  // short-circuits on it) — and /search/tv is the suspenders. Skip the TMDb call
+  // entirely for a flagged series (no wasted search).
+  const search = ai.isSeries
+    ? { movie: [], tv: [] }
+    : await deps.searchTitle(ai.title, {
+        year: windowYear,
+        ...(ai.language ? { language: ai.language } : {}),
+      });
 
-  const langCode = codeForLanguage(ai.language);
-  const search = await deps.searchTitle(ai.title, {
-    year: windowYear,
-    ...(ai.language ? { language: ai.language } : {}),
-  });
-
-  // Movie hits within ±1 year of the window — this is what avoids the 2019
-  // "Blast" trap when the window is 2026.
-  let movieCands = search.movie.filter(
-    (h) => h.year !== undefined && Math.abs(h.year - windowYear) <= 1
+  // SHARED resolve — the ±1yr "2019 Blast trap" guard + language narrowing live
+  // in ONE place (discovery/sources/resolveTitle.ts), used here AND by discovery's
+  // OTT search. No duplicated logic.
+  const res = resolveTitleToTmdb(
+    { title: ai.title, isSeries: ai.isSeries, ...(ai.language ? { language: ai.language } : {}) },
+    search,
+    windowYear
   );
-  if (langCode) {
-    const langMatch = movieCands.filter((h) => h.originalLanguage === langCode);
-    if (langMatch.length > 0) movieCands = langMatch;
+  if (res.kind !== "movie" || !res.hit) {
+    return { ai, kind: res.kind, ambiguous: res.ambiguous };
   }
 
-  if (movieCands.length >= 1) {
-    const hit = movieCands[0]!;
-    const ambiguous = movieCands.length > 1;
-    let cast: string[] | undefined;
-    if (!poolByTmdbId.has(hit.id)) {
-      const credits = await deps.fetchCredits(hit.id);
-      if (credits.leadCast.length > 0) cast = credits.leadCast;
-    }
-    return { ai, kind: "movie", hit, ambiguous, ...(cast ? { cast } : {}) };
+  // Cast for a NEW (non-pool) movie hit only — TMDb, never the LLM.
+  let cast: string[] | undefined;
+  if (!poolByTmdbId.has(res.hit.id)) {
+    const credits = await deps.fetchCredits(res.hit.id);
+    if (credits.leadCast.length > 0) cast = credits.leadCast;
   }
-
-  // No qualifying movie. A TV hit ⇒ series; otherwise unverified.
-  if (search.tv.length > 0) return { ai, kind: "series", ambiguous: false };
-  return { ai, kind: "unverified", ambiguous: false };
+  return { ai, kind: "movie", hit: res.hit, ambiguous: res.ambiguous, ...(cast ? { cast } : {}) };
 }
 
 // ── Builders ────────────────────────────────────────────────────────────────

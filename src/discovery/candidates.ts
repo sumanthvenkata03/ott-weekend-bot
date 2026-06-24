@@ -1,5 +1,5 @@
 // src/discovery/candidates.ts
-// Step 2 — the SHARED pillar-facing candidate surface. Every drop/pillar calls
+// The SHARED pillar-facing candidate surface. Every drop/pillar calls
 // getCandidates(window, languages, intent) instead of doing its own search, and
 // gets back an ENRICHED Release[] in the exact shape today's ingest* produces
 // (so reconcile / gate / AI-review consume it unchanged).
@@ -9,17 +9,18 @@
 // reusable steps. Enrichment is NOT duplicated: it reuses the one shared
 // enrichReleases seam in ingestion/releases/index.ts.
 //
-// SCOPE (Step 2 only): intent routes onto discovery's EXISTING releaseType
-// tagging. We do NOT retire ingestOTTArrivals or unify the two OTT paths — that
-// is Step 3. Wiki-only finds (no tmdbId / no releaseType) are out of scope here:
-// they can't be TMDb-enriched or reconciled, so the intent filter naturally
-// excludes them, keeping the pool TMDb-backed exactly like ingest* today.
+// Step 3 — intent:"ott" ALSO runs discovery's AI-search OTT net (ottSearch.ts),
+// so press-confirmed OTT releases TMDb's release_type=4 net misses (the Blast
+// case) are found, resolved to a real tmdbId, and carry their press OTT date
+// through to Release.releaseDates.ott. intent:"theatrical" does NOT trigger the
+// OTT search — that is what keeps the 4 theatrical-only pillars LLM-free.
 
-import { discover, SUPPORTED_LANGUAGES } from "./index.js";
+import { discover, SUPPORTED_LANGUAGES, unionFilms } from "./index.js";
+import { discoverOttSearch } from "./sources/ottSearch.js";
 import { enrichReleases } from "../ingestion/releases/index.js";
 import { log } from "../shared/logger.js";
 import type { DiscoveredFilm } from "./types.js";
-import type { Language, Release } from "../shared/types.js";
+import type { Language, Platform, Release } from "../shared/types.js";
 
 /** Which release a pillar wants. Single-valued — a both-pillar (Wednesday) calls
  *  twice, once per window, exactly as it does today. */
@@ -47,14 +48,34 @@ function toLanguageEnum(s: string | undefined): Language | undefined {
   return s !== undefined && VALID_LANGUAGES.has(s as Language) ? (s as Language) : undefined;
 }
 
+// Press platform name (free text from the AI net) → our Platform enum. An
+// unknown name is omitted (platform stays []) — never coerced to a wrong value.
+const PLATFORM_NAMES: Record<string, Platform> = {
+  "netflix": "Netflix",
+  "prime video": "Prime Video", "amazon prime video": "Prime Video", "amazon video": "Prime Video",
+  "jiohotstar": "JioHotstar", "jio hotstar": "JioHotstar", "hotstar": "JioHotstar",
+  "disney+ hotstar": "JioHotstar", "disney plus hotstar": "JioHotstar",
+  "aha": "Aha",
+  "sonyliv": "SonyLIV", "sony liv": "SonyLIV",
+  "zee5": "ZEE5",
+  "sun nxt": "Sun NXT",
+};
+function toPlatform(s: string | undefined): Platform | undefined {
+  return s ? PLATFORM_NAMES[s.trim().toLowerCase()] : undefined;
+}
+
 /**
  * Adapt a discovery find into a Release STUB — identity + date + provenance the
  * enrichment chain needs, with no fabricated content fields (those get filled by
  * enrichReleases). The language string is mapped to the Language enum; an
  * UNRECOGNIZED language returns `undefined` so getCandidates DROPS the film
  * (decision: drop + warn — never coerce a stray TMDb tag to a wrong language,
- * never crash). The empty content fields (genre/synopsis/posterUrl/popularity)
- * are exactly what the Step 2 /movie/{id} backfill fills during enrich.
+ * never crash).
+ *
+ * Step 3 carry-through: an AI-OTT find's press ottDate → releaseDates.ott (where
+ * post-validator's qualifyingDate(dateField:"ott") reads it) and its platform →
+ * platform[]. The releaseDates merge in enrichWithCreditsAndLanguages keeps that
+ * ott date alive when TMDb only returns a theatrical date.
  */
 export function toReleaseStub(f: DiscoveredFilm): Release | undefined {
   const language = toLanguageEnum(f.language);
@@ -62,30 +83,34 @@ export function toReleaseStub(f: DiscoveredFilm): Release | undefined {
     log.warn(`getCandidates: dropping "${f.title}" — unrecognized language "${f.language ?? ""}"`);
     return undefined;
   }
+  const platform = toPlatform(f.platform);
   return {
     id: f.tmdbId !== undefined ? `tmdb-${f.tmdbId}` : `disc-${f.normalizedTitle}`,
     ...(f.tmdbId !== undefined ? { tmdbId: f.tmdbId } : {}),
     title: f.title,
     language,
     isSeries: false,
-    platform: [],
+    platform: platform ? [platform] : [],
     releaseDate: f.releaseDate ?? "",
+    // Press OTT date lands here so the landing verifier (dateField:"ott") sees it.
+    ...(f.ottDate ? { releaseDates: { ott: f.ottDate } } : {}),
     genre: [],
     cast: [],
     synopsis: "",
     subtitleLanguages: [],
     // tmdbPopularity deliberately omitted — its absence is the signal enrich
     // uses to know this is a lean stub that needs the /movie/{id} backfill.
-    sources: ["tmdb"],
+    // Provenance reflects which net(s) found it (e.g. "tmdb", "ai-ott", or both).
+    sources: [...f.foundIn],
     fetchedAt: new Date().toISOString(),
   };
 }
 
 /**
  * Does a discovery find match the requested intent? Routes onto discovery's
- * existing releaseType tagging (set by the TMDb net's theatrical + digital
- * passes). Wiki-only finds carry no releaseType and are excluded from BOTH
- * intents (Step 2 keeps the pool TMDb-backed; see file header).
+ * releaseType tagging. Wiki-only finds carry no releaseType and are excluded
+ * from both intents (the pool stays TMDb/AI-backed). AI-OTT finds are tagged
+ * releaseType:"digital", so they match the "ott" intent.
  */
 function matchesIntent(f: DiscoveredFilm, intent: DropIntent): boolean {
   const rt = f.releaseType;
@@ -97,18 +122,26 @@ function matchesIntent(f: DiscoveredFilm, intent: DropIntent): boolean {
 
 /**
  * The shared candidate surface. Discover films in [from,to] for the languages,
- * keep those matching the intent (theatrical vs OTT), adapt each to a Release
- * stub, and run the shared enrichment seam. Returns enriched Release[] in the
- * same shape ingest* produces — every emitted film carries a tmdbId, so the
- * §6 must-match fields (tmdbId, tmdbPopularity, releaseDate, releaseDates,
- * platform[], language enum, title, sources[], imdbId) all populate.
+ * keep those matching the intent; for OTT, ALSO run the AI-search net and union
+ * its finds (deduped by tmdbId). Adapt each to a Release stub and run the shared
+ * enrichment seam. Returns enriched Release[] in the same shape ingest* produces.
  */
 export async function getCandidates(q: CandidateQuery): Promise<Release[]> {
   const languages = q.languages && q.languages.length > 0 ? q.languages : SUPPORTED_LANGUAGES;
   const result = await discover({ from: q.from, to: q.to, languages });
 
-  const stubs = result.films
-    .filter((f) => matchesIntent(f, q.intent))
+  let films = result.films.filter((f) => matchesIntent(f, q.intent));
+
+  // OTT intent ALSO runs the AI-search OTT net (Blast-recall). Theatrical intent
+  // does NOT — that intent-gate keeps the 4 theatrical-only pillars at 0 LLM
+  // calls. unionFilms dedups by tmdbId so a film found by BOTH the TMDb digital
+  // pass and the AI net collapses to one (no double-count).
+  if (q.intent === "ott") {
+    const ottFinds = await discoverOttSearch(languages, q.from, q.to);
+    if (ottFinds.length > 0) films = unionFilms([...films, ...ottFinds]);
+  }
+
+  const stubs = films
     .map(toReleaseStub)
     .filter((r): r is Release => r !== undefined);
 
