@@ -16,15 +16,19 @@ vi.mock("../index.js", () => ({
 vi.mock("../../ingestion/releases/index.js", () => ({
   enrichReleases: vi.fn(async (stubs: unknown) => stubs),
 }));
-// Mock the OTT-search net so it never really fires (no Tavily/Claude/SQLite); we
-// assert WHETHER it's called to prove theatrical isolation.
+// Mock BOTH OTT nets so they never really fire (no Tavily/Claude/HTTP/SQLite); we
+// assert WHETHER they're called to prove theatrical isolation.
 vi.mock("../sources/ottSearch.js", () => ({
   discoverOttSearch: vi.fn(async () => []),
+}));
+vi.mock("../sources/ottCalendar.js", () => ({
+  discoverOttCalendar: vi.fn(async () => []),
 }));
 
 import { discover } from "../index.js";
 import { enrichReleases } from "../../ingestion/releases/index.js";
 import { discoverOttSearch } from "../sources/ottSearch.js";
+import { discoverOttCalendar } from "../sources/ottCalendar.js";
 import { getCandidates, toReleaseStub } from "../candidates.js";
 import { log } from "../../shared/logger.js";
 import type { DiscoveredFilm, DiscoveryResult, ReleaseType } from "../types.js";
@@ -33,6 +37,7 @@ import type { Release } from "../../shared/types.js";
 const mockDiscover = vi.mocked(discover);
 const mockEnrich = vi.mocked(enrichReleases);
 const mockOttSearch = vi.mocked(discoverOttSearch);
+const mockOttCalendar = vi.mocked(discoverOttCalendar);
 
 interface FilmSpec {
   title: string;
@@ -77,6 +82,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockEnrich.mockImplementation(async (stubs) => stubs);
   mockOttSearch.mockResolvedValue([]);
+  mockOttCalendar.mockResolvedValue([]);
 });
 
 describe("toReleaseStub — DiscoveredFilm → Release adapter", () => {
@@ -148,20 +154,23 @@ describe("getCandidates — intent routing onto discovery releaseType", () => {
   });
 });
 
-describe("getCandidates — OTT-search intent gating (theatrical isolation)", () => {
-  it("🔒 intent 'theatrical' does NOT trigger the AI OTT search (0 LLM — keeps the 4 theatrical pillars free)", async () => {
+describe("getCandidates — OTT-net intent gating (theatrical isolation)", () => {
+  it("🔒 intent 'theatrical' does NOT trigger EITHER OTT net (0 LLM — keeps the 4 theatrical pillars free)", async () => {
     mockDiscover.mockResolvedValue(discoveryResult([
       film({ title: "T", language: "Telugu", tmdbId: 1, releaseType: "theatrical" }),
     ]));
     await getCandidates({ from: "2026-01-01", to: "2026-01-31", intent: "theatrical" });
     expect(mockOttSearch).not.toHaveBeenCalled();
+    expect(mockOttCalendar).not.toHaveBeenCalled();
   });
 
-  it("intent 'ott' DOES trigger the AI OTT search (Blast-recall path), once, with the same window/languages", async () => {
+  it("intent 'ott' DOES trigger BOTH OTT nets (Blast-recall path), once each, with the same window/languages", async () => {
     mockDiscover.mockResolvedValue(discoveryResult([]));
     await getCandidates({ from: "2026-06-22", to: "2026-06-28", intent: "ott", languages: ["Tamil"] });
     expect(mockOttSearch).toHaveBeenCalledTimes(1);
     expect(mockOttSearch).toHaveBeenCalledWith(["Tamil"], "2026-06-22", "2026-06-28");
+    expect(mockOttCalendar).toHaveBeenCalledTimes(1);
+    expect(mockOttCalendar).toHaveBeenCalledWith(["Tamil"], "2026-06-22", "2026-06-28");
   });
 });
 

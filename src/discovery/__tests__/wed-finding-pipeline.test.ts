@@ -36,6 +36,9 @@ vi.mock("../sources/ottSearch.js", () => ({
   runAiNet: vi.fn(async () => ({ films: [], rejected: [], dateConflict: [] })),
   buildQueries: vi.fn(() => []),
 }));
+// The OTT-calendar net is additive — mock it to [] so this Step-5a assertion stays
+// scoped to the ottSearch→Blast path (and so its real fetch never fires here).
+vi.mock("../sources/ottCalendar.js", () => ({ discoverOttCalendar: vi.fn(async () => []) }));
 
 // enrich leaves — config + cache mocked so importing the ratings module never
 // opens SQLite or hits config's process.exit.

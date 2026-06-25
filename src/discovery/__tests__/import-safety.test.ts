@@ -56,7 +56,12 @@ describe("src/discovery import-safety", () => {
 
     expect(typeof mod.discover).toBe("function");
     expect(exitSpy).not.toHaveBeenCalled();
-  });
+    // 30s timeout (not the 5s default): this case is a COLD dynamic import, and
+    // under the suite's full parallel run the aggregate transform/import cost can
+    // push a cold import past 5s. The assertion is about import SAFETY (no
+    // process.exit / throw), never latency — the generous bound keeps it from
+    // flaking on load without changing what it proves.
+  }, 30000);
 
   it("🔒 TMDB_API_KEY is enforced at CALL time, not import time — a TMDb fetch throws the clear error", async () => {
     // The module imported cleanly above with the key unset. Now exercise the
@@ -65,5 +70,5 @@ describe("src/discovery import-safety", () => {
     // mock, so the loader runs and surfaces the throw.)
     const { tmdbFetchCached } = await import("../../ingestion/releases/tmdb.js");
     await expect(tmdbFetchCached("/discover/movie", {}, 60)).rejects.toThrow("TMDB_API_KEY is not set");
-  });
+  }, 30000); // same cold-import latitude under parallel load (see the case above)
 });

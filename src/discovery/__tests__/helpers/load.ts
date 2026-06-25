@@ -27,6 +27,13 @@ export function readSyntheticHtml(file: string): string {
   return readFileSync(join(FIX, "wikipedia", "synthetic", file), "utf8");
 }
 
+// --- OTT calendar ---
+/** Raw HTML body of a captured Filmibeat roundup page (drives the calendar
+ *  fetch+flatten+extract chain; the real page body, frozen offline). */
+export function loadOttCalendarHtml(file: string): string {
+  return readFileSync(join(FIX, "ottcalendar", file), "utf8");
+}
+
 // --- TMDb ---
 export interface TmdbMovie {
   id: number;

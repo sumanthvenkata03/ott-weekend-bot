@@ -38,6 +38,9 @@ const BLAST = {
 vi.mock("../sources/ottSearch.js", () => ({
   discoverOttSearch: vi.fn(async () => [BLAST]),
 }));
+// The OTT-calendar net is additive — mock it to [] so this test stays scoped to
+// the ottSearch→Blast path (and its real fetch never fires here).
+vi.mock("../sources/ottCalendar.js", () => ({ discoverOttCalendar: vi.fn(async () => []) }));
 
 // enrichReleases leaves — config + cache mocked so importing the ratings module
 // never opens SQLite or hits config's process.exit.

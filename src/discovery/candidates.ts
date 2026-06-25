@@ -17,6 +17,7 @@
 
 import { discover, SUPPORTED_LANGUAGES, unionFilms } from "./index.js";
 import { discoverOttSearch } from "./sources/ottSearch.js";
+import { discoverOttCalendar } from "./sources/ottCalendar.js";
 import { enrichReleases } from "../ingestion/releases/index.js";
 import { log } from "../shared/logger.js";
 import type { DiscoveredFilm } from "./types.js";
@@ -132,13 +133,23 @@ export async function getCandidates(q: CandidateQuery): Promise<Release[]> {
 
   let films = result.films.filter((f) => matchesIntent(f, q.intent));
 
-  // OTT intent ALSO runs the AI-search OTT net (Blast-recall). Theatrical intent
-  // does NOT — that intent-gate keeps the 4 theatrical-only pillars at 0 LLM
-  // calls. unionFilms dedups by tmdbId so a film found by BOTH the TMDb digital
-  // pass and the AI net collapses to one (no double-count).
+  // OTT intent ALSO runs the two OTT recall nets (Blast-recall). Theatrical
+  // intent does NOT — that intent-gate keeps the 4 theatrical-only pillars at 0
+  // LLM calls. Both nets are DECOUPLED (own fetch + own extraction): the
+  // AI-search net (Tavily snippets) and the OTT-calendar net (full roundup-page
+  // body). unionFilms dedups by tmdbId, so a film found by any combination of
+  // the TMDb digital pass, the AI net, and the calendar net collapses to ONE on
+  // its shared id (no double-count); the possibleDistinct guard still fires only
+  // on DIFFERENT ids, so genuine same-title namesakes stay split. A net that
+  // returns [] (degraded/fail-safe) leaves the union byte-for-byte unchanged.
   if (q.intent === "ott") {
-    const ottFinds = await discoverOttSearch(languages, q.from, q.to);
-    if (ottFinds.length > 0) films = unionFilms([...films, ...ottFinds]);
+    const [ottFinds, calendarFinds] = await Promise.all([
+      discoverOttSearch(languages, q.from, q.to),
+      discoverOttCalendar(languages, q.from, q.to),
+    ]);
+    if (ottFinds.length > 0 || calendarFinds.length > 0) {
+      films = unionFilms([...films, ...ottFinds, ...calendarFinds]);
+    }
   }
 
   const stubs = films

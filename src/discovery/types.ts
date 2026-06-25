@@ -8,8 +8,11 @@
 /** The independent discovery nets.
  *  - "tmdb" / "wikipedia": the algorithmic nets (no LLM).
  *  - "ai-ott": the AI-search OTT net (Tavily + Claude extract → TMDb resolve) —
- *    finds press-confirmed OTT releases TMDb's release_type=4 net misses. */
-export type DiscoverySource = "tmdb" | "wikipedia" | "ai-ott";
+ *    finds press-confirmed OTT releases TMDb's release_type=4 net misses.
+ *  - "ott-calendar": the OTT-calendar net (full roundup-page body → Claude
+ *    extract → TMDb resolve) — surfaces films whose row sits in the page BODY,
+ *    past Tavily's truncated snippet (the Blast case). */
+export type DiscoverySource = "tmdb" | "wikipedia" | "ai-ott" | "ott-calendar";
 
 /**
  * How TMDb surfaced a film in the date range:
