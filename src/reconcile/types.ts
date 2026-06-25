@@ -135,11 +135,27 @@ export interface ReconciledFilm {
   year?: number;
 
   /**
-   * AI-review annotation (advisory; OUTSIDE the gate hash). Attached after
-   * tiering, on the review run only, for 🟢/🟡 films. Never consulted by
+   * AI-review annotation (advisory). Attached before the gate (Step 1), for
+   * 🟢/🟡 films. The verdict TEXT stays OUTSIDE the gate hash and is NOT read by
    * assignTier / decideGate / renderableFor — it only renders into the review.
+   * The SEPARATE `aiDemoted` field below is its one actionable consequence.
    */
   aiReview?: AiReviewVerdict;
+
+  /**
+   * AUTO-DEMOTION (Step 1). Set ONLY when aiReview is a SOURCED `reject` (a
+   * confident negative; the discipline guard guarantees the source). Unlike the
+   * advisory verdict, this IS folded into the gate hash (filmFingerprint) and IS
+   * read by renderableFor: a demoted film is REMOVED from the renderable pool.
+   * TIGHTENS ONLY — it can never promote a film into render. `originalTier` is
+   * preserved so the review shows what was pulled (e.g. "🟡→🛑") and why.
+   */
+  aiDemoted?: {
+    originalTier: Tier;
+    verdict: AiVerdict;
+    reason: string;
+    sourceUrl: string;
+  };
 
   // The renderer-bound record (absent for unverified / series).
   release?: Release;

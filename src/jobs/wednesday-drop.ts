@@ -243,9 +243,20 @@ async function main() {
   ];
   for (const r of results) log.info(reconcileSummary(r));
 
-  // 4. GATE — block render behind human approval. The first run writes the
-  //    "Wed Drop — REVIEW" artifact and STOPS; a re-run with `--approve <hash>`
-  //    renders only if the reviewed list still hashes the same. 🔴 never renders.
+  // 4. AI-REVIEW (advisory verdict + actionable auto-demote) — runs BEFORE the
+  //    gate now, on BOTH the review run AND the --approve re-run, so a SOURCED 🛑
+  //    reject auto-removes its film from the renderable pool and the gate hash
+  //    reflects the removal (the approved review == what renders). It changes no
+  //    tier and only ever TIGHTENS. The batched web-search call is CACHED per
+  //    edition (≤2/drop): the review run misses, the approve re-run hits (no LLM
+  //    call) → identical verdicts → identical demotion → identical hash. Fails
+  //    soft to "unavailable", which demotes nothing.
+  await annotateWithAiReview(results);
+
+  // 5. GATE — block render behind human approval, hashing over the (possibly
+  //    demoted) set. The first run writes the "Wed Drop — REVIEW" artifact and
+  //    STOPS; a re-run with `--approve <hash>` renders only if the reviewed list
+  //    still hashes the same. 🔴 and AI-removed films never render.
   const decision = decideGate(results, {
     ...(approveHash ? { approveHash } : {}),
     autoPassGreen: config.RECONCILE_AUTOPASS_GREEN,
@@ -253,18 +264,11 @@ async function main() {
   log.info(`\n🚦 Gate: ${decision.mode} — ${decision.reason}`);
 
   if (!decision.proceed) {
-    // AI-REVIEW (advisory) — fact-check each 🟢/🟡 film via web search and
-    // annotate the review list. Runs AFTER decideGate, so the verdict is OUTSIDE
-    // the hash; and only on this blocked/review run (the --approve re-run has
-    // proceed=true and skips it → 0 review calls). It changes NO tier, excludes
-    // NO film, approves NOTHING — it only attaches f.aiReview for the renderer.
-    const annotated = await annotateWithAiReview(results);
-
     // writeReview delivers Notion + Slack independently and fails soft; it
-    // returns the Notion URL ("" if that write failed). Key the stop message to
-    // delivery so the operator never sees "approve" guidance for a review that
-    // doesn't exist.
-    const reviewUrl = await writeReview(annotated, decision.hash, WED_DROP_LABELS);
+    // returns the Notion URL ("" if that write failed). The review now SHOWS the
+    // auto-removed films in their own section. Key the stop message to delivery so
+    // the operator never sees "approve" guidance for a review that doesn't exist.
+    const reviewUrl = await writeReview(results, decision.hash, WED_DROP_LABELS);
     if (reviewUrl) {
       log.warn(
         `\n⛔ Wed Drop GATED (hash ${decision.hash}). NOTHING rendered or published.\n` +
@@ -280,7 +284,7 @@ async function main() {
     return;
   }
 
-  // 5. Approved (or auto-passed) — render only the approved (renderable) pools.
+  // 6. Approved (or auto-passed) — render only the approved (renderable) pools.
   log.success(`✅ Gate cleared (${decision.mode}, hash ${decision.hash}) — rendering approved editions.`);
   const thePool = decision.renderable.theatrical ?? [];
   const ottPool = decision.renderable.ott ?? [];

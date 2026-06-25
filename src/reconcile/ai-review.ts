@@ -5,18 +5,27 @@
 // it the right film?) and ANNOTATES each 🟢/🟡 film with a verdict + source so
 // the human's final review is a glance at a pre-flagged page.
 //
-// AUTHORITY BOUNDARY (load-bearing): this changes NO tier, excludes NO film, and
-// approves NOTHING. It only attaches `aiReview` to ReconciledFilm. The verdict is
-// OUTSIDE the gate hash (it runs after decideGate). assignTier / decideGate /
-// renderableFor never read it. The --approve flow is untouched.
+// AUTHORITY BOUNDARY (Step 1): this changes NO tier and approves NOTHING. It
+// attaches the advisory `aiReview` verdict, AND — for a SOURCED `reject` only —
+// sets the actionable `aiDemoted` field, which removes the film from the
+// renderable pool (the gate reads aiDemoted, not the verdict text). It only ever
+// TIGHTENS: ✅ confirm / ⚠️ doubt / ❓ unverified / ⚠️ unavailable never demote,
+// and nothing is ever promoted into render. The verdict TEXT stays outside the
+// hash; `aiDemoted` is folded in (filmFingerprint), so the approved review and
+// what renders stay identical.
 //
-// Budget: ONE batched callClaudeJSON-with-web-search per edition (≤2/drop). Runs
-// on the review run only (the approve re-run skips this whole branch). FAIL SOFT
-// toward MORE caution: any call error annotates every reviewed film "unavailable"
-// ("verify manually"), never a silent blank and never a reassuring pass.
+// Budget + determinism: ONE batched callClaudeJSON-with-web-search per edition
+// (≤2/drop), CACHED by (version + window + reviewed-film projection). It now runs
+// BEFORE the gate, on BOTH the review run AND the --approve re-run — but the
+// re-run is a cache HIT (no LLM call), so verdicts / demotion / hash reproduce
+// exactly and the ≤2-call budget holds. FAIL SOFT toward MORE caution: any call
+// error annotates every reviewed film "unavailable" ("verify manually") and
+// demotes NOTHING (an infra failure is not a verdict).
 
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { callClaudeJSON } from "../content/claude.js";
+import { cached } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
 import type { AiReviewVerdict, ReconciledFilm, ReconcileResult } from "./types.js";
 
@@ -83,6 +92,33 @@ OUTPUT — STRICT JSON ONLY (no prose, no markdown). Exactly ONE entry per film 
 { "reviews": [ { "tmdbId": <number>, "verdict": "confirm|doubt|reject|unverified", "reason": "...", "sourceUrl": "https://..." } ] }`;
 }
 
+/**
+ * Cache version for the RAW AI-review output ({reviews}). BUMP only when the
+ * review PROMPT (buildReviewPrompt) or the AiReviewSchema SHAPE changes — a
+ * cached blob would otherwise no longer mean what a fresh call produces. The
+ * discipline-guard + auto-demote mapping run FRESH outside the cache, so changing
+ * those needs NO bump. (Mirrors RESEARCH_CACHE_VERSION.)
+ */
+export const AI_REVIEW_CACHE_VERSION = "v1";
+
+/** Verdicts are stable within a drop cycle; a same-day --approve must hit. */
+const AI_REVIEW_CACHE_TTL_HOURS = 24;
+
+/**
+ * Stable cache key over the EXACT reviewer input (the projected 🟢/🟡 films) +
+ * window + version. Identical input ⇒ identical cached verdicts ⇒ identical
+ * demotion ⇒ identical gate hash (the --approve determinism spine). ANY data
+ * change to a reviewable film changes the projection ⇒ new key ⇒ a fresh call
+ * (and the gate hash changes too, correctly forcing a re-review).
+ */
+function reviewCacheKey(r: ReconcileResult, films: ReconciledFilm[]): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify(films.map(projectForReview)))
+    .digest("hex")
+    .slice(0, 16);
+  return `ai-review:${AI_REVIEW_CACHE_VERSION}:${r.pillar}:${r.window.start}-${r.window.end}:${digest}`;
+}
+
 /** Fail-soft annotation: every reviewed film gets "unavailable" → pushes the operator to look closer. */
 function markUnavailable(films: ReconciledFilm[]): void {
   for (const f of films) {
@@ -102,7 +138,16 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
   const windowLabel = `${r.window.start} → ${r.window.end}`;
   try {
     const prompt = buildReviewPrompt(r.pillar, windowLabel, films);
-    const out = await callClaudeJSON(prompt, AiReviewSchema, "opus", { webSearch: true });
+    // CACHE the raw model output, keyed by the exact reviewer input. The review
+    // run misses (one live web-search call); the --approve re-run hits (no call)
+    // → identical verdicts → identical demotion → identical gate hash. The mapping
+    // + demotion below run FRESH outside the cache (mirrors verdict-research).
+    let miss = false;
+    const out = await cached(
+      reviewCacheKey(r, films),
+      async () => { miss = true; return callClaudeJSON(prompt, AiReviewSchema, "opus", { webSearch: true }); },
+      { ttlSeconds: AI_REVIEW_CACHE_TTL_HOURS * 3600 }
+    );
 
     const byId = new Map<number, AiReviewVerdict>();
     for (const v of out.reviews) {
@@ -118,11 +163,25 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
       const v = f.tmdbId !== undefined ? byId.get(f.tmdbId) : undefined;
       if (v) {
         // Discipline guard: a doubt/reject with no source reads as a bare claim —
-        // downgrade to "unverified" so it never looks authoritative without a cite.
+        // downgrade to "unverified" so it never looks authoritative without a cite
+        // (this is ALSO what guarantees every actionable 🛑 carries a source).
+        let review: AiReviewVerdict;
         if ((v.verdict === "doubt" || v.verdict === "reject") && !v.sourceUrl) {
-          f.aiReview = { verdict: "unverified", reason: `${v.reason} (no source cited)` };
+          review = { verdict: "unverified", reason: `${v.reason} (no source cited)` };
         } else {
-          f.aiReview = v;
+          review = v;
+        }
+        f.aiReview = review;
+        // AUTO-DEMOTE (Step 1) — a SOURCED reject ONLY. Keyed on the VERDICT, not
+        // the tier (a 🟡 film with a ✅ verdict is untouched). TIGHTENS ONLY: it
+        // removes the film from renderable and moves the hash; it never promotes.
+        if (review.verdict === "reject" && review.sourceUrl) {
+          f.aiDemoted = {
+            originalTier: f.tier,
+            verdict: "reject",
+            reason: review.reason,
+            sourceUrl: review.sourceUrl,
+          };
         }
         assessed++;
       } else {
@@ -130,7 +189,7 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
         f.aiReview = { verdict: "unverified", reason: "not returned by AI-review" };
       }
     }
-    log.info(`AI-review [${r.pillar}]: ${assessed}/${films.length} films assessed via web search`);
+    log.info(`AI-review [${r.pillar}]: ${assessed}/${films.length} films assessed via web search${miss ? "" : " (cache hit)"}`);
   } catch (err) {
     log.warn(`AI-review [${r.pillar}] failed — marking films unavailable`, err instanceof Error ? err.message : err);
     markUnavailable(films);
@@ -146,7 +205,7 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
 export async function annotateWithAiReview(results: ReconcileResult[]): Promise<ReconcileResult[]> {
   const total = results.reduce((n, r) => n + reviewableFilms(r).length, 0);
   if (total === 0) return results;
-  log.info(`\n🔬 AI-review — fact-checking ${total} 🟢/🟡 film(s) via web search (advisory; changes no tier)...`);
+  log.info(`\n🔬 AI-review — fact-checking ${total} 🟢/🟡 film(s) via web search (sourced 🛑 → auto-removed; changes no tier)...`);
   await Promise.all(results.map((r) => reviewEdition(r)));
   return results;
 }

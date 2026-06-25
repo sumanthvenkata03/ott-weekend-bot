@@ -19,8 +19,12 @@
 //     Both writers FAIL SOFT and INDEPENDENTLY; writeReview ALWAYS surfaces the
 //     approve hash + a safety line.
 //
-//   The AI-review verdict (f.aiReview) is ADVISORY: it renders next to the tier
-//   but feeds NOTHING here — not the hash, not the decision, not renderableFor.
+//   AI-review (Step 1): the advisory verdict TEXT (f.aiReview) still feeds nothing
+//   here. But its ONE actionable consequence — f.aiDemoted, set only on a SOURCED
+//   🛑 reject — IS read here: filmFingerprint folds it into the hash and
+//   renderableFor removes the film (TIGHTENS ONLY; never promotes). A demotion
+//   also forces the manual gate (autoPassGreen can't fire). So the review the
+//   human approves and the set that renders stay identical.
 
 import { createHash } from "node:crypto";
 import { Client } from "@notionhq/client";
@@ -87,12 +91,15 @@ export interface GateDecision {
 
 /**
  * Canonical, timestamp-free fingerprint of one film for the gate hash. The
- * advisory AI-review verdict is DELIBERATELY excluded — it's non-deterministic
- * (web search) and must not churn the hash. A future auto-demote would act
- * through `tier` (already hashed), so safety never needs the verdict text.
+ * advisory AI-review verdict TEXT is excluded — it's non-deterministic (web
+ * search) and must not churn the hash. But AUTO-DEMOTE (f.aiDemoted, a SOURCED
+ * 🛑) IS folded in — APPENDED only when present, so a drop with NO demotion
+ * hashes byte-identically to before (the pinned regression anchor stays
+ * value-stable), while a demotion moves the hash so --approve binds to the
+ * actually-rendered (demoted) set.
  */
 function filmFingerprint(f: ReconciledFilm): string {
-  return [
+  const base = [
     f.pillar,
     f.tmdbId ?? `t:${f.title.trim().toLowerCase()}`,
     f.tier,
@@ -101,6 +108,7 @@ function filmFingerprint(f: ReconciledFilm): string {
     [...f.foundIn].sort().join("+"),
     f.status,
   ].join("|");
+  return f.aiDemoted ? `${base}|demoted:${f.aiDemoted.verdict}` : base;
 }
 
 /**
@@ -121,6 +129,7 @@ function renderableFor(result: ReconcileResult, greenOnly: boolean): Release[] {
   const out: Release[] = [];
   const seen = new Set<string>();
   for (const f of result.reconciled) {
+    if (f.aiDemoted) continue;                         // AI-review auto-removed (sourced 🛑) — TIGHTENS ONLY
     if (!f.release) continue;                          // unverified / series — never render
     if (greenOnly ? f.tier !== "green" : f.tier === "red") continue;
     if (seen.has(f.release.id)) continue;
@@ -136,7 +145,12 @@ function renderableFor(result: ReconcileResult, greenOnly: boolean): Release[] {
  */
 export function decideGate(results: ReconcileResult[], opts: GateOptions): GateDecision {
   const hash = computeDropHash(results);
-  const allGreen = results.every((r) => r.counts.total > 0 && r.counts.yellow === 0 && r.counts.red === 0);
+  // A sourced 🛑 auto-demotion forces the MANUAL gate: even an otherwise all-🟢
+  // drop must not auto-publish when AI-review pulled a film — the operator sees
+  // the removal and confirms. So autoPassGreen can't fire while anyDemoted. (The
+  // tier-based counts don't reflect aiDemoted, hence this explicit guard.)
+  const anyDemoted = results.some((r) => r.reconciled.some((f) => f.aiDemoted));
+  const allGreen = !anyDemoted && results.every((r) => r.counts.total > 0 && r.counts.yellow === 0 && r.counts.red === 0);
 
   if (opts.autoPassGreen && allGreen) {
     const renderable: Partial<Record<string, Release[]>> = {};
@@ -211,6 +225,16 @@ function aiReviewRuns(f: ReconciledFilm): unknown[] {
   return runs;
 }
 
+/** One auto-removed film → a line showing what it WAS (original tier) → 🛑, the reason, and [source]. */
+function demotedBlocks(f: ReconciledFilm): unknown[] {
+  const d = f.aiDemoted!;
+  const runs: unknown[] = [
+    textRun(`${TIER_EMOJI[d.originalTier]}→🛑 ${f.title} (${f.language}) — auto-removed: ${d.reason} `),
+    linkRun("[source]", d.sourceUrl),
+  ];
+  return [{ object: "block" as const, type: "paragraph" as const, paragraph: { rich_text: runs } }];
+}
+
 /** One reconciled film → its line (tier + reconcile source + AI verdict) + (if confirmed) a TMDb line + poster. */
 function filmBlocks(f: ReconciledFilm): unknown[] {
   const runs: unknown[] = [textRun(filmLine(f))];
@@ -244,10 +268,19 @@ function buildReviewBlocks(results: ReconcileResult[], hash: string, labels: Gat
   for (const r of results) {
     const meta = labels.labelFor(r.pillar);
     children.push(heading(`${meta.notionTitle} — ${r.counts.green}🟢 / ${r.counts.yellow}🟡 / ${r.counts.red}🔴 (added by AI net: ${r.counts.addedByAiNet})`));
-    // Order: red, yellow, green — surface the problems first.
+    // AUTO-REMOVED (Step 1) — films the advisory AI-review pulled (a sourced 🛑).
+    // Surfaced FIRST and separately so the operator sees exactly what's NOT in the
+    // drop and why; they're skipped in the tier loop below (no double-listing).
+    const demoted = r.reconciled.filter((x) => x.aiDemoted);
+    if (demoted.length > 0) {
+      children.push(heading(`🛑 Auto-removed by AI-review (${demoted.length}) — NOT in the drop`));
+      for (const f of demoted) for (const b of demotedBlocks(f)) children.push(b);
+    }
+    // Order: red, yellow, green — surface the problems first. Demoted films appear
+    // in their own section above, so skip them here.
     const order: Tier[] = ["red", "yellow", "green"];
     for (const tier of order) {
-      for (const f of r.reconciled.filter((x) => x.tier === tier)) {
+      for (const f of r.reconciled.filter((x) => x.tier === tier && !x.aiDemoted)) {
         for (const b of filmBlocks(f)) children.push(b);
       }
     }
@@ -344,22 +377,31 @@ function aiTally(r: ReconcileResult): string {
   if (reviewed.length === 0) return "";
   const c: Record<AiVerdict, number> = { confirm: 0, doubt: 0, reject: 0, unverified: 0, unavailable: 0 };
   for (const f of reviewed) c[f.aiReview!.verdict] += 1;
+  const removed = reviewed.filter((f) => f.aiDemoted).length;
   const parts: string[] = [];
   if (c.reject) parts.push(`${c.reject}🛑`);
   if (c.doubt) parts.push(`${c.doubt}⚠️`);
   if (c.unverified) parts.push(`${c.unverified}❓`);
   if (c.unavailable) parts.push(`${c.unavailable}⚠️unavail`);
   if (c.confirm) parts.push(`${c.confirm}✅`);
+  if (removed) parts.push(`✂️${removed} auto-removed`);
   return parts.length ? ` · AI: ${parts.join(" ")}` : "";
 }
 
-/** Films the AI flagged for a closer look (everything but a clean ✅). */
+/** Films the AI flagged for a closer look (everything but a clean ✅). Excludes
+ *  auto-removed films — those are DECIDED (shown in their own section), not pending
+ *  "verify these", so a demoted film is never double-listed in the Slack ping. */
 function aiFlaggedNames(results: ReconcileResult[]): string[] {
   return results.flatMap((r) =>
     r.reconciled
-      .filter((f) => f.aiReview && f.aiReview.verdict !== "confirm")
+      .filter((f) => f.aiReview && f.aiReview.verdict !== "confirm" && !f.aiDemoted)
       .map((f) => `${AI_GLYPH[f.aiReview!.verdict]} ${f.title}`)
   );
+}
+
+/** Films auto-removed from the drop by AI-review (a sourced 🛑). */
+function aiRemovedNames(results: ReconcileResult[]): string[] {
+  return results.flatMap((r) => r.reconciled.filter((f) => f.aiDemoted).map((f) => f.title));
 }
 
 function truncList(names: string[], max = 8): string {
@@ -396,12 +438,14 @@ async function postReviewToSlack(
     return `*${m.slackLabel}:* ${r.counts.green}🟢 / ${r.counts.yellow}🟡 / ${r.counts.red}🔴 · +${r.counts.addedByAiNet} AI · ${r.rejected.length} rejected${aiTally(r)}`;
   });
   const flagged = aiFlaggedNames(results);
+  const removed = aiRemovedNames(results);
 
   const blocks: unknown[] = [
     { type: "header", text: { type: "plain_text", text: `🕵️ ${labels.reviewTitle}`, emoji: true } },
     section(`*Reconciliation review · ${windowLabel}*\nRender is GATED — nothing published until approved.`),
     section(editionLines.join("\n")),
     section(`*AI net added:* ${truncList(aiAddedNames(results))}`),
+    ...(removed.length ? [section(`*🛑 Auto-removed by AI-review (NOT in drop):* ${truncList(removed)}`)] : []),
     ...(flagged.length ? [section(`*AI-review — verify these:* ${truncList(flagged)}`)] : []),
     section(`*Approve:*\n\`\`\`${labels.approveCommand} ${hash}\`\`\``),
   ];
