@@ -109,7 +109,14 @@
     justify-content: center;
     color: var(--cream);
     text-align: center;
-    padding: 30px;
+    /* Reserve the lower band for the TBSI seal (a canvas-level stamp anchored to
+       the poster's lower-left, .tbsi-stamp-wrap). Centering the fallback copy over
+       the FULL poster height let a long, 2-line title (e.g. "Moda Kavida
+       Vaathavarana") descend under the seal; the asymmetric bottom padding centers
+       the language + title in the CLEAR UPPER region instead, so it sits clear of
+       the stamp at any realistic title length. Poster cards hide this block
+       (.poster-fallback-hidden → display:none), so only no-poster cards are affected. */
+    padding: 30px 30px 190px;
   }
   .poster-fallback-hidden { display: none; }
   .poster-fallback .lang {
