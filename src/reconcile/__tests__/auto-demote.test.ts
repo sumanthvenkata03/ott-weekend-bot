@@ -232,3 +232,84 @@ describe("auto-demote (Step 1) — 🛑 removes from renderable, moves the hash,
     expect(ids).toContain("r32");
   });
 });
+
+// Step 2 — date-recency: GIVEN a recency-based search result, the verdict is a
+// SOURCED reject and Step 1's spine auto-removes the film (B→A end-to-end). These
+// assert the PLUMBING (recency reasoning → reject → demote); the recency JUDGMENT
+// itself is the live LLM's (mocked here) and is validated on a real Wed Drop run.
+describe("date-recency (Step 2) — a recent contradiction → 🛑 → auto-removed", () => {
+  it("LENIN: a recent 'postponed to July 10, outside window' → reject → auto-removed (not the loud June 26)", async () => {
+    const films = [
+      film({ tmdbId: 101, title: "Lenin", tier: "yellow" }),       // given date 2026-06-26
+      film({ tmdbId: 102, title: "Solid Film" }),                  // stays in
+    ];
+    const results = [result(films)];
+    mockCall.mockResolvedValue({
+      reviews: [
+        { tmdbId: 101, verdict: "reject", reason: "postponed to July 10 per a recent trade report — outside the June 24–28 window (older June 26 announcements are stale)", sourceUrl: "https://trade.example/lenin-postponed" },
+        { tmdbId: 102, verdict: "confirm", reason: "release confirmed for the window", sourceUrl: "https://n/solid" },
+      ],
+    });
+    await annotateWithAiReview(results);
+
+    expect(films[0]!.aiReview?.verdict).toBe("reject");
+    expect(films[0]!.aiDemoted?.sourceUrl).toBe("https://trade.example/lenin-postponed");
+
+    const ids = (decideGate(results, { approveHash: computeDropHash(results), autoPassGreen: false }).renderable.theatrical ?? []).map((r) => r.id);
+    expect(ids).not.toContain("r101");                            // auto-removed
+    expect(ids).toContain("r102");
+
+    await writeReview(results, computeDropHash(results), WED_DROP_LABELS);
+    expect(JSON.stringify(notionMock.createArgs.children)).toContain("🟡→🛑 Lenin");
+  });
+
+  it("ITLLU ARJUNA: a recent 'already released on the same platform earlier' → reject → auto-removed", async () => {
+    const films = [film({ tmdbId: 201, title: "Itllu Arjuna" })];  // given date 2026-06-26
+    const results = [result(films)];
+    mockCall.mockResolvedValue({
+      reviews: [
+        { tmdbId: 201, verdict: "reject", reason: "already released on this platform in March 2026 per a recent review — not a June arrival", sourceUrl: "https://n/itllu-released" },
+      ],
+    });
+    await annotateWithAiReview(results);
+
+    expect(films[0]!.aiReview?.verdict).toBe("reject");
+    expect(films[0]!.aiDemoted).toBeDefined();
+    const ids = (decideGate(results, { approveHash: computeDropHash(results), autoPassGreen: false }).renderable.theatrical ?? []).map((r) => r.id);
+    expect(ids).not.toContain("r201");
+  });
+
+  it("STAGGERED RELEASE: an earlier THEATRICAL run does NOT remove a legit in-window OTT drop (confirm → stays)", async () => {
+    // The prompt instructs: a prior theatrical/regional release must NOT reject a later
+    // OTT arrival. Here the correct verdict is "confirm", so the film stays renderable —
+    // this guards against ever wiring "already released anywhere" into auto-demote.
+    const films = [film({ tmdbId: 401, title: "Theatrical-then-OTT", tier: "yellow", pillar: "ott" })];
+    const results = [result(films, "ott")];
+    mockCall.mockResolvedValue({
+      reviews: [
+        { tmdbId: 401, verdict: "confirm", reason: "earlier theatrical run, but the OTT drop lands in this window", sourceUrl: "https://n/ott-drop" },
+      ],
+    });
+    await annotateWithAiReview(results);
+
+    expect(films[0]!.aiDemoted).toBeUndefined();
+    const ids = (decideGate(results, { approveHash: computeDropHash(results), autoPassGreen: false }).renderable.ott ?? []).map((r) => r.id);
+    expect(ids).toContain("r401");
+  });
+
+  it("DOUBT boundary: a contested-but-UNRESOLVED date → doubt → NOT auto-removed (recency doesn't over-trigger)", async () => {
+    const films = [film({ tmdbId: 301, title: "Contested Date Film", tier: "yellow" })];
+    const results = [result(films)];
+    mockCall.mockResolvedValue({
+      reviews: [
+        { tmdbId: 301, verdict: "doubt", reason: "two outlets give different June dates; neither is clearly newer/authoritative", sourceUrl: "https://n/contested" },
+      ],
+    });
+    await annotateWithAiReview(results);
+
+    expect(films[0]!.aiReview?.verdict).toBe("doubt");
+    expect(films[0]!.aiDemoted).toBeUndefined();                  // flag-only — the human still judges it
+    const ids = (decideGate(results, { approveHash: computeDropHash(results), autoPassGreen: false }).renderable.theatrical ?? []).map((r) => r.id);
+    expect(ids).toContain("r301");                                // still renderable
+  });
+});

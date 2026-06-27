@@ -19,7 +19,7 @@ vi.mock("../../shared/cache.js", () => ({
   },
 }));
 import { callClaudeJSON } from "../../content/claude.js";
-import { annotateWithAiReview } from "../ai-review.js";
+import { annotateWithAiReview, buildReviewPrompt } from "../ai-review.js";
 import { computeDropHash } from "../gate.js";
 import type { ReconcileResult, ReconciledFilm } from "../types.js";
 
@@ -177,5 +177,26 @@ describe("annotateWithAiReview — advisory, hash-invariant, fail-soft", () => {
     mockCall.mockResolvedValue({ reviews: [] });
     await annotateWithAiReview([redOnly]);
     expect(mockCall).toHaveBeenCalledTimes(0);             // no 🟢/🟡 ⇒ no call
+  });
+});
+
+describe("buildReviewPrompt — date-recency instruction (Step 2)", () => {
+  it("steers a CONFIRMED out-of-window negative to reject, while guarding against over-removing real films", () => {
+    const prompt = buildReviewPrompt(
+      "theatrical",
+      "2026-06-24 → 2026-06-28",
+      [film({ tmdbId: 1, title: "Lenin", tier: "yellow", date: "2026-06-26" })]
+    );
+    // The window is interpolated into the recency rule (so "outside the window" is concrete).
+    expect(prompt).toContain("2026-06-24 → 2026-06-28");
+    // Recency must be paired with AUTHORITY — a recent rumor must not override an older official source.
+    expect(prompt).toContain("RECENT + AUTHORITATIVE");
+    expect(prompt).toContain("A recent RUMOR does NOT override an older OFFICIAL confirmation");
+    // Staggered/regional safety: an earlier theatrical/regional release must NOT kill a later in-window OTT drop.
+    expect(prompt).toContain("does NOT disqualify a later OTT or wider release");
+    // Vague/indefinite postponements are NOT a reject (avoid false positives).
+    expect(prompt).toContain("delayed indefinitely");
+    // Conservative default: when unsure, keep the film (doubt), don't auto-remove it.
+    expect(prompt).toContain('When unsure, prefer "doubt"');
   });
 });

@@ -62,7 +62,7 @@ function projectForReview(f: ReconciledFilm) {
   };
 }
 
-function buildReviewPrompt(edition: string, windowLabel: string, films: ReconciledFilm[]): string {
+export function buildReviewPrompt(edition: string, windowLabel: string, films: ReconciledFilm[]): string {
   const filmsJson = JSON.stringify(films.map(projectForReview), null, 2);
   return `You are a release fact-checker for The Big Screen Index. Using WEB SEARCH, you verify whether each film below is ACTUALLY releasing as claimed, in the stated window. You output DATA ONLY (strict JSON).
 
@@ -79,10 +79,17 @@ FOR EACH FILM, check via search:
 - Does the DATE hold up? (Does the press corroborate the given date, or a different one?)
 - Is this the RIGHT film? (Does the TMDb id / title / year match the film actually releasing — not a same-title different film?)
 
+DATE RECENCY — when sources DISAGREE on the date, prefer the NEWER report, but ONLY when it is AUTHORITATIVE (bias toward KEEPING real films):
+- Release dates are often announced months ahead and then changed, so a newer report can override older ones. BUT recency alone is NOT enough: weight RECENT + AUTHORITATIVE sources (official studio/distributor, trade press, CBFC, or the platform itself) over BOTH older announcements AND recent low-authority chatter (fan posts, rumor aggregators, unsourced "reportedly"). A recent RUMOR does NOT override an older OFFICIAL confirmation — when they conflict, that is "doubt", not "reject".
+- Return "reject" on a date basis ONLY for a CONFIRMED negative from a recent authoritative source:
+  (a) it gives a NEW release date you can place CLEARLY OUTSIDE ${windowLabel} — a concrete date after the window's end, NOT "TBA" / "delayed indefinitely" / a vague "early/mid/late <month>" that could still fall in the window; OR
+  (b) the film ALREADY RELEASED on THIS pillar's own platform/region BEFORE this window. A prior THEATRICAL, festival, or other-region release does NOT disqualify a later OTT or wider release that lands in the window — that staggered in-window arrival is exactly what we want, so "confirm" (or "doubt") it, never "reject" on that basis.
+- Everything short of that is "doubt", not "reject": a postponement with no concrete new date, an imprecise new date that might still fall in the window, two equally-recent sources that disagree, or a recent-but-unofficial claim against an official one. When unsure, prefer "doubt" — it keeps the film for the human to judge, whereas "reject" auto-removes it.
+
 VERDICTS (exactly one per film):
 - "confirm": search corroborates the release AND the date.
-- "doubt": search found a REASON FOR CONCERN (postponed, contested/ wrong date, CBFC/legal issue, wrong-film risk). Cite the source.
-- "reject": search shows the release is NOT happening as claimed (stalled, cancelled, or a different film). Cite the source.
+- "doubt": search found an UNRESOLVED reason for concern — a contested date where no source is clearly newer AND more authoritative, a postponement with no confirmed out-of-window date, an imprecise date that may still fall in the window, an open CBFC/legal issue, or a wrong-film risk. Cite the source.
+- "reject": a recent AUTHORITATIVE source shows the release is NOT happening in this window — stalled, cancelled, a different film, a CONFIRMED new date clearly outside ${windowLabel}, or an earlier release on THIS pillar's own platform/region. Cite the recent source.
 - "unverified": search returned nothing usable. reason = "couldn't confirm via search". NO sourceUrl.
 
 FILMS (${edition} edition · window ${windowLabel}):
