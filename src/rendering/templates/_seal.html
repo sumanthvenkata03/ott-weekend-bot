@@ -1,0 +1,71 @@
+{#
+  Reusable vintage "pillar seal" badge — a bold rectangular stamp in the TBSI
+  burgundy/brass/cream palette, matching the cover's red "ISSUE Nº" corner stamp
+  idiom (CSS, not a raster asset) but rectangular, wider, and brass-ruled.
+
+  Usage (any cover that imports this file):
+    {% import "_seal.html" as components %}
+    <div class="seal-mount">{{ components.seal("SATURDAY VERDICT") | safe }}</div>
+
+  The macro is placement-agnostic: it renders an inline-block badge that sizes to
+  a fixed width and centers its own text. The HOST template owns where it lands
+  (wrap it in an absolutely-positioned, text-align:center mount). It carries its
+  own scoped CSS so dropping the macro brings its styling with it.
+
+  Crispness: the cover renders under Puppeteer at deviceScaleFactor 2 (2160²) and
+  every part of this seal is vector (rectangle, double border, text) — edges are
+  mathematically crisp at the render DPR, so no raster supersample/LANCZOS pass is
+  needed (that only helps bitmap assets).
+#}
+{% macro seal(label) %}
+<style>
+  .tbsi-seal {
+    /* wide rectangular badge — fixed width, height driven by padding so the
+       aspect lands ~5.5:1 (within the locked 5:1–6:1 range) */
+    display: inline-block;
+    position: relative;
+    width: 460px;
+    padding: 31px 0;                  /* tuned so the brass-rule rectangle lands ~85px
+                                          tall → aspect ~5.4:1 (raised from 28px to hold
+                                          the badge height constant after the longer
+                                          "THEATRICAL" label dropped the font to 15px) */
+    background: #5E2129;              /* oxblood-burgundy fill, opaque */
+    border: 3px solid #C49A3F;        /* brass OUTER rule (~3px) */
+    border-radius: 5px;               /* ~0.06 × seal height (~85px) */
+    text-align: center;
+    box-shadow: 0 6px 18px rgba(20, 16, 14, 0.40);  /* subtle lift off the hero */
+  }
+  .tbsi-seal::after {
+    /* brass INNER hairline (~1px), inset 5px → ~2px gap inside the outer rule:
+       the classic vintage double-rule */
+    content: "";
+    position: absolute;
+    inset: 5px;
+    border: 1px solid #C49A3F;
+    border-radius: 3px;
+    pointer-events: none;
+  }
+  .tbsi-seal .seal-text {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 13px;                  /* sized so "★ SATURDAY THEATRICAL VERDICT ★"
+                                          fills ~83% of the 460px badge with even margins
+                                          (the longer label needs a smaller face than the
+                                          original 21px short-label seal) */
+    font-weight: 700;
+    letter-spacing: 0.15em;           /* heavy vintage all-caps tracking */
+    text-transform: uppercase;
+    color: #F4ECDC;                   /* cream */
+    white-space: nowrap;
+    line-height: 1;
+    /* neutralise the trailing letter-spacing so the text optically centers */
+    text-indent: 0.15em;
+  }
+  .tbsi-seal .seal-star {
+    color: #C49A3F;                   /* brass side stars, on-brand flourish */
+    margin: 0 0.55em;
+  }
+</style>
+<div class="tbsi-seal">
+  <span class="seal-text"><span class="seal-star">&#9733;</span>{{ label }}<span class="seal-star">&#9733;</span></span>
+</div>
+{% endmacro %}

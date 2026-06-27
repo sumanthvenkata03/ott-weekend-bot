@@ -143,6 +143,20 @@
     color: var(--brass);
     text-shadow: 0 1px 4px rgba(20, 16, 14, 0.7);
   }
+  /* Centered pillar SEAL mount — the big "★ SATURDAY VERDICT ★" badge (component
+     in _seal.html) is dropped here, horizontally centered in the top band. Top is
+     nudged to 96px (8.9% of 1080) rather than the nominal 5%/54px, which would
+     overlap the masthead wordmark (y≈50–82); 96px clears it by ~14px and stays
+     well left of the issue stamp (seal ends x≈770; stamp starts x≈845). The seal
+     REPLACES the old small sub-masthead label — don't say "Saturday Verdict" twice. */
+  .seal-mount {
+    position: absolute;
+    top: 96px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    z-index: 10;
+  }
 
   /* Tilted corner stamp */
   .corner-stamp {
@@ -406,6 +420,7 @@
 </style>
 </head>
 <body>
+{% import "_seal.html" as components %}
 <div class="canvas">
 
   <!-- HERO IMAGE LAYER -->
@@ -450,6 +465,9 @@
     <span class="label">★ THE BIG SCREEN INDEX</span>
     <span class="date">{{ date | date('weekday-dd-mm') }}</span>
   </div>
+
+  <!-- CENTERED PILLAR SEAL — the "★ SATURDAY THEATRICAL VERDICT ★" focal badge -->
+  <div class="seal-mount">{{ components.seal("SATURDAY THEATRICAL VERDICT") | safe }}</div>
 
   <!-- ISSUE NUMBER CORNER STAMP -->
   <div class="corner-stamp">
