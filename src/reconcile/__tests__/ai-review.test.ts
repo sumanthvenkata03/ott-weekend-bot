@@ -32,6 +32,14 @@ function film(p: { tmdbId?: number; title: string; tier: "green" | "yellow" | "r
     ...p,
   } as ReconciledFilm;
 }
+/** Minimal Release stub for seam-#3 platform-fill tests (only `platform` matters). */
+function rel(platform: string[]): NonNullable<ReconciledFilm["release"]> {
+  return {
+    id: "tmdb-x", title: "X", language: "Tamil", isSeries: false,
+    platform, releaseDate: "2026-06-25", genre: [], cast: [],
+    synopsis: "", subtitleLanguages: [], sources: [], fetchedAt: "",
+  } as NonNullable<ReconciledFilm["release"]>;
+}
 function result(films: ReconciledFilm[], pillar: "theatrical" | "ott" = "theatrical"): ReconcileResult {
   return {
     pillar,
@@ -177,6 +185,40 @@ describe("annotateWithAiReview — advisory, hash-invariant, fail-soft", () => {
     mockCall.mockResolvedValue({ reviews: [] });
     await annotateWithAiReview([redOnly]);
     expect(mockCall).toHaveBeenCalledTimes(0);             // no 🟢/🟡 ⇒ no call
+  });
+});
+
+describe("annotateWithAiReview — seam #3 platform fact-fill (OTT-gated, fill-only-if-empty)", () => {
+  it("platform=null leaves release.platform untouched (fabrication guard holds)", async () => {
+    const f = film({ tmdbId: 1, title: "Nazar", tier: "yellow", pillar: "ott", release: rel([]) });
+    const results = [result([f], "ott")];
+    mockCall.mockResolvedValue({ reviews: [{ tmdbId: 1, verdict: "unverified", reason: "couldn't confirm via search", platform: null }] });
+    await annotateWithAiReview(results);
+    expect(f.release!.platform).toEqual([]);                 // no source → no platform → stays []
+  });
+
+  it("a mappable platform + EMPTY release.platform → filled via toPlatform (enum, not raw text)", async () => {
+    const f = film({ tmdbId: 2, title: "Karakkam", tier: "yellow", pillar: "ott", release: rel([]) });
+    const results = [result([f], "ott")];
+    mockCall.mockResolvedValue({ reviews: [{ tmdbId: 2, verdict: "confirm", reason: "SonyLIV confirms", sourceUrl: "https://x.example", platform: "Sony LIV" }] });
+    await annotateWithAiReview(results);
+    expect(f.release!.platform).toEqual(["SonyLIV"]);        // "Sony LIV" → enum "SonyLIV"
+  });
+
+  it("a platform on a NON-empty release.platform does NOT override (seams 1-2 win)", async () => {
+    const f = film({ tmdbId: 3, title: "Mollywood Times", tier: "green", pillar: "ott", release: rel(["JioHotstar"]) });
+    const results = [result([f], "ott")];
+    mockCall.mockResolvedValue({ reviews: [{ tmdbId: 3, verdict: "confirm", reason: "x", sourceUrl: "https://x.example", platform: "Netflix" }] });
+    await annotateWithAiReview(results);
+    expect(f.release!.platform).toEqual(["JioHotstar"]);     // unchanged — AI-review never overrides
+  });
+
+  it("BLAST-RADIUS GUARD: the theatrical edition is NOT filled (OTT-only gate)", async () => {
+    const f = film({ tmdbId: 4, title: "Alpha", tier: "yellow", pillar: "theatrical", release: rel([]) });
+    const results = [result([f], "theatrical")];
+    mockCall.mockResolvedValue({ reviews: [{ tmdbId: 4, verdict: "confirm", reason: "future OTT mentioned", sourceUrl: "https://x.example", platform: "Netflix" }] });
+    await annotateWithAiReview(results);
+    expect(f.release!.platform).toEqual([]);                 // theatrical card stays empty
   });
 });
 

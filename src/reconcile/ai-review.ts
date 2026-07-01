@@ -27,6 +27,7 @@ import { createHash } from "node:crypto";
 import { callClaudeJSON } from "../content/claude.js";
 import { cached } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
+import { toPlatform } from "../shared/platform.js";
 import type { AiReviewVerdict, ReconciledFilm, ReconcileResult } from "./types.js";
 
 // The model returns these FOUR verdicts. "unavailable" is set only by fail-soft
@@ -36,6 +37,10 @@ const VerdictSchema = z.object({
   verdict: z.enum(["confirm", "doubt", "reject", "unverified"]),
   reason: z.string(),
   sourceUrl: z.string().optional(),
+  // Seam #3 — the OTT streaming platform, ONLY when a source the search found
+  // explicitly states it (fabrication-guarded; null otherwise). Orthogonal to the
+  // verdict: it fact-fills a gap in release.platform, it does not judge the film.
+  platform: z.string().nullable().optional(),
 });
 const AiReviewSchema = z.object({
   reviews: z.array(VerdictSchema).default([]),
@@ -74,6 +79,9 @@ export function buildReviewPrompt(edition: string, windowLabel: string, films: R
 YOU ASSESS ONLY — you do NOT rewrite anything:
 - If a source shows a DIFFERENT date or cast, FLAG it in the reason (e.g. "source says August, not June — <url>"). Do NOT output a corrected date/cast/title. The film's data stays exactly as given to you.
 
+PLATFORM (the ONE fact you MAY return, fabrication-guarded):
+- If a source you found explicitly states the OTT streaming platform for this film, return it as \`platform\` (the platform's common name, e.g. "Netflix", "SonyLIV", "JioHotstar", "Prime Video"). If no source states a platform, return null. Never guess or infer the platform — it must be explicitly stated in a source you actually found.
+
 FOR EACH FILM, check via search:
 - Is this release actually CONFIRMED to happen in ${windowLabel}? (Official announcement / trade press / CBFC clearance — vs. stalled, postponed, cancelled, or "expected".)
 - Does the DATE hold up? (Does the press corroborate the given date, or a different one?)
@@ -96,7 +104,7 @@ FILMS (${edition} edition · window ${windowLabel}):
 ${filmsJson}
 
 OUTPUT — STRICT JSON ONLY (no prose, no markdown). Exactly ONE entry per film above, keyed by its tmdbId:
-{ "reviews": [ { "tmdbId": <number>, "verdict": "confirm|doubt|reject|unverified", "reason": "...", "sourceUrl": "https://..." } ] }`;
+{ "reviews": [ { "tmdbId": <number>, "verdict": "confirm|doubt|reject|unverified", "reason": "...", "sourceUrl": "https://...", "platform": "Netflix|null" } ] }`;
 }
 
 /**
@@ -106,7 +114,7 @@ OUTPUT — STRICT JSON ONLY (no prose, no markdown). Exactly ONE entry per film 
  * discipline-guard + auto-demote mapping run FRESH outside the cache, so changing
  * those needs NO bump. (Mirrors RESEARCH_CACHE_VERSION.)
  */
-export const AI_REVIEW_CACHE_VERSION = "v1";
+export const AI_REVIEW_CACHE_VERSION = "v2";
 
 /** Verdicts are stable within a drop cycle; a same-day --approve must hit. */
 const AI_REVIEW_CACHE_TTL_HOURS = 24;
@@ -157,12 +165,17 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
     );
 
     const byId = new Map<number, AiReviewVerdict>();
+    // Raw source-stated platform, kept OUT of AiReviewVerdict (it's a fact-fill,
+    // not part of the verdict). Only present when the model returned a non-null
+    // platform; normalized to an enum at the fill site below.
+    const platformById = new Map<number, string>();
     for (const v of out.reviews) {
       byId.set(v.tmdbId, {
         verdict: v.verdict,
         reason: v.reason,
         ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
       });
+      if (v.platform) platformById.set(v.tmdbId, v.platform);
     }
 
     let assessed = 0;
@@ -179,6 +192,15 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
           review = v;
         }
         f.aiReview = review;
+        // Seam #3 — LAST-RESORT platform fill. Only for the OTT edition, and only
+        // when release.platform is still EMPTY (JustWatch/stub/reconcile — seams
+        // 1-2 — always win). Verdict-independent: a source-stated platform is a
+        // fact regardless of the date verdict. Enum-normalized via toPlatform; an
+        // unmappable/absent name leaves [] (the honest "STREAMING TBA" path).
+        if (r.pillar === "ott" && f.release && f.release.platform.length === 0) {
+          const p = toPlatform(f.tmdbId !== undefined ? platformById.get(f.tmdbId) : undefined);
+          if (p) f.release.platform = [p];
+        }
         // AUTO-DEMOTE (Step 1) — a SOURCED reject ONLY. Keyed on the VERDICT, not
         // the tier (a 🟡 film with a ✅ verdict is untouched). TIGHTENS ONLY: it
         // removes the film from renderable and moves the hash; it never promotes.
