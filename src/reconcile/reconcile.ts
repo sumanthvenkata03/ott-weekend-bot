@@ -25,6 +25,7 @@
 // net can only ADD films and annotate tier, never remove a TMDb candidate.
 
 import type { Release } from "../shared/types.js";
+import { toPlatform } from "../shared/platform.js";
 import type { TmdbTitleHit, TmdbTitleSearch } from "../ingestion/releases/tmdb.js";
 import { qualifyingDate, inWindow } from "../shared/post-validator.js";
 import type { BucketWindow, ManifestRow } from "../shared/post-validator.js";
@@ -264,6 +265,15 @@ function buildFromPool(
   const platform = aiFilm?.platform ?? (r.platform.length > 0 ? r.platform.join(", ") : undefined);
   const year = r.releaseDate && ISO.test(r.releaseDate) ? Number.parseInt(r.releaseDate.slice(0, 4), 10) : undefined;
 
+  // Fix B — write the known platform back into the Release the renderer reads.
+  // Only when r.platform is empty (JustWatch missed / stub had none) AND the
+  // reconciled press platform maps CLEANLY to an enum value via toPlatform. A
+  // comma-joined string or unmapped display variant returns undefined → leave []
+  // (the honest "STREAMING TBA" path) rather than inject raw text that would
+  // drop the logo and fall to brass.
+  const enumPlatform = r.platform.length === 0 ? toPlatform(platform) : undefined;
+  const release: Release = enumPlatform ? { ...r, platform: [enumPlatform] } : r;
+
   const f: ReconciledFilm = {
     ...(r.tmdbId !== undefined ? { tmdbId: r.tmdbId } : {}),
     title: r.title,
@@ -288,7 +298,7 @@ function buildFromPool(
     resolvedTitle: r.title,
     ...(r.posterUrl ? { posterUrl: r.posterUrl } : {}),
     ...(year !== undefined ? { year } : {}),
-    release: r,
+    release,
   };
   if (warnReason && !f.reasons.includes(warnReason)) f.reasons.push(warnReason);
   return f;
@@ -309,13 +319,18 @@ function buildFromNewAi(res: AiResolution, window: BucketWindow, pillar: string)
       ? { ...(ai.date ? { ott: ai.date } : {}) }
       : { ...(theatricalDate ? { theatrical: theatricalDate } : {}) };
 
+  // Fix B (Blast-class rescue) — TMDb missed this film entirely, so the ONLY
+  // platform signal is the press (ai.platform). Normalize it through toPlatform
+  // (enum only; unmapped/comma-joined → [] so the card honestly shows TBA).
+  const enumPlatform = toPlatform(ai.platform);
+
   const release: Release = {
     id: `tmdb-${hit.id}`,
     tmdbId: hit.id,
     title: hit.title,
     language,
     isSeries: false,
-    platform: [],
+    platform: enumPlatform ? [enumPlatform] : [],
     releaseDate: ai.date ?? hit.releaseDate ?? "",
     ...(Object.keys(releaseDates).length > 0 ? { releaseDates } : {}),
     genre: [],

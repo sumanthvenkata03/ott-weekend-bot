@@ -244,7 +244,11 @@ export async function enrichReleases(stubs: Release[]): Promise<Release[]> {
     withImdb.map(async r => {
       if (!r.tmdbId) return r;
       const platforms = await getStreamingPlatforms(r.tmdbId);
-      return { ...r, platform: platforms };
+      // Additive-only: a JustWatch miss returns [] — do NOT let that wipe a
+      // platform the discovery/press net already resolved into the stub
+      // (candidates.ts, enum-normalized). Only overwrite when JustWatch actually
+      // found something. Never invents a platform.
+      return { ...r, platform: platforms.length > 0 ? platforms : r.platform };
     })
   );
   log.info(`  Streaming on at least 1 platform: ${withPlatforms.filter(r => r.platform.length > 0).length}/${stubs.length}`);

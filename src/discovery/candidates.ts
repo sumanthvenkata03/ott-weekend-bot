@@ -20,8 +20,9 @@ import { discoverOttSearch } from "./sources/ottSearch.js";
 import { discoverOttCalendar } from "./sources/ottCalendar.js";
 import { enrichReleases } from "../ingestion/releases/index.js";
 import { log } from "../shared/logger.js";
+import { toPlatform } from "../shared/platform.js";
 import type { DiscoveredFilm } from "./types.js";
-import type { Language, Platform, Release } from "../shared/types.js";
+import type { Language, Release } from "../shared/types.js";
 
 /** Which release a pillar wants. Single-valued — a both-pillar (Wednesday) calls
  *  twice, once per window, exactly as it does today. */
@@ -49,21 +50,9 @@ function toLanguageEnum(s: string | undefined): Language | undefined {
   return s !== undefined && VALID_LANGUAGES.has(s as Language) ? (s as Language) : undefined;
 }
 
-// Press platform name (free text from the AI net) → our Platform enum. An
-// unknown name is omitted (platform stays []) — never coerced to a wrong value.
-const PLATFORM_NAMES: Record<string, Platform> = {
-  "netflix": "Netflix",
-  "prime video": "Prime Video", "amazon prime video": "Prime Video", "amazon video": "Prime Video",
-  "jiohotstar": "JioHotstar", "jio hotstar": "JioHotstar", "hotstar": "JioHotstar",
-  "disney+ hotstar": "JioHotstar", "disney plus hotstar": "JioHotstar",
-  "aha": "Aha",
-  "sonyliv": "SonyLIV", "sony liv": "SonyLIV",
-  "zee5": "ZEE5",
-  "sun nxt": "Sun NXT",
-};
-function toPlatform(s: string | undefined): Platform | undefined {
-  return s ? PLATFORM_NAMES[s.trim().toLowerCase()] : undefined;
-}
+// Press platform name → Platform enum now lives in shared/platform.ts (toPlatform),
+// reused verbatim by the reconcile core so both press-ingest paths normalize the
+// same way. Unknown names still map to undefined → platform stays [].
 
 /**
  * Adapt a discovery find into a Release STUB — identity + date + provenance the
