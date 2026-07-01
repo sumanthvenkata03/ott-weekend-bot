@@ -87,11 +87,17 @@ FOR EACH FILM, check via search:
 - Does the DATE hold up? (Does the press corroborate the given date, or a different one?)
 - Is this the RIGHT film? (Does the TMDb id / title / year match the film actually releasing — not a same-title different film?)
 
+SEARCH STRATEGY — release dates CHANGE, and old articles dominate generic results:
+- Do NOT rely on one generic "<title> release date" query per film. Dates get preponed/postponed, and months-old SEO articles often outrank the newer announcement — a generic query can show you ONLY the stale date.
+- For each film ALSO run recency-targeted queries, e.g. "<title> release date latest", "<title> release date postponed preponed new date", "<title> release date <current month and year>".
+- Check the PUBLICATION DATE of each result and weight the most recently PUBLISHED authoritative source. A generic "<title> release date" query alone is NEVER sufficient basis for a "reject".
+
 DATE RECENCY — when sources DISAGREE on the date, prefer the NEWER report, but ONLY when it is AUTHORITATIVE (bias toward KEEPING real films):
 - Release dates are often announced months ahead and then changed, so a newer report can override older ones. BUT recency alone is NOT enough: weight RECENT + AUTHORITATIVE sources (official studio/distributor, trade press, CBFC, or the platform itself) over BOTH older announcements AND recent low-authority chatter (fan posts, rumor aggregators, unsourced "reportedly"). A recent RUMOR does NOT override an older OFFICIAL confirmation — when they conflict, that is "doubt", not "reject".
 - Return "reject" on a date basis ONLY for a CONFIRMED negative from a recent authoritative source:
   (a) it gives a NEW release date you can place CLEARLY OUTSIDE ${windowLabel} — a concrete date after the window's end, NOT "TBA" / "delayed indefinitely" / a vague "early/mid/late <month>" that could still fall in the window; OR
   (b) the film ALREADY RELEASED on THIS pillar's own platform/region BEFORE this window. A prior THEATRICAL, festival, or other-region release does NOT disqualify a later OTT or wider release that lands in the window — that staggered in-window arrival is exactly what we want, so "confirm" (or "doubt") it, never "reject" on that basis.
+- REJECT-SAFETY when the film's GIVEN date is already INSIDE ${windowLabel}: rejecting on a date basis ADDITIONALLY requires the out-of-window source to be CLEARLY NEWER (by publication date) than the given date's information. A single out-of-window date whose recency you CANNOT establish as newer is "doubt", NOT "reject" — the given in-window date may itself be the later change (preponed/re-dated films look exactly like this). If you cannot confirm you have the LATEST word on the date, return "doubt" — it keeps the film for the human; "reject" removes it silently.
 - Everything short of that is "doubt", not "reject": a postponement with no concrete new date, an imprecise new date that might still fall in the window, two equally-recent sources that disagree, or a recent-but-unofficial claim against an official one. When unsure, prefer "doubt" — it keeps the film for the human to judge, whereas "reject" auto-removes it.
 
 VERDICTS (exactly one per film):
@@ -114,7 +120,8 @@ OUTPUT — STRICT JSON ONLY (no prose, no markdown). Exactly ONE entry per film 
  * discipline-guard + auto-demote mapping run FRESH outside the cache, so changing
  * those needs NO bump. (Mirrors RESEARCH_CACHE_VERSION.)
  */
-export const AI_REVIEW_CACHE_VERSION = "v2";
+// v3: search-strategy guidance + in-window reject-safety added to buildReviewPrompt.
+export const AI_REVIEW_CACHE_VERSION = "v3";
 
 /** Verdicts are stable within a drop cycle; a same-day --approve must hit. */
 const AI_REVIEW_CACHE_TTL_HOURS = 24;
