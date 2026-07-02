@@ -1,7 +1,7 @@
 // src/jobs/wednesday-drop.ts
 import { addDays, endOfWeek, format, startOfDay, startOfWeek } from "date-fns";
 import { getCandidates } from "../discovery/candidates.js";
-import type { Release } from "../shared/types.js";
+import type { Release, Platform } from "../shared/types.js";
 import { generateWednesdayDrop, MAX_WED_DROP_FILMS } from "../content/weekend/wednesday-drop.js";
 import { writeWednesdayDropToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
@@ -22,6 +22,61 @@ import { annotateWithAiReview } from "../reconcile/ai-review.js";
 import { decideGate, writeReview, WED_DROP_LABELS } from "../reconcile/gate.js";
 import { capPoolForSelector } from "../reconcile/select.js";
 import type { ReconcileResult } from "../reconcile/types.js";
+
+/**
+ * Manual one-off exclusion hook. WED_DROP_EXCLUDE is a comma-separated list of
+ * TMDb ids and/or exact titles to pull from a renderable pool — for a film the
+ * operator has verified shouldn't run (e.g. no real release this week). Applied
+ * POST-GATE inside produceEdition (like the dedup), so it never feeds the gate
+ * fingerprint: the --approve token stays valid and only the rendered set shrinks.
+ */
+function parseExcludeList(raw: string | undefined): { ids: Set<number>; titles: Set<string> } {
+  const ids = new Set<number>();
+  const titles = new Set<string>();
+  for (const tok of (raw ?? "").split(",").map(s => s.trim()).filter(Boolean)) {
+    const n = Number(tok);
+    if (Number.isInteger(n) && String(n) === tok) ids.add(n);
+    else titles.add(tok.toLowerCase());
+  }
+  return { ids, titles };
+}
+
+function isManuallyExcluded(r: Release, ex: { ids: Set<number>; titles: Set<string> }): boolean {
+  if (r.tmdbId !== undefined && ex.ids.has(r.tmdbId)) return true;
+  return ex.titles.has(r.title.trim().toLowerCase());
+}
+
+/**
+ * Manual platform override hook. WED_DROP_PLATFORM is a ';'-separated list of
+ * `Title=Platform` pairs, applied POST-GATE to a renderable pool for films whose
+ * streaming partner JustWatch/TMDb didn't resolve but the operator has verified
+ * from official sources. Applied BEFORE the LLM + render, so the copy, the
+ * "NOW ON <platform>" card line, and the landing verifier all agree. Post-gate →
+ * never touches the gate fingerprint (the --approve token stays valid).
+ */
+function parsePlatformOverrides(raw: string | undefined): Map<string, Platform> {
+  const map = new Map<string, Platform>();
+  for (const pair of (raw ?? "").split(";").map(s => s.trim()).filter(Boolean)) {
+    const eq = pair.indexOf("=");
+    if (eq === -1) continue;
+    const title = pair.slice(0, eq).trim().toLowerCase();
+    const platform = pair.slice(eq + 1).trim();
+    if (title && platform) map.set(title, platform as Platform);
+  }
+  return map;
+}
+
+function applyPlatformOverrides(pool: Release[], overrides: Map<string, Platform>): { pool: Release[]; applied: number } {
+  if (overrides.size === 0) return { pool, applied: 0 };
+  let applied = 0;
+  const out = pool.map(r => {
+    const p = overrides.get(r.title.trim().toLowerCase());
+    if (!p) return r;
+    applied += 1;
+    return { ...r, platform: [p] };
+  });
+  return { pool: out, applied };
+}
 
 /**
  * Produce ONE Wed Drop edition end-to-end from its own (un-merged) pool:
@@ -46,10 +101,25 @@ async function produceEdition(
   const deduped = pool.filter(r => !excluded.has(filmKey(r)));
   const droppedDupes = pool.length - deduped.length;
   if (droppedDupes > 0) log.info(`  Dedup: dropped ${droppedDupes} already-featured film(s) from the ${edition} pool`);
-  if (deduped.length === 0) {
-    log.info(`  ${meta.notionTitle}: every candidate was featured recently — edition skipped.`);
+
+  // Manual one-off exclusion (WED_DROP_EXCLUDE) — post-gate, hash-neutral. Pulls
+  // operator-verified drops (e.g. a film with no real release this week).
+  const manualExcluded = parseExcludeList(process.env.WED_DROP_EXCLUDE);
+  const renderablePool = deduped.filter(r => !isManuallyExcluded(r, manualExcluded));
+  const droppedManual = deduped.length - renderablePool.length;
+  if (droppedManual > 0) log.info(`  Manual exclude (WED_DROP_EXCLUDE): removed ${droppedManual} film(s) from the ${edition} pool`);
+
+  if (renderablePool.length === 0) {
+    log.info(`  ${meta.notionTitle}: every candidate was featured recently or manually excluded — edition skipped.`);
     return;
   }
+
+  // Manual platform override (WED_DROP_PLATFORM) — set operator-verified streaming
+  // partners for films JustWatch/TMDb couldn't resolve. Applied here so the LLM
+  // prompt, the card's "NOW ON <platform>" line, and the landing verifier agree.
+  const platformOverrides = parsePlatformOverrides(process.env.WED_DROP_PLATFORM);
+  const { pool: finalPool, applied: platformsSet } = applyPlatformOverrides(renderablePool, platformOverrides);
+  if (platformsSet > 0) log.info(`  Platform override (WED_DROP_PLATFORM): set platform on ${platformsSet} film(s) in the ${edition} pool`);
 
   // Per-edition candidate cap (capPoolForSelector): the popularity slice applies
   // ONLY to the TMDb-pool portion — AI-net finds are CAP-EXEMPT so they always
@@ -57,7 +127,7 @@ async function produceEdition(
   // (they carry no tmdbPopularity and would otherwise sink below the cut). The
   // LLM remains the editorial filter (picks up to MAX or skips); this only
   // guarantees AI finds reach its INPUT, not that they get published.
-  const featured = capPoolForSelector(deduped);
+  const featured = capPoolForSelector(finalPool);
   log.info(`  Feeding ${featured.length} ${edition} candidates to the LLM (picks up to ${MAX_WED_DROP_FILMS} or skips)`);
 
   // Generate the edition's draft via Claude.
@@ -289,13 +359,25 @@ async function main() {
   const thePool = decision.renderable.theatrical ?? [];
   const ottPool = decision.renderable.ott ?? [];
 
-  if (thePool.length > 0) {
+  // Optional edition scope: WED_DROP_ONLY=ott|theatrical runs just that edition
+  // (leaving the other's live assets/copy untouched) — e.g. re-publishing one
+  // edition after a manual exclude without re-billing/re-posting the other.
+  const onlyEdition = process.env.WED_DROP_ONLY?.trim().toLowerCase();
+  const runThe = !onlyEdition || onlyEdition === "theatrical";
+  const runOtt = !onlyEdition || onlyEdition === "ott";
+  if (onlyEdition) log.info(`WED_DROP_ONLY=${onlyEdition} — running only the ${onlyEdition} edition this pass.`);
+
+  if (!runThe) {
+    log.info("In Theaters: skipped (WED_DROP_ONLY).");
+  } else if (thePool.length > 0) {
     await produceEdition("theatrical", thePool, issueNumber, startDate, endDate);
   } else {
     log.info("In Theaters: no approved/renderable films this week — edition skipped.");
   }
 
-  if (ottPool.length > 0) {
+  if (!runOtt) {
+    log.info("Now Streaming: skipped (WED_DROP_ONLY).");
+  } else if (ottPool.length > 0) {
     await produceEdition("ott", ottPool, issueNumber, ottStartDate, endDate);
   } else {
     log.info("Now Streaming: no approved/renderable films this week — edition skipped.");

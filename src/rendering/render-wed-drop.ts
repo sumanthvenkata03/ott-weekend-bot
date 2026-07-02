@@ -8,7 +8,8 @@ import { log } from "../shared/logger.js";
 import type { WednesdayDropDraft, WedDropSlide } from "../delivery/notion.js";
 import type { Release } from "../shared/types.js";
 import { EDITION_META, type WedDropEdition } from "../shared/wed-drop-edition.js";
-import { sortWedDropByRating } from "../content/weekend/wednesday-drop.js";
+import { sortWedDropByProminence } from "../content/weekend/wednesday-drop.js";
+import { computeCropPosition } from "./poster-crop.js";
 import type {
   WedDropCoverContext,
   WedDropCardContext,
@@ -84,8 +85,8 @@ export async function renderWedDrop(
   log.info(`Rendering Wed Drop [${edition}] — Issue №${issueNumber}`);
 
   // The LLM outputs slides typed cover / index / release / cta.
-  // For rendering we care about: cover (slide 1) → headline, release slides → body cards.
-  const coverSlide = draft.slides.find(s => s.type === "cover");
+  // The redesigned cover no longer uses the LLM cover slide (its plain h1 is
+  // derived from the edition); we only need the release slides → body cards.
   const releaseSlides = draft.slides.filter(s => s.type === "release");
 
   log.info(`  Films: ${draft.releases.length} | Release slides: ${releaseSlides.length}`);
@@ -104,15 +105,21 @@ export async function renderWedDrop(
   // (same date) don't delete each other's PNGs.
   await cleanOldRenders(outputDir, `${meta.slug}-${baseCtx.date}`);
 
-  // 1. Cover: shows up to 4 films in a 2x2 grid + the LLM's cover headline
+  // 1. Cover: poster-wall grid of the TOP 4 films (draft.releases is already in
+  //    prominence order, so the biggest film leads the wall). The dark-crop
+  //    safeguard samples each poster's top band and shifts the crop when it's
+  //    near-black; posterless films render the typographic fallback cell.
   const gridItems = draft.releases.slice(0, 4).map(buildGridItem);
+  await Promise.all(gridItems.map(async gi => {
+    gi.cropPosition = await computeCropPosition(gi.posterUrl);
+  }));
   const coverPath = `${outputDir}/wed-drop-${meta.slug}-${baseCtx.date}-cover.png`;
   const coverCtx: WedDropCoverContext = {
     ...baseCtx,
     weekendDates: draft.weekendDates,
     filmCount: draft.releases.length,
-    coverHeadline: coverSlide?.title ?? `${draft.releases.length} films.`,
-    coverSubtext: coverSlide?.body ?? "Your weekend, sorted.",
+    coverTitle: edition === "ott" ? "This Week's OTT Drops." : "This Week's Theatrical Drops.",
+    gridClass: `count-${Math.min(gridItems.length, 4)}`,
     gridItems,
   };
   await renderToPNG({
@@ -206,10 +213,11 @@ if (isMainModule) {
   });
 
   // Assemble a draft from a cover + a list of { body, release } picks. The
-  // sample items are deliberately passed in NON-rating order; sortWedDropByRating
-  // (the SAME function the production generator runs) reorders both the releases
-  // and the 'release' slides into rating-descending order, so this no-LLM render
-  // demonstrates exactly what job:wednesday produces.
+  // sample items are deliberately passed in NON-prominence order;
+  // sortWedDropByProminence (the SAME function the production generator runs)
+  // reorders both the releases and the 'release' slides into prominence order
+  // (biggest film first), so this no-LLM render demonstrates exactly what
+  // job:wednesday produces.
   const draftOf = (
     weekendDates: string,
     cover: { title: string; body: string },
@@ -225,7 +233,7 @@ if (isMainModule) {
       })),
       { slideNumber: items.length + 2, type: "cta", title: "Which one?", body: "DM us. Save this." },
     ];
-    const sorted = sortWedDropByRating(rawSlides, items.map(it => it.release));
+    const sorted = sortWedDropByProminence(rawSlides, items.map(it => it.release));
     return {
       pillar: "Wed Drop",
       weekendDates,
@@ -237,36 +245,59 @@ if (isMainModule) {
     };
   };
 
+  // Known-good TMDb poster (reused across sample cells so the poster wall shows
+  // real images without needing many distinct URLs).
+  const SAMPLE_POSTER = "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg";
+
   // ── THEATRICAL edition (In Theaters): all releaseDates.theatrical, cinema-bound ──
+  // No posters → exercises the ALL-FALLBACK poster wall (every cell typographic).
+  // tmdbPopularity drives the order now (biggest first), NOT the rating fields.
+  // Expected prominence order: Cocktail 2 (900) → Deewana (750) → Nooru Sami
+  // (400) → Abhhiman (250) → Lifeline (120).
   const theatricalDraft = draftOf(
     "Jun 17 — Jun 21, 2026",
     { title: "Five for the big screen.", body: "This weekend belongs in a theater." },
     [
-      { body: "A glossy reboot that coasts on its leads. Fun, forgettable.", release: mk({ id: "t1", title: "Cocktail 2", language: "Hindi", genre: ["Romance"], releaseDates: { theatrical: "2026-06-19" }, director: "Homi Adajania", cast: ["Rashmika Mandanna", "Shahid Kapoor"], runtime: 138, tbsiScore: 5.4, tbsiSourceCount: 2, imdbRating: 5.5, rottenTomatoes: 48 }) },
-      { body: "A throwback romance that wears its sincerity well.", release: mk({ id: "t2", title: "Deewana", language: "Telugu", genre: ["Romance"], releaseDates: { theatrical: "2026-06-19" }, director: "Trivikram Srinivas", cast: ["Vijay Deverakonda"], runtime: 144, tbsiScore: 6.8, tbsiSourceCount: 3, imdbRating: 6.9, rottenTomatoes: 62, metacritic: 60 }) },
-      { body: "Devotional drama for a specific crowd — earnest if uneven.", release: mk({ id: "t3", title: "Nooru Sami", language: "Tamil", releaseDates: { theatrical: "2026-06-19" }, director: "Sasikumar", cast: ["Sasikumar"], runtime: 132 }) },
-      { body: "Bengali courtroom drama that builds to a real payoff.", release: mk({ id: "t4", title: "Abhhiman", language: "Bengali", releaseDates: { theatrical: "2026-06-19" }, director: "Raj Chakraborty", cast: ["Prosenjit Chatterjee"], runtime: 126 }) },
-      { body: "Bengali medical drama with a big heart, if a thin plot.", release: mk({ id: "t5", title: "Lifeline", language: "Bengali", releaseDates: { theatrical: "2026-06-21" }, director: "Atanu Ghosh", cast: ["Jaya Ahsan"], runtime: 118 }) },
+      { body: "A glossy reboot that coasts on its leads. Fun, forgettable.", release: mk({ id: "t1", title: "Cocktail 2", language: "Hindi", genre: ["Romance"], releaseDates: { theatrical: "2026-06-19" }, director: "Homi Adajania", cast: ["Rashmika Mandanna", "Shahid Kapoor"], runtime: 138, tbsiScore: 5.4, tbsiSourceCount: 2, imdbRating: 5.5, rottenTomatoes: 48, tmdbPopularity: 900 }) },
+      { body: "A throwback romance that wears its sincerity well.", release: mk({ id: "t2", title: "Deewana", language: "Telugu", genre: ["Romance"], releaseDates: { theatrical: "2026-06-19" }, director: "Trivikram Srinivas", cast: ["Vijay Deverakonda"], runtime: 144, tbsiScore: 6.8, tbsiSourceCount: 3, imdbRating: 6.9, rottenTomatoes: 62, metacritic: 60, tmdbPopularity: 750 }) },
+      { body: "Devotional drama for a specific crowd — earnest if uneven.", release: mk({ id: "t3", title: "Nooru Sami", language: "Tamil", releaseDates: { theatrical: "2026-06-19" }, director: "Sasikumar", cast: ["Sasikumar"], runtime: 132, tmdbPopularity: 400 }) },
+      { body: "Bengali courtroom drama that builds to a real payoff.", release: mk({ id: "t4", title: "Abhhiman", language: "Bengali", releaseDates: { theatrical: "2026-06-19" }, director: "Raj Chakraborty", cast: ["Prosenjit Chatterjee"], runtime: 126, tmdbPopularity: 250 }) },
+      { body: "Bengali medical drama with a big heart, if a thin plot.", release: mk({ id: "t5", title: "Lifeline", language: "Bengali", releaseDates: { theatrical: "2026-06-21" }, director: "Atanu Ghosh", cast: ["Jaya Ahsan"], runtime: 118, tmdbPopularity: 120 }) },
     ]
   );
 
   // ── OTT edition (Now Streaming): all releaseDates.ott + a platform ──
-  // Items are passed in DELIBERATELY NON-rating order to prove the source sort
-  // reorders them. Expected rating-descending result:
-  //   1. Drishyam 3   — tier 0 (TBSI 8.3)
-  //   2. Razor        — tier 0 (TBSI 6.5)
-  //   3. Sitting      — tier 1 (TMDb 7.4, 300 votes — fallback, no blend)
-  //   4. Kenatha Kanom— tier 2 (unrated, popularity 50)
-  //   5. Athiradi     — tier 2 (unrated, popularity 12)
+  // Items are passed in DELIBERATELY NON-prominence order to prove the source
+  // sort reorders them. Posters on the top-3 films + a POSTERLESS film (Athiradi)
+  // in the top 4 exercises BOTH the poster wall AND the typographic fallback cell.
+  // Expected prominence order (tmdbPopularity DESC):
+  //   1. Drishyam 3    — 950 (poster)   ← biggest film LEADS, though not top-rated
+  //   2. Razor         — 700 (poster)
+  //   3. Sitting       — 500 (poster)
+  //   4. Athiradi      — 300 (NO poster → fallback cell in the wall)
+  //   5. Kenatha Kanom —  50 (off the top-4 cover, still card 5)
   const ottDraft = draftOf(
     "Jun 15 — Jun 21, 2026",
     { title: "Five to stream this weekend.", body: "Couch sorted, all weekend long." },
     [
-      { body: "Mass-y action that knows exactly what it is. Now on JioHotstar.", release: mk({ id: "o5", title: "Athiradi", language: "Malayalam", genre: ["Action"], platform: ["JioHotstar"], releaseDate: "2026-06-19", releaseDates: { ott: "2026-06-19" }, director: "Lal Jose", cast: ["Tovino Thomas"], runtime: 142, tmdbPopularity: 12 }) },
-      { body: "A one-room chamber piece that quietly arrived on Aha. A real find.", release: mk({ id: "o3", title: "Sitting", language: "Telugu", platform: ["Aha"], releaseDate: "2026-06-20", releaseDates: { ott: "2026-06-20" }, director: "Praveen Kandregula", cast: ["Priyadarshi"], runtime: 96, tmdbVoteAverage: 7.4, tmdbVoteCount: 300 }) },
-      { body: "Lean Telugu thriller dropping straight to Netflix. A sharp 100 minutes.", release: mk({ id: "o2", title: "Razor", language: "Telugu", genre: ["Thriller"], platform: ["Netflix"], releaseDate: "2026-06-19", releaseDates: { ott: "2026-06-19" }, director: "Sailesh Kolanu", cast: ["Nani"], runtime: 104, tbsiScore: 6.5, tbsiSourceCount: 3, imdbRating: 6.6 }) },
+      { body: "Mass-y action that knows exactly what it is. Now on JioHotstar.", release: mk({ id: "o5", title: "Athiradi", language: "Malayalam", genre: ["Action"], platform: ["JioHotstar"], releaseDate: "2026-06-19", releaseDates: { ott: "2026-06-19" }, director: "Lal Jose", cast: ["Tovino Thomas"], runtime: 142, tmdbPopularity: 300 }) },
+      { body: "A one-room chamber piece that quietly arrived on Aha. A real find.", release: mk({ id: "o3", title: "Sitting", language: "Telugu", platform: ["Aha"], releaseDate: "2026-06-20", releaseDates: { ott: "2026-06-20" }, posterUrl: SAMPLE_POSTER, director: "Praveen Kandregula", cast: ["Priyadarshi"], runtime: 96, tmdbVoteAverage: 7.4, tmdbVoteCount: 300, tmdbPopularity: 500 }) },
+      { body: "Lean Telugu thriller dropping straight to Netflix. A sharp 100 minutes.", release: mk({ id: "o2", title: "Razor", language: "Telugu", genre: ["Thriller"], platform: ["Netflix"], releaseDate: "2026-06-19", releaseDates: { ott: "2026-06-19" }, posterUrl: SAMPLE_POSTER, director: "Sailesh Kolanu", cast: ["Nani"], runtime: 104, tbsiScore: 6.5, tbsiSourceCount: 3, imdbRating: 6.6, tmdbPopularity: 700 }) },
       { body: "Slow-burn rural drama that finally hit SonyLIV this week. Worth the wait.", release: mk({ id: "o4", title: "Kenatha Kanom", language: "Tamil", platform: ["SonyLIV"], releaseDate: "2026-06-16", releaseDates: { ott: "2026-06-16" }, director: "Ameer", cast: ["Vikram Prabhu"], runtime: 128, tmdbPopularity: 50 }) },
-      { body: "The franchise everyone swore was over returns — and it still grips. Now on Prime Video.", release: mk({ id: "o1", title: "Drishyam 3", language: "Malayalam", genre: ["Thriller"], platform: ["Prime Video"], releaseDate: "2026-06-18", releaseDates: { ott: "2026-06-18" }, posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg", director: "Jeethu Joseph", cast: ["Mohanlal"], runtime: 151, tbsiScore: 8.3, tbsiSourceCount: 4, imdbRating: 8.1, rottenTomatoes: 85, metacritic: 73, letterboxd: 4.0 }) },
+      { body: "The franchise everyone swore was over returns — and it still grips. Now on Prime Video.", release: mk({ id: "o1", title: "Drishyam 3", language: "Malayalam", genre: ["Thriller"], platform: ["Prime Video"], releaseDate: "2026-06-18", releaseDates: { ott: "2026-06-18" }, posterUrl: SAMPLE_POSTER, director: "Jeethu Joseph", cast: ["Mohanlal"], runtime: 151, tbsiScore: 8.3, tbsiSourceCount: 4, imdbRating: 8.1, rottenTomatoes: 85, metacritic: 73, letterboxd: 4.0, tmdbPopularity: 950 }) },
+    ]
+  );
+
+  // ── Adaptive 3-film grid (two on top, one full-width below) ──
+  // Lead + bottom cell carry posters so the full-width bottom tile shows an image.
+  // Expected prominence order: Kingdom (800) → Mirage (500) → Echo (200).
+  const threeDraft = draftOf(
+    "Jun 17 — Jun 21, 2026",
+    { title: "Three to stream.", body: "A tighter week, still worth it." },
+    [
+      { body: "A sweeping period epic that finally lands on Netflix.", release: mk({ id: "d3-1", title: "Kingdom", language: "Telugu", genre: ["Action"], platform: ["Netflix"], releaseDate: "2026-06-18", releaseDates: { ott: "2026-06-18" }, posterUrl: SAMPLE_POSTER, director: "Gowtam Tinnanuri", cast: ["Vijay Deverakonda"], runtime: 150, tmdbPopularity: 800 }) },
+      { body: "A twisty mid-budget thriller worth a quiet evening.", release: mk({ id: "d3-2", title: "Mirage", language: "Tamil", genre: ["Thriller"], platform: ["Aha"], releaseDate: "2026-06-19", releaseDates: { ott: "2026-06-19" }, director: "Karthik Naren", cast: ["Arun Vijay"], runtime: 118, tmdbPopularity: 500 }) },
+      { body: "A tender indie that rewards patience.", release: mk({ id: "d3-3", title: "Echo", language: "Malayalam", genre: ["Drama"], platform: ["SonyLIV"], releaseDate: "2026-06-17", releaseDates: { ott: "2026-06-17" }, posterUrl: SAMPLE_POSTER, director: "Lijo Jose Pellissery", cast: ["Fahadh Faasil"], runtime: 104, tmdbPopularity: 200 }) },
     ]
   );
 
@@ -292,14 +323,19 @@ if (isMainModule) {
   };
 
   // Mirror produceEdition's skip guard for this render check (the real guard
-  // lives in src/jobs/wednesday-drop.ts and runs BEFORE renderWedDrop).
+  // lives in src/jobs/wednesday-drop.ts and runs BEFORE renderWedDrop). Each
+  // sample writes to its OWN review folder — renderWedDrop's cleanOldRenders is
+  // scoped per (slug, date), so same-edition samples would otherwise overwrite
+  // one another. Distinct dirs keep every cover on disk for pixel review.
   const renderOrSkip = async (label: string, draft: WednesdayDropDraft, edition: WedDropEdition) => {
     if (draft.slides.length === 0) {
       log.info(`  [${label}] edition skipped — no films (no cover, no cards rendered)`);
       return;
     }
-    log.info(`  [${label}] rating order: ${draft.releases.map((r, i) => `${i + 1}. ${r.title}`).join("  →  ")}`);
-    const result = await renderWedDrop(draft, 2, edition);
+    const safe = label.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
+    const dir = `output/review/wed-cover/${safe}`;
+    log.info(`  [${label}] prominence order: ${draft.releases.map((r, i) => `${i + 1}. ${r.title}`).join("  →  ")}`);
+    const result = await renderWedDrop(draft, 2, edition, dir);
     log.success(`  [${label}] cover: ${result.coverPath} | cards: ${result.cardPaths.length}`);
     for (const p of result.cardPaths) log.info(`           ${p}`);
   };
@@ -307,6 +343,7 @@ if (isMainModule) {
   try {
     await renderOrSkip("theatrical", theatricalDraft, "theatrical");
     await renderOrSkip("ott", ottDraft, "ott");
+    await renderOrSkip("ott-three (3 films)", threeDraft, "ott");
     await renderOrSkip("theatrical-mini (2 films)", miniDraft, "theatrical");
     await renderOrSkip("theatrical-empty (0 films)", emptyDraft, "theatrical");
     log.success("\n✓ Render complete for both editions.");

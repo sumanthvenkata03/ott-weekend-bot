@@ -167,19 +167,27 @@ export interface WedDropGridItem {
   platformLogos: string[];     // ["netflix", "jiohotstar"] — filename stems
   posterUrl?: string;
   fallbackColor: string;
+  /** CSS object-position for the poster crop, e.g. "center 18%". Set only on
+   *  the cover's top-4 grid items by the dark-crop safeguard; body cards ignore
+   *  it. Defaults to "center 18%" in the template when unset. */
+  cropPosition?: string;
 }
 
 /** Full context for the Wed Drop cover slide (1080x1350) */
 export interface WedDropCoverContext extends RenderBase {
   pillarLabel: "WED DROP";
-  /** Edition masthead label: "IN THEATERS" | "NOW STREAMING" */
+  /** Edition masthead label: "IN THEATERS" | "NOW STREAMING" (retained for
+   *  parity with the card context; the redesigned cover no longer renders it —
+   *  the edition reads from the plain h1 instead). */
   editionLabel: string;
+  /** Plain edition h1, e.g. "This Week's OTT Drops." / "This Week's Theatrical
+   *  Drops." Derived from the edition — no LLM copy. */
+  coverTitle: string;
+  /** Grid layout class for the poster wall: "count-1".."count-4" (top-4 cap). */
+  gridClass: string;
   weekendDates: string;
   filmCount: number;
-  /** From LLM: 6-word headline + subtext (slide 1 in carouselSlides) */
-  coverHeadline: string;
-  coverSubtext: string;
-  /** Up to 4 films shown as a 2x2 grid */
+  /** Up to 4 films shown as a poster-wall grid (prominence order) */
   gridItems: WedDropGridItem[];
 }
 

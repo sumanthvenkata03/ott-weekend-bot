@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;0,800;1,400;1,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&family=Inter:wght@600;700;800&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
 <style>
   :root {
     --ink: #1A1614;
@@ -17,90 +17,42 @@
     height: 1350px;
     overflow: hidden;
     font-family: 'Playfair Display', Georgia, serif;
-    background: var(--cream);
-    color: var(--ink);
+    background: var(--ink);
+    color: var(--cream);
   }
-  .canvas { position: relative; width: 100%; height: 100%; padding: 60px 70px; }
+  .canvas { position: relative; width: 100%; height: 100%; overflow: hidden; }
 
-  /* Masthead — newspaper-style title bar */
-  .masthead {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    font-size: 22px;
-    letter-spacing: 4px;
-    color: var(--ink);
-  }
-  .masthead .date {
-    font-family: 'JetBrains Mono', monospace;
-    font-weight: 500;
-    font-size: 20px;
-  }
-  .masthead-rule {
-    border-top: 4px solid var(--ink);
-    margin-top: 14px;
-    padding-top: 4px;
-    border-bottom: 1px solid var(--ink);
-  }
-
-  /* Headline block */
-  .headline-block {
-    margin-top: 40px;
-    text-align: center;
-  }
-  .headline-block .kicker {
-    font-family: 'Playfair Display', serif;
-    font-size: 18px;
-    font-style: italic;
-    color: var(--vermillion);
-    letter-spacing: 3px;
-    margin-bottom: 12px;
-    text-transform: uppercase;
-  }
-  .headline-block .big {
-    font-family: 'Playfair Display', serif;
-    font-size: 84px;
-    font-weight: 700;
-    line-height: 0.98;
-    color: var(--ink);
-    letter-spacing: -1.5px;
-  }
-  .headline-block .sub {
-    font-family: 'Playfair Display', serif;
-    font-style: italic;
-    font-size: 32px;
-    color: var(--vermillion);
-    margin-top: 18px;
-    line-height: 1.3;
-  }
-
-  /* Poster grid 2x2 */
-  .poster-grid {
+  /* ── Poster wall: full-bleed grid of the TOP 4 films (prominence order) ── */
+  .grid {
     position: absolute;
-    top: 480px;
-    left: 70px;
-    right: 70px;
-    bottom: 160px;
+    inset: 0;
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: 1fr 1fr;
-    gap: 18px;
+    z-index: 1;
   }
-  .poster-cell {
-    background-color: var(--ink);
-    border: 4px solid var(--vermillion);
+  /* Adaptive layouts by film count (capped at 4). */
+  .grid.count-1 { grid-template-columns: 1fr;      grid-template-rows: 1fr; }
+  .grid.count-2 { grid-template-columns: 1fr;      grid-template-rows: 1fr 1fr; }
+  .grid.count-3 { grid-template-columns: 1fr 1fr;  grid-template-rows: 1fr 1fr; }
+  .grid.count-4 { grid-template-columns: 1fr 1fr;  grid-template-rows: 1fr 1fr; }
+  /* 3 films → two on top, one full-width below. */
+  .grid.count-3 .cell:nth-child(3) { grid-column: 1 / -1; }
+
+  .cell {
     position: relative;
     overflow: hidden;
+    background-color: var(--ink);
   }
-  .poster-img {
+  .cell-img {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
-    object-fit: cover;
-    z-index: 2;
+    object-fit: cover;         /* == background-size: cover */
+    z-index: 2;                /* object-position set inline per-cell (dark-crop) */
   }
-  .poster-fallback {
+  /* Posterless film → typographic fallback cell (fallbackColor + title + lang).
+     Also revealed if a poster 404s (img onerror hides the <img>). */
+  .cell-fallback {
     position: absolute;
     inset: 0;
     z-index: 1;
@@ -108,232 +60,162 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    color: var(--cream);
     text-align: center;
-    padding: 16px;
+    padding: 28px;
+    color: var(--cream);
   }
-  .poster-fallback-hidden { display: none; }
-  .poster-fallback .lang {
-    font-family: 'Playfair Display', serif;
-    font-size: 12px;
-    letter-spacing: 4px;
-    opacity: 0.7;
-    margin-bottom: 10px;
-  }
-  .poster-fallback .title {
-    font-family: 'Playfair Display', serif;
-    font-size: 22px;
+  .cell-fallback-hidden { display: none; }
+  .cell-fallback .lang {
+    font-family: 'Inter', sans-serif;
+    font-size: 15px;
     font-weight: 700;
-    line-height: 1;
+    letter-spacing: 0.34em;
+    text-transform: uppercase;
+    opacity: 0.75;
+    margin-bottom: 16px;
+  }
+  .cell-fallback .title {
+    font-family: 'Playfair Display', serif;
+    font-size: 40px;
+    font-weight: 800;
+    line-height: 1.02;
     letter-spacing: -0.5px;
   }
-  /* Title bar at bottom of each poster cell */
-  .poster-tag {
+
+  /* ── Scrim band (the approved "B2-open" level) ── */
+  .scrimband {
     position: absolute;
-    bottom: 0;
     left: 0; right: 0;
-    background: rgba(0,0,0,0.8);
-    color: var(--cream);
-    padding: 8px 12px;
-    font-family: 'Playfair Display', serif;
-    font-size: 17px;
-    font-weight: 700;
-    text-align: center;
-    z-index: 3;
-    border-top: 1.5px solid var(--brass);
-  }
-  .poster-tag .lang-pip {
-    color: var(--brass);
-    font-style: italic;
-    font-size: 13px;
-    font-weight: 500;
-    margin-left: 6px;
-  }
-
-  /* Footer */
-  .footer {
-    position: absolute;
-    bottom: 60px;
-    left: 70px;
-    right: 70px;
-    border-top: 4px solid var(--ink);
-    padding-top: 14px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .footer .brand {
-    font-family: 'Playfair Display', serif;
-    font-size: 18px;
-    letter-spacing: 4px;
-    color: var(--ink);
-  }
-  .footer .meta {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
-    letter-spacing: 1px;
-    color: var(--ink);
-  }
-
-  /* ── Swipe affordances (additive) ── */
-
-  /* A — centered swipe cue, sits in the band above the footer rule */
-  .swipe-cue {
-    position: absolute;
-    left: 70px;
-    right: 70px;
-    bottom: 116px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
-  }
-  .swipe-cue-rule {
-    width: 64px;
-    height: 1px;
-    background: var(--vermillion);
-  }
-  .swipe-cue-text {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--vermillion);
-    white-space: nowrap;
-  }
-
-  /* B — page-turn dog-ear, pinned to the cover's true bottom-right corner */
-  .page-turn {
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    z-index: 6;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 560px;
+    z-index: 4;
+    background: linear-gradient(180deg,
+      rgba(26,22,20,0) 0%,
+      rgba(26,22,20,.42) 26%,
+      rgba(26,22,20,.50) 50%,
+      rgba(26,22,20,.42) 74%,
+      rgba(26,22,20,0) 100%);
     pointer-events: none;
-    display: flex;
-    align-items: flex-end;
-    gap: 8px;
-  }
-  .page-turn-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    color: var(--vermillion);
-    margin-bottom: 8px;
-  }
-  .page-turn-svg .tri { fill: var(--brass); }
-  .page-turn-svg .fold-line { stroke: var(--ink); stroke-width: 1; }
-  .page-turn-svg .turn-arrow {
-    fill: var(--ink);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 16px;
   }
 
-  /* D — chevron-trail gutter: translucent veil over the grid's right edge */
-  .swipe-gutter {
+  /* ── Centered content ── */
+  .content {
     position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: 19%;
+    left: 64px; right: 64px;
+    top: 50%;
+    transform: translateY(-50%);
     z-index: 5;
-    pointer-events: none;
-    background: rgba(26, 22, 20, 0.40);
+    text-align: center;
+  }
+  .eyebrow {
+    font-family: 'Inter', sans-serif;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.34em;
+    font-size: 20px;
+    color: var(--brass);
+    text-shadow: 0 2px 6px rgba(0,0,0,.95), 0 4px 18px rgba(0,0,0,.8);
+    margin-bottom: 30px;
+  }
+  .eyebrow .star { color: var(--vermillion); }
+  .cover-title {
+    font-family: 'Playfair Display', serif;
+    font-weight: 900;
+    font-size: 98px;
+    line-height: 1;
+    color: var(--cream);
+    -webkit-text-stroke: 1.8px var(--cream);
+    text-shadow:
+      0 2px 5px rgba(0,0,0,.95),
+      0 8px 28px rgba(0,0,0,.9),
+      0 0 70px rgba(0,0,0,.63);
+    margin-bottom: 30px;
+  }
+  .meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 21px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--brass);
+    text-shadow: 0 2px 6px rgba(0,0,0,.95), 0 4px 18px rgba(0,0,0,.8);
+    margin-bottom: 26px;
+  }
+  .swipe {
+    font-family: 'Inter', sans-serif;
+    font-weight: 800;
+    font-size: 22px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--cream);
+    text-shadow: 0 2px 6px rgba(0,0,0,.95), 0 4px 18px rgba(0,0,0,.8);
+  }
+  .swipe .arrow { color: var(--brass); }
+
+  /* ── Chevron tab (right edge) ── */
+  .chev-tab {
+    position: absolute;
+    right: 0;
+    top: 37%;
+    z-index: 6;
+    background: rgba(26,22,20,.5);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    padding: 16px 20px 16px 24px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 6px;
+    gap: 4px;
   }
-  .swipe-gutter .chev { display: block; }
-  .swipe-gutter .chev-1 { opacity: 0.6; }
-  .swipe-gutter .chev-2 { opacity: 0.8; }
-  .swipe-gutter .chev-3 { opacity: 1.0; }
-  .swipe-gutter .chev path {
-    fill: none;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+  .chev-tab .chev {
+    font-family: 'Inter', sans-serif;
+    font-weight: 800;
+    font-size: 46px;
+    line-height: 1;
+    color: var(--cream);
   }
-  /* dark underlay halo — legibility over bright posters; does NOT touch the veil */
-  .swipe-gutter .chev .chev-halo {
-    stroke: #1A1614;
-    stroke-width: 13;
-    opacity: 0.45;
-  }
-  .swipe-gutter .chev .chev-line {
-    stroke: #F4ECDC;
-    stroke-width: 9;
-  }
+  .chev-tab .chev-1 { opacity: 0.4; }
+  .chev-tab .chev-2 { opacity: 0.68; }
+  .chev-tab .chev-3 { opacity: 1.0; }
 </style>
 </head>
 <body>
 <div class="canvas">
 
-  <div class="masthead">
-    <span>★ THE BIG SCREEN INDEX · WED DROP · {{ editionLabel }}</span>
-    <span class="date">№ {{ issue }} · {{ date | date('dd-mm-yy') }}</span>
-  </div>
-  <div class="masthead-rule"></div>
-
-  <div class="headline-block">
-    <div class="kicker">★ THE WEEKEND ENDS HERE ★</div>
-    <div class="big">{{ coverHeadline }}</div>
-    <div class="sub">{{ coverSubtext }}</div>
-  </div>
-
-  <div class="poster-grid">
+  <!-- POSTER WALL — top 4 films (prominence order) -->
+  <div class="grid {{ gridClass }}">
     {% for item in gridItems %}{% if loop.index <= 4 %}
-    <div class="poster-cell" style="background-color: {{ item.fallbackColor }};">
+    <div class="cell" style="background-color: {{ item.fallbackColor }};">
       {% if item.posterUrl %}
-        <img src="{{ item.posterUrl }}" class="poster-img" alt="" onerror="this.style.display='none'" />
+        <img src="{{ item.posterUrl }}" class="cell-img" alt=""
+             style="object-position: {{ item.cropPosition or 'center 18%' }};"
+             onerror="this.style.display='none'" />
       {% endif %}
-      <div class="poster-fallback {% if item.posterUrl %}poster-fallback-hidden{% endif %}">
+      <div class="cell-fallback {% if item.posterUrl %}cell-fallback-hidden{% endif %}">
         <div class="lang">{{ item.language | upper }}</div>
         <div class="title">{{ item.filmTitle }}</div>
       </div>
-      <div class="poster-tag">
-        {{ item.filmTitle }}<span class="lang-pip">{{ item.language }}</span>
-      </div>
     </div>
     {% endif %}{% endfor %}
-
-    <!-- D — chevron-trail gutter: translucent veil over the grid's right edge -->
-    <div class="swipe-gutter">
-      <svg class="chev chev-1" viewBox="0 0 36 72" width="36" height="72" aria-hidden="true">
-        <path class="chev-halo" d="M11 14 L27 36 L11 58" />
-        <path class="chev-line" d="M11 14 L27 36 L11 58" />
-      </svg>
-      <svg class="chev chev-2" viewBox="0 0 36 72" width="36" height="72" aria-hidden="true">
-        <path class="chev-halo" d="M11 14 L27 36 L11 58" />
-        <path class="chev-line" d="M11 14 L27 36 L11 58" />
-      </svg>
-      <svg class="chev chev-3" viewBox="0 0 36 72" width="36" height="72" aria-hidden="true">
-        <path class="chev-halo" d="M11 14 L27 36 L11 58" />
-        <path class="chev-line" d="M11 14 L27 36 L11 58" />
-      </svg>
-    </div>
   </div>
 
-  <!-- A — centered swipe cue, just above the footer rule -->
-  <div class="swipe-cue">
-    <span class="swipe-cue-rule"></span>
-    <span class="swipe-cue-text">{% if filmCount >= 2 %}SWIPE FOR ALL {{ filmCount }} →{% else %}SWIPE  →{% endif %}</span>
-    <span class="swipe-cue-rule"></span>
+  <!-- SCRIM BAND -->
+  <div class="scrimband"></div>
+
+  <!-- CHEVRON TAB (swipe affordance #1) -->
+  <div class="chev-tab">
+    <span class="chev chev-1">&#10095;</span>
+    <span class="chev chev-2">&#10095;</span>
+    <span class="chev chev-3">&#10095;</span>
   </div>
 
-  <div class="footer">
-    <span class="brand">★ VOL. {{ vol }} · {{ filmCount }} {{ "FILM" | pluralize(filmCount, "FILMS") }} ★</span>
-    <span class="meta">{{ weekendDates }}</span>
-  </div>
-
-  <!-- B — page-turn dog-ear, true bottom-right corner of the cover -->
-  <div class="page-turn">
-    <span class="page-turn-label">TURN</span>
-    <svg class="page-turn-svg" width="64" height="64" viewBox="0 0 64 64" aria-hidden="true">
-      <path class="tri" d="M64 0 L64 64 L0 64 Z" />
-      <line class="fold-line" x1="64" y1="0" x2="0" y2="64" />
-      <text class="turn-arrow" x="46" y="52" text-anchor="middle">&#8594;</text>
-    </svg>
+  <!-- CENTERED CONTENT -->
+  <div class="content">
+    <div class="eyebrow"><span class="star">&#9733;</span> THE BIG SCREEN INDEX &middot; WED DROP <span class="star">&#9733;</span></div>
+    <div class="cover-title">{{ coverTitle }}</div>
+    <div class="meta">&#8470; {{ issue }} &middot; {{ filmCount }} {{ "FILM" | pluralize(filmCount, "FILMS") }} &middot; {{ weekendDates }}</div>
+    <!-- swipe affordance #2 -->
+    <div class="swipe">{% if filmCount >= 2 %}SWIPE FOR ALL {{ filmCount }} <span class="arrow">&#8594;</span>{% else %}SWIPE <span class="arrow">&#8594;</span>{% endif %}</div>
   </div>
 
 </div>

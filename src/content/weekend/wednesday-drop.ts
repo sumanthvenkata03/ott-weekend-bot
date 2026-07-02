@@ -7,7 +7,7 @@ import type { Release } from "../../shared/types.js";
 import type { WednesdayDropDraft } from "../../delivery/notion.js";
 import type { WedDropEdition } from "../../shared/wed-drop-edition.js";
 import { notableComposersBlock, enrichmentBlock } from "./_shared.js";
-import { TMDB_FALLBACK_MIN_VOTES } from "../../rendering/_shared.js";
+import { compareByProminence } from "../../shared/prominence.js";
 
 /**
  * Wed Drop is a variable-count post now that it spans both this weekend's
@@ -92,101 +92,22 @@ function editionFraming(edition: WedDropEdition, weekendDates: string) {
 }
 
 /**
- * Rating tier for the deterministic sort. The three tiers MUST mirror
- * buildStampContext's seal logic (TBSI blend → TMDb community fallback → NEW /
- * unrated) so a card's position never disagrees with its stamp: a TBSI-blended
- * film always outranks a TMDb-fallback one, which always outranks an unrated
- * premiere that merely happens to be popular.
- *   0  TBSI blend exists (tbsiScore defined)
- *   1  TMDb average that clears the same vote floor the stamp uses
- *   2  no verdict yet
- */
-function ratingTier(r: Release): 0 | 1 | 2 {
-  if (r.tbsiScore !== undefined) return 0;
-  if (
-    typeof r.tmdbVoteAverage === "number" &&
-    (r.tmdbVoteCount ?? 0) >= TMDB_FALLBACK_MIN_VOTES
-  ) {
-    return 1;
-  }
-  return 2;
-}
-
-/** The score the sort ranks by WITHIN a tier (see ratingTier). */
-function scoreWithinTier(r: Release): number {
-  switch (ratingTier(r)) {
-    case 0: return r.tbsiScore ?? 0;
-    case 1: return r.tmdbVoteAverage ?? 0;
-    default: return r.tmdbPopularity ?? 0;
-  }
-}
-
-/**
- * Language priority for ordering the UNRATED tier (tier 2), where there is no
- * verdict to rank by. South-first house style: Telugu → Tamil → Malayalam →
- * Hindi → Kannada → everything else. Keys are lowercased; both full names and
- * ISO codes are accepted so the map keys on whatever form Release.language
- * holds (today it's a full English name). Anything unlisted falls to 5.
- */
-const LANGUAGE_PRIORITY: Record<string, number> = {
-  telugu: 0, te: 0,
-  tamil: 1, ta: 1,
-  malayalam: 2, ml: 2,
-  hindi: 3, hi: 3,
-  kannada: 4, kn: 4,
-};
-
-function languagePriority(r: Release): number {
-  return LANGUAGE_PRIORITY[String(r.language).toLowerCase()] ?? 5;
-}
-
-/**
- * Deterministic rating comparator: tier ASC, then score-within-tier DESC.
- * Tiebreakers (tmdbPopularity DESC, then title ASC) make the order fully
- * deterministic for equal scores, independent of the LLM's pick order.
- */
-function compareByRating(a: Release, b: Release): number {
-  const tierA = ratingTier(a);
-  const tierB = ratingTier(b);
-  if (tierA !== tierB) return tierA - tierB;                  // tier ASC
-
-  // Unrated tier (2): no verdict to rank by, so order by language priority
-  // (South-first house style) first, then popularity, then title.
-  if (tierA === 2) {
-    const langA = languagePriority(a);
-    const langB = languagePriority(b);
-    if (langA !== langB) return langA - langB;               // language ASC
-    const popA = a.tmdbPopularity ?? 0;
-    const popB = b.tmdbPopularity ?? 0;
-    if (popA !== popB) return popB - popA;                   // popularity DESC
-    return a.title.localeCompare(b.title);                   // title ASC
-  }
-
-  // Rated tiers (0, 1): score-within-tier DESC, then popularity, then title.
-  const scoreA = scoreWithinTier(a);
-  const scoreB = scoreWithinTier(b);
-  if (scoreA !== scoreB) return scoreB - scoreA;             // score DESC
-  const popA = a.tmdbPopularity ?? 0;
-  const popB = b.tmdbPopularity ?? 0;
-  if (popA !== popB) return popB - popA;                     // popularity DESC
-  return a.title.localeCompare(b.title);                     // title ASC
-}
-
-/**
- * Reorder a Wed Drop draft into deterministic rating-descending order,
+ * Reorder a Wed Drop draft into deterministic PROMINENCE-descending order (the
+ * biggest film first, irrespective of rating/verdict — see prominence.ts),
  * overriding the LLM's own ordering. The releases array is sorted by
- * compareByRating (fixing the cover, which reads releases[0..3]); the
+ * compareByProminence (fixing the cover, which reads releases[0..3]); the
  * 'release' slides are reordered to match the sorted releases by exact title
  * (fixing the body cards AND the Notion markdown, which both flow from slide
  * order). Non-release slides (cover / index / cta) keep their positions, and
  * every slide is renumbered so slideNumber stays ascending in the Notion
  * markdown. Inputs are not mutated; new arrays are returned. Array.sort is
- * stable, so the popularity/title tiebreakers fully determine equal-score ties.
+ * stable, so the vote-count/title tiebreakers fully determine equal-popularity
+ * ties. This is presentation order only — it never touches the gate hash.
  */
-export function sortWedDropByRating<
+export function sortWedDropByProminence<
   S extends { type: string; title: string; slideNumber: number }
 >(slides: S[], releases: Release[]): { slides: S[]; releases: Release[] } {
-  const sortedReleases = [...releases].sort(compareByRating);
+  const sortedReleases = [...releases].sort(compareByProminence);
   const orderByTitle = new Map(sortedReleases.map((r, i) => [r.title, i]));
   const sortedReleaseSlides = slides
     .filter(s => s.type === "release")
@@ -323,12 +244,14 @@ Be specific. Take stands. Lean South-heavy where the films justify it.`;
     );
   }
 
-  // Deterministic rating sort — supersedes the LLM's own "order best-first"
+  // Deterministic PROMINENCE sort — supersedes the LLM's own "order best-first"
   // ordering (that prompt rule is now redundant but harmless). Sorting both the
   // releases and the 'release' slides here makes the cover (releases[0..3]),
   // the body cards (release-slide order) and the Notion draft (markdown + the
-  // featured-releases bullets) all follow the same rating-descending order.
-  const sorted = sortWedDropByRating(output.carouselSlides, pickedReleases);
+  // featured-releases bullets) all lead with the biggest film. Presentation
+  // order only — the gate already ran (and hashed) upstream, so this is
+  // hash-neutral by construction.
+  const sorted = sortWedDropByProminence(output.carouselSlides, pickedReleases);
 
   // Render carousel slides as markdown for the Notion body
   const carouselSlides = sorted.slides

@@ -24,6 +24,7 @@ import {
 // HEAT axis (🔥) — DISPLAY-ONLY, computed in isolation from the verdict pipeline.
 // Reads only the release's popularity signals; cannot touch ★/verdict/seal.
 import { computeHeat } from "../content/weekend/heat.js";
+import { compareByProminence } from "../shared/prominence.js";
 
 /**
  * Delete any stale sat-verdict PNGs for this date before re-rendering, so a
@@ -99,10 +100,6 @@ function buildCard(
   };
 }
 
-function pickHero(cards: SatVerdictCard[]): SatVerdictCard {
-  return cards.find(c => c.verdictKind === "must-watch") ?? cards[0];
-}
-
 export interface RenderResult {
   coverPath: string;
   cardPaths: string[];
@@ -116,11 +113,20 @@ export async function renderSatVerdict(
 ): Promise<RenderResult> {
   log.info(`Rendering Sat Verdict — Issue №${issueNumber}`);
 
-  const cards = draft.verdicts.map(slide => {
-    const release = draft.releases.find(r => r.title === slide.filmTitle);
-    return buildCard(slide, release);
-  });
-  const hero = pickHero(cards);
+  // Prominence-first (biggest film leads, irrespective of verdict): pair each
+  // verdict slide with its Release, sort by prominence, and use that one order
+  // for the cards, the cover hero (= card 1), and the poster strip. Pairs are
+  // sorted together so the per-card research (slide.research) stays aligned with
+  // its release in the loop below. Presentation order only — the gate ran upstream.
+  const ordered = draft.verdicts
+    .map(slide => ({ slide, release: draft.releases.find(r => r.title === slide.filmTitle) }))
+    .sort((a, b) => compareByProminence(
+      { title: a.slide.filmTitle, ...(a.release?.tmdbPopularity !== undefined ? { tmdbPopularity: a.release.tmdbPopularity } : {}), ...(a.release?.tmdbVoteCount !== undefined ? { tmdbVoteCount: a.release.tmdbVoteCount } : {}) },
+      { title: b.slide.filmTitle, ...(b.release?.tmdbPopularity !== undefined ? { tmdbPopularity: b.release.tmdbPopularity } : {}), ...(b.release?.tmdbVoteCount !== undefined ? { tmdbVoteCount: b.release.tmdbVoteCount } : {}) },
+    ));
+
+  const cards = ordered.map(({ slide, release }) => buildCard(slide, release));
+  const hero = cards[0]!;
 
   log.info(`  Cards: ${cards.length}  |  Hero: ${hero.filmTitle} (${hero.verdict})`);
 
@@ -195,8 +201,8 @@ export async function renderSatVerdict(
     // research (sample/render path) it falls back to the release's aggregator
     // rating. "NO SCORE YET" (not "NO VERDICT YET") because the card carries a
     // verdict stamp — the missing thing is the audience score, not the verdict.
-    const release = draft.releases.find(r => r.title === card.filmTitle);
-    const research = draft.verdicts[i]?.research;
+    const { slide: orderedSlide, release } = ordered[i]!;
+    const research = orderedSlide.research;
     const stamp = buildStampContext(release, {
       scoreAbsenceLabel: "NO SCORE YET",
       ...(research ? {
@@ -374,6 +380,8 @@ if (isMainModule) {
         // Sample ratings — 4-source stamp (tbsiScore 8.2)
         tbsiScore: 8.2, tbsiSourceCount: 4,
         imdbRating: 8.8, rottenTomatoes: 87, metacritic: 74, letterboxd: 4.2,
+        // Prominence: mid — leads on rating but NOT the biggest film (see below).
+        tmdbPopularity: 400,
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
         fetchedAt: new Date().toISOString(),
@@ -395,6 +403,8 @@ if (isMainModule) {
         // Sample ratings — 3-source stamp (tbsiScore 7.4, no Letterboxd)
         tbsiScore: 7.4, tbsiSourceCount: 3,
         imdbRating: 7.0, rottenTomatoes: 88, metacritic: 72,
+        // Prominence: lowest of the three.
+        tmdbPopularity: 250,
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
         fetchedAt: new Date().toISOString(),
@@ -411,8 +421,15 @@ if (isMainModule) {
         director: "Mudassar Aziz",
         cast: ["Ayushmann Khurrana", "Tabu", "Wamiqa Gabbi"],
         synopsis: "The third installment of a franchise nobody asked for.",
-        posterUrl: undefined,
-        
+        // Given a poster so the prominence-first hero renders as a clean poster
+        // hero. NOTE: if the biggest film had NO poster, the current (un-redesigned)
+        // Sat cover's typographic fallback hero overlaps the bottom title block —
+        // a known fragility flagged for the separate Sat cover design pass.
+        posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
+        // Prominence: BIGGEST film (a tent-pole franchise) despite a Skip verdict —
+        // under prominence-first it becomes card 1 + the cover hero, proving the
+        // "biggest leads, irrespective of verdict" behavior.
+        tmdbPopularity: 900,
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
         fetchedAt: new Date().toISOString(),
@@ -426,7 +443,7 @@ if (isMainModule) {
     // feeds the real trimmed list from selectVerdictCards. The unrated
     // "NO SCORE YET" seal is already exercised by card 3 (Pati Patni — no
     // ratings, older release → UNRATED).
-    const result = await renderSatVerdict(sampleDraft, 42, "output/posts", [
+    const result = await renderSatVerdict(sampleDraft, 42, "output/review/sat-verdict", [
       "Deewana", "Sitting", "Dark Giant", "Loafer Returns", "Nayagan 2", "Quick Cut",
     ]);
     log.success(`\n✓ Render complete:`);
