@@ -2,103 +2,48 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;0,800;1,400;1,700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,800;0,900;1,400;1,700&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 {% include "_design-tokens.html" %}
 <style>
+  /* Sat Verdict body card — "Image Left / Content Right" (Variant 6).
+     Image-forward: poster fills the LEFT 60%; a cream content column on the
+     RIGHT 40% carries only the essentials in 4 equal rows (title+kicker,
+     one-line caption, ★ seal, verdict stamp). The old split "ticket" (admit-one,
+     platform block, runtime, cast, released marquee, available-in, watch-if,
+     masthead, perforation, footer) is intentionally dropped from the face. */
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
     width: 1080px;
-    height: 1080px;
+    height: 1350px;
     overflow: hidden;
     font-family: 'Playfair Display', Georgia, serif;
-    background: var(--brass);
-    color: var(--ink);
-  }
-  body.skip { background: var(--cream); }
-
-  .canvas {
-    position: relative;
-    width: 100%;
-    height: 100%;
-  }
-
-  /* Masthead */
-  .masthead {
-    position: absolute;
-    top: 50px;
-    left: 24px;
-    right: 24px;
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-  }
-  .masthead .label {
-    font-family: 'Playfair Display', serif;
-    font-size: 22px;
-    font-weight: 500;
-    letter-spacing: 4px;
-    color: var(--ink);
-  }
-  .masthead .date {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 20px;
-    color: var(--ink);
-  }
-
-  /* Perforation line */
-  .perforation {
-    position: absolute;
-    top: 130px;
-    left: 0; right: 0;
-    border-top: 2px dashed var(--ink);
-  }
-  .perforation::before,
-  .perforation::after {
-    content: '';
-    position: absolute;
-    top: -16px;
-    width: 32px;
-    height: 32px;
-    background: var(--cream);
-    border-radius: 50%;
-  }
-  body:not(.skip) .perforation::before,
-  body:not(.skip) .perforation::after {
     background: var(--ink);
+    color: var(--ink);
   }
-  .perforation::before { left: -16px; }
-  .perforation::after  { right: -16px; }
-
-  /* Ticket body */
-  .ticket-body {
-    position: absolute;
-    top: 180px;
-    left: 24px;
-    right: 24px;
-    bottom: 180px;
+  .card {
+    position: relative;
+    width: 100%; height: 100%;
     display: grid;
-    grid-template-columns: 500px 1fr;
-    gap: 24px;
+    grid-template-columns: 60% 40%;
   }
-  /* Phase 5.7 — outer padding 60→24, gap 30→24, columns bumped. */
-  body.compact .ticket-body { grid-template-columns: 560px 1fr; }
-  body.dense   .ticket-body { grid-template-columns: 440px 1fr; }
 
-  /* Poster window: image overlay on a colored fallback */
-  .poster-window {
-    background-color: {{ card.fallbackColor }};
-    border: 4px solid var(--vermillion);
+  /* ── LEFT 60% — poster shown in FULL (object-fit:contain, never cropped).
+     The ink matte fills the slot space the portrait poster doesn't cover, so it
+     reads as a deliberate dark frame. Vermillion border treatment kept. ── */
+  .poster-col {
     position: relative;
     overflow: hidden;
+    background-color: var(--ink);
+    border: 4px solid var(--vermillion);
   }
   .poster-img {
     position: absolute;
     inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
+    width: 100%; height: 100%;
+    object-fit: contain;
     z-index: 2;
   }
+  /* Posterless film → typographic fallback (revealed if a poster 404s too). */
   .poster-fallback {
     position: absolute;
     inset: 0;
@@ -107,16 +52,9 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    color: var(--cream);
     text-align: center;
-    /* Reserve the lower band for the TBSI seal (a canvas-level stamp anchored to
-       the poster's lower-left, .tbsi-stamp-wrap). Centering the fallback copy over
-       the FULL poster height let a long, 2-line title (e.g. "Moda Kavida
-       Vaathavarana") descend under the seal; the asymmetric bottom padding centers
-       the language + title in the CLEAR UPPER region instead, so it sits clear of
-       the stamp at any realistic title length. Poster cards hide this block
-       (.poster-fallback-hidden → display:none), so only no-poster cards are affected. */
-    padding: 30px 30px 190px;
+    padding: 30px;
+    color: var(--cream);
   }
   .poster-fallback-hidden { display: none; }
   .poster-fallback .lang {
@@ -128,478 +66,166 @@
   }
   .poster-fallback .title-stack {
     font-family: 'Playfair Display', serif;
-    font-size: 38px;
-    font-weight: 700;
+    font-size: 40px;
+    font-weight: 800;
     letter-spacing: -1px;
     line-height: 1;
   }
-  .poster-fallback .credit {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    letter-spacing: 2px;
-    margin-top: 18px;
-    opacity: 0.7;
-  }
 
-  /* HEAT sticker (🔥) — DISPLAY-ONLY buzz badge, top-left of the poster. A separate
-     visual zone from the verdict stamp / seal / "N CRITICS" badge (all on the
-     card's right), so it can never be mistaken for the score. Rendered ONLY when
-     `heat` is present (null heat → no element at all; QUIET still shows). The flame
-     is an inline SVG, not the emoji char — headless Chromium has no colour-emoji
-     font, so a literal 🔥 would render as tofu. */
+  /* HEAT chip (🔥) — DISPLAY-ONLY buzz badge, top-left of the poster. Rendered
+     ONLY when `heat` is present. Inline SVG flame (headless Chromium has no
+     colour-emoji font, so a literal 🔥 would render as tofu). */
   .heat-sticker {
     position: absolute;
-    top: 0;
-    left: 0;
-    z-index: 3;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 9px 14px 9px 11px;
+    top: 30px; left: 30px;
+    z-index: 6;
+    display: flex; align-items: center; gap: 8px;
+    padding: 11px 16px 11px 13px;
     background: var(--vermillion);
     color: var(--cream);
     font-family: 'Inter', sans-serif;
-    font-size: 14px;
-    font-weight: 800;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    border-bottom-right-radius: 6px;
-    box-shadow: 2px 2px 0 rgba(20, 16, 14, 0.28);
+    font-size: 16px; font-weight: 800;
+    letter-spacing: 1.5px; text-transform: uppercase;
+    border-radius: 6px;
+    box-shadow: 2px 3px 0 rgba(20, 16, 14, 0.4);
   }
-  .heat-sticker .flame {
-    width: 15px;
-    height: 18px;
-    display: block;
-    flex-shrink: 0;
-  }
+  .heat-sticker .flame { width: 16px; height: 19px; display: block; flex-shrink: 0; }
   .heat-sticker .flame path { fill: var(--cream); }
 
-  /* Metadata block */
-  .metadata { display: flex; flex-direction: column; }
-  .admit-one {
-    font-family: 'Playfair Display', serif;
-    font-size: 14px;
-    font-weight: 500;
-    letter-spacing: 5px;
+  /* ── RIGHT 40% — cream content column, 4 equal rows ── */
+  .content-col {
+    background: var(--cream);
+    display: grid;
+    grid-template-rows: repeat(4, 1fr);
     color: var(--ink);
-    border-bottom: 1px solid var(--ink);
-    padding-bottom: 8px;
-    margin-bottom: 14px;
   }
-  .film-title {
-    font-family: 'Playfair Display', serif;
-    font-size: 56px;
-    font-weight: 700;
-    letter-spacing: -1px;
-    line-height: 0.98;
-    color: var(--ink);
-    margin-bottom: 18px;
-  }
-  .lang-line {
-    font-family: 'Playfair Display', serif;
-    font-style: italic;
-    font-size: 20px;
-    color: var(--ink);
-    margin-bottom: 6px;
-    opacity: 0.85;
-  }
-  /* Phase 5.5 — Line 2: cast + (optional) music director. */
-  .lang-line-2 {
-    font-family: 'Inter', sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    letter-spacing: 0.3px;
-    color: var(--ink);
-    opacity: 0.7;
-    margin-bottom: 16px;
-  }
-  .one-line {
-    font-family: 'Playfair Display', serif;
-    font-size: 22px;
-    font-weight: 500;
-    line-height: 1.3;
-    color: var(--ink);
-    border-top: 1px solid var(--ink);
-    padding-top: 14px;
-    margin-bottom: 16px;
-  }
-  .watch-if {
-    font-family: 'Inter', sans-serif;
-    font-size: 16px;
-    line-height: 1.45;
-    color: var(--ink);
-    opacity: 0.85;
-  }
-  .watch-if .label {
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    font-size: 13px;
-    margin-bottom: 4px;
-    opacity: 1;
-  }
-  /* Phase 5.5 — platform color set inline per card.
-     The earlier variant-based override (cream platform-line for must-watch
-     and worth-a-try) is intentionally removed: brand color wins.
-     Post-review: font + tracking reduced (26/4 → 22/3) to stay single-row in
-     the narrower text column that came with wider posters. */
-  .platform-line {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-family: 'Inter', sans-serif;
-    font-size: 22px;
-    font-weight: 800;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    padding-bottom: 6px;
-    margin-top: 12px;
-    margin-bottom: 18px;
-    border-bottom: 2px solid currentColor;
-    white-space: nowrap;
-  }
-  .platform-line.is-gradient {
-    background-image: linear-gradient(
-      90deg,
-      var(--platform-jiohotstar-start) 0%,
-      var(--platform-jiohotstar-end) 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    color: transparent;
-    -webkit-text-fill-color: transparent;
-    border-bottom-color: var(--platform-jiohotstar-end);
-  }
-  .logo-stamp {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 60px;
-    height: 60px;
-    padding: 7px;
-    background: #FFFFFF;
-    border: 1px solid var(--ink);
-    border-radius: 4px;
-    flex-shrink: 0;
-    box-sizing: border-box;
-  }
-  .logo-stamp svg {
-    width: 100%;
-    height: 100%;
-    display: block;
-  }
-
-  /* Verdict stamp variants — HERO treatment (Phase 6).
-     For a brand called "The Verdict," the verdict is the card's anchor: a large,
-     upright, flex-centered block in the lower-right, inside the 24px safe margin
-     and clear of the footer. ONE fixed footprint (320 x min 200) holds all three
-     labels; each is centered on BOTH axes, so "SKIP" (1 line) and the two-line
-     "MUST WATCH" / "WORTH A TRY" all sit identically issue-to-issue.
-     No per-variant <br>: line-wrapping falls out of the box width. The content
-     width fits a single stacked word ("WATCH" / "WORTH" / "A TRY") but NOT
-     "WORTH A" or "MUST WATCH", so the long labels break themselves onto two
-     balanced lines while "SKIP" stays one — purely from width, no hand-placed
-     tags. transform:none — upright reads more authoritative AND removes any
-     rotated-corner overflow past the safe margin on the longest label. */
-  .verdict-stamp {
-    position: absolute;
-    bottom: 112px;
-    right: 24px;
-    width: 320px;
-    min-height: 200px;
-    transform: none;
+  .row {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 22px 20px;
-    z-index: 10;
+    padding: 26px 30px;
+    min-height: 0;
+  }
+  .row + .row { border-top: 1.5px solid rgba(26, 22, 20, 0.16); }
+
+  /* Row 1 — title + small kicker */
+  .row-title .kicker {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px; font-weight: 700;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--vermillion);
+    margin-bottom: 12px;
+  }
+  .row-title .title {
+    font-family: 'Playfair Display', serif;
+    font-weight: 900;
+    font-size: 48px;
+    line-height: 1.0;
+    letter-spacing: -1px;
+    color: var(--ink);
+  }
+  /* Row 2 — one-line caption */
+  .row-caption .caption {
+    font-family: 'Playfair Display', serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 27px;
+    line-height: 1.32;
+    color: var(--ink);
+  }
+  /* Row 3 — ★ seal (in-flow, centered). The shared _tbsi-stamp.html markup +
+     its .tbsi-* visual CSS (in _design-tokens.html) are UNCHANGED; only this
+     per-template positioning wrapper differs: in-flow (not absolute) so it
+     centers in its row. viewBox 0 0 200 200 rescales from this size. */
+  .tbsi-stamp-wrap {
+    width: 188px; height: 188px;
+    transform: rotate(-6deg);
+    filter: drop-shadow(0 5px 12px rgba(20, 16, 14, 0.28));
+    pointer-events: none;
+  }
+
+  /* Row 4 — verdict stamp (in-flow, centered). Per-tier colors preserved:
+     SKIP vermillion outline · WATCH IT (divisive) green · WORTH A TRY ink/brass ·
+     MUST WATCH vermillion. Unknown kind falls to an unstyled loud marker. */
+  .verdict-stamp {
+    display: inline-flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    min-width: 240px;
+    padding: 16px 26px;
     font-family: 'Playfair Display', serif;
     font-weight: 700;
   }
-  .verdict-stamp .kicker {
-    font-size: 14px;
-    font-weight: 500;
-    letter-spacing: 3px;
-    margin-bottom: 12px;
-  }
-  .verdict-stamp .label {
-    font-size: 58px;
-    letter-spacing: 2px;
-    line-height: 0.94;
-  }
-  /* Color semantics preserved at hero scale — three instantly-distinct looks that
-     keep contrast on BOTH card backgrounds (mustard for must-watch/worth-a-try,
-     cream for skip): must-watch = filled vermillion/cream, worth-a-try = filled
-     ink/brass, skip = vermillion outline. Border weights thickened to stay
-     proportional to the larger footprint. */
-  .verdict-must-watch {
-    background: var(--vermillion);
-    color: var(--cream);
-    border: 3px solid var(--cream);
-    box-shadow: inset 0 0 0 6px var(--vermillion);
-  }
-  .verdict-worth-a-try {
-    background: var(--ink);
-    color: var(--brass);
-    border: 3px solid var(--brass);
-  }
-  .verdict-skip {
-    background: transparent;
-    color: var(--vermillion);
-    border: 7px solid var(--vermillion);
-  }
-  /* DIVISIVE — bottle-green (#2E5742) filled stamp with cream text/border,
-     mirroring the must-watch filled treatment. Shares the brass body bg, so it
-     also picks up the body.divisive inversions below. */
-  .verdict-divisive {
-    background: var(--bottle);
-    color: var(--cream);
-    border: 3px solid var(--cream);
-    box-shadow: inset 0 0 0 6px var(--bottle);
-  }
-
-  /* Phase 5.6 — must-watch / worth-a-try / divisive variants have a brass body
-     bg, so the default filled-brass pill goes invisible against it. Invert to
-     ink bg + brass text for these variants so the pill shape stays visible.
-     Skip-variant cards have a cream bg and use the default brass pill. */
-  body.must-watch .pill-filled,
-  body.worth-a-try .pill-filled,
-  body.divisive .pill-filled {
-    background: var(--ink);
-    color: var(--brass);
-  }
-
-  /* Phase 5.8 — marquee inversion for mustard-bg variants. Brass rules and
-     vermillion labels would clash on mustard; switch to ink across the
-     marquee. Skip-variant cards have cream bg and use the default brass
-     marquee from _design-tokens.html. */
-  body.must-watch .marquee-rule,
-  body.worth-a-try .marquee-rule,
-  body.divisive .marquee-rule {
-    border-top-color: var(--ink);
-  }
-  body.must-watch .marquee-label,
-  body.worth-a-try .marquee-label,
-  body.divisive .marquee-label {
-    color: var(--ink);
-    opacity: 0.85;
-  }
-  body.must-watch .marquee-divider,
-  body.worth-a-try .marquee-divider,
-  body.divisive .marquee-divider {
-    color: var(--ink);
-  }
-
-  /* Phase 5.8 follow-up — section labels ("★ RELEASED", "★ AVAILABLE IN")
-     also need to flip to ink on mustard. Vermillion-on-mustard is too low
-     contrast to read at swipe distance. The existing "★ ADMIT ONE" label
-     uses its own .admit-one class with explicit ink already, so it's
-     unaffected by this override. */
-  body.must-watch .section-label,
-  body.worth-a-try .section-label,
-  body.divisive .section-label {
-    color: var(--ink);
-  }
-
-  /* Footer */
-  .footer {
-    position: absolute;
-    bottom: 50px;
-    left: 24px;
-    right: 24px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-top: 1.5px solid var(--ink);
-    padding-top: 14px;
-    font-family: 'Playfair Display', serif;
-    font-size: 16px;
-    letter-spacing: 4px;
-    color: var(--ink);
-  }
-  .footer .meta { font-family: 'JetBrains Mono', monospace; font-size: 14px; letter-spacing: 1px; }
-
-  /* TBSI score seal — Phase 6.1: the ★ score IS the Index's brand, so it becomes
-     a LARGE wax-stamp pressed onto the poster's lower-left, not a small metadata
-     accent. Anchored to the poster's FIXED lower-left corner (left+bottom don't
-     move with density — only the poster's right edge does), so it lands cleanly
-     on the art across compact/standard/dense. Canvas-level + z-index:5 paints it
-     over the poster image; −6° tilt sells the stamped-on feel. This frees the
-     metadata column entirely for the verdict hero (the lower-right pocket now
-     holds the verdict alone). Score logic untouched — positioning wrapper only;
-     the SVG scales with the wrapper. Internal contrast (ink disc + brass ring/
-     text) keeps it legible over both dark and light poster art. */
-  .tbsi-stamp-wrap {
-    position: absolute;
-    bottom: 210px;
-    left: 44px;
-    width: 300px;
-    height: 300px;
-    transform: rotate(-6deg);
-    pointer-events: none;
-    z-index: 5;
-  }
-  /* Reserve the lower-right HERO pocket: wrap the lower copy (verdict one-liner +
-     WATCH IF) before the hero verdict's left edge so no text runs under it. The
-     hero verdict is ALWAYS present (every card has a verdict), so this reserve is
-     unconditional — unlike the old seal-gated reserve, which left no-seal cards'
-     copy running full-width under the stamp. The demoted seal sits higher, above
-     this copy, so it needs no text reserve of its own. The text column yields to
-     the verdict by design (it wraps to more lines / shortens). */
-  .metadata .one-line,
-  .metadata .watch-if { margin-right: 336px; }
+  .verdict-stamp .kicker { font-size: 13px; font-weight: 500; letter-spacing: 3px; margin-bottom: 9px; }
+  .verdict-stamp .label { font-size: 48px; letter-spacing: 2px; line-height: 0.94; }
+  .verdict-must-watch { background: var(--vermillion); color: var(--cream); border: 3px solid var(--cream); box-shadow: inset 0 0 0 5px var(--vermillion); }
+  .verdict-worth-a-try { background: var(--ink); color: var(--brass); border: 3px solid var(--brass); }
+  .verdict-skip { background: transparent; color: var(--vermillion); border: 6px solid var(--vermillion); }
+  .verdict-divisive { background: var(--bottle); color: var(--cream); border: 3px solid var(--cream); box-shadow: inset 0 0 0 5px var(--bottle); }
 </style>
 </head>
-<body class="{{ card.verdictKind }} {{ density }}">
-<div class="canvas">
+<body class="{{ card.verdictKind }}">
+<div class="card">
 
-  <!-- Masthead -->
-  <div class="masthead">
-    <span class="label">★ THE VERDICT · №{{ issue }}</span>
-    <span class="date">{{ date | date('dd-mm') }}</span>
-  </div>
-
-  <!-- Perforation -->
-  <div class="perforation"></div>
-
-  <!-- Ticket body -->
-  <div class="ticket-body">
-
-    <!-- Poster window: img on top of colored fallback -->
-    <div class="poster-window">
-      {% if card.posterUrl %}
-        <img src="{{ card.posterUrl }}" class="poster-img" alt="" onerror="this.style.display='none'" />
-      {% endif %}
-      <div class="poster-fallback {% if card.posterUrl %}poster-fallback-hidden{% endif %}">
-        <div class="lang">{{ card.language | upper }}</div>
-        <div class="title-stack">{{ card.filmTitle }}</div>
-        {% if card.director %}
-        <div class="credit">DIR · {{ card.director | upper }}</div>
-        {% endif %}
-      </div>
-      {# HEAT (🔥) — display-only buzz sticker; omitted entirely when heat is null. #}
-      {% if heat %}
-      <div class="heat-sticker">
-        <svg class="flame" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 6 8 7.5 8 12a4 4 0 0 0 8 0c0-1.5-.7-2.8-1.6-3.9.2 1 .1 2-.5 2.7.5-2-.6-3.8-1.9-5C12.6 5 12 3.6 12 2Z"/></svg>
-        <span>{{ heat.label }}</span>
-      </div>
-      {% endif %}
+  <!-- LEFT 60% — poster + heat chip -->
+  <div class="poster-col">
+    {% if card.posterUrl %}
+      <img src="{{ card.posterUrl }}" class="poster-img" alt="" onerror="this.style.display='none'" />
+    {% endif %}
+    <div class="poster-fallback {% if card.posterUrl %}poster-fallback-hidden{% endif %}">
+      <div class="lang">{{ card.language | upper }}</div>
+      <div class="title-stack">{{ card.filmTitle }}</div>
     </div>
-
-    <!-- Metadata -->
-    <div class="metadata{% if hasSeal %} has-seal{% endif %}">
-      <div class="admit-one">★ ADMIT ONE ★</div>
-      <div class="platform-line{% if platformIsGradient %} is-gradient{% endif %}" style="color: {{ platformColor }};">
-        <span class="star">★</span>
-        {% if card.platform and card.platform.length > 0 %}
-          <span>NOW ON</span>
-          <span>{{ card.platform[0] | upper }}</span>
-          {% set stem = card.platformLogos[0] %}
-          {% if stem %}<span class="logo-stamp">{{ stem | platformLogoSvg | safe }}</span>{% endif %}
-        {% else %}
-          <span>STREAMING TBA</span>
-        {% endif %}
-      </div>
-      <div class="film-title">{{ card.filmTitle }}</div>
-      {# Phase 5.6 — audio languages moved to AVAILABLE IN section below. #}
-      {% if card.runtime %}
-      <div class="lang-line">{{ card.runtime }} min</div>
-      {% endif %}
-      {% set hasCast = card.leadCast and card.leadCast.length > 0 %}
-      {% set hasMusic = card.isMusicDirectorNotable and card.musicDirector %}
-      {% if hasCast or hasMusic %}
-      <div class="lang-line-2">{% if hasCast %}with {{ card.leadCast | join(", ") }}{% endif %}{% if hasCast and hasMusic %}, {% endif %}{% if hasMusic %}music by {{ card.musicDirector }}{% endif %}</div>
-      {% endif %}
-
-      {# Phase 5.8 — RELEASED marquee. Sat Verdict's must-watch/worth-a-try
-         variants have a mustard body bg; the body.must-watch/worth-a-try
-         overrides in this template's <style> recolor rules/labels to ink. #}
-      {% if card.releaseDates and (card.releaseDates.theatrical or card.releaseDates.ott) %}
-      <div class="released-section">
-        <div class="section-label">★ RELEASED</div>
-        <div class="released-marquee">
-          <hr class="marquee-rule" />
-          <div class="marquee-content">
-            {% if card.releaseDates.theatrical and card.releaseDates.ott and card.releaseDates.theatrical != card.releaseDates.ott %}
-              <span class="marquee-event">
-                <span class="marquee-label">IN CINEMAS</span>
-                <span class="marquee-sep">·</span>
-                <span class="marquee-date">{{ card.releaseDates.theatrical | longDate | upper }}</span>
-              </span>
-              <span class="marquee-divider">│</span>
-              <span class="marquee-event">
-                <span class="marquee-label">OTT STREAMING</span>
-                <span class="marquee-sep">·</span>
-                <span class="marquee-date">{{ card.releaseDates.ott | longDate | upper }}</span>
-              </span>
-            {% elif card.releaseDates.ott %}
-              <span class="marquee-event">
-                <span class="marquee-label">OTT STREAMING</span>
-                <span class="marquee-sep">·</span>
-                <span class="marquee-date">{{ card.releaseDates.ott | longDate | upper }}</span>
-              </span>
-            {% elif card.releaseDates.theatrical %}
-              <span class="marquee-event">
-                <span class="marquee-label">IN CINEMAS</span>
-                <span class="marquee-sep">·</span>
-                <span class="marquee-date">{{ card.releaseDates.theatrical | longDate | upper }}</span>
-              </span>
-            {% endif %}
-          </div>
-          <hr class="marquee-rule" />
-        </div>
-      </div>
-      {% endif %}
-
-      {# Phase 5.6 — AVAILABLE IN pill row. #}
-      {% if card.audioLanguages and card.audioLanguages.original %}
-      <div class="languages-section">
-        <div class="section-label">★ AVAILABLE IN</div>
-        <div class="language-pills">
-          <span class="pill pill-filled">{{ card.audioLanguages.original | upper }}</span>
-          {% for lang in card.audioLanguages.dubbed %}
-          <span class="pill pill-outlined">{{ lang }}</span>
-          {% endfor %}
-        </div>
-      </div>
-      {% endif %}
-
-      <div class="one-line">{{ card.oneLineVerdict }}</div>
-      <div class="watch-if">
-        <div class="label">★ WATCH IF</div>
-        {{ card.watchIf | truncate(120) }}
-      </div>
+    {# HEAT (🔥) — display-only buzz sticker; omitted entirely when heat is null. #}
+    {% if heat %}
+    <div class="heat-sticker">
+      <svg class="flame" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 6 8 7.5 8 12a4 4 0 0 0 8 0c0-1.5-.7-2.8-1.6-3.9.2 1 .1 2-.5 2.7.5-2-.6-3.8-1.9-5C12.6 5 12 3.6 12 2Z"/></svg>
+      <span>{{ heat.label }}</span>
     </div>
-
-  </div>
-
-  {% include "_tbsi-stamp.html" %}
-
-  <!-- Verdict stamp — EXPLICIT per kind. The fallback branch deliberately renders
-       a glaring "UNKNOWN" (and the verdict-KIND class won't match any .verdict-*
-       rule, so the box is unstyled too) instead of silently falling through to
-       WORTH A TRY. The render env is throwOnUndefined:false with no strict/throw
-       filter, so a visible marker is the loud-failure pattern here. -->
-  <div class="verdict-stamp verdict-{{ card.verdictKind }}">
-    <div class="kicker">★ THE VERDICT ★</div>
-    {% if card.verdictKind == "must-watch" %}
-      <div class="label">MUST WATCH</div>
-    {% elif card.verdictKind == "worth-a-try" %}
-      <div class="label">WORTH A TRY</div>
-    {% elif card.verdictKind == "divisive" %}
-      <div class="label">WATCH IT</div>
-    {% elif card.verdictKind == "skip" %}
-      <div class="label">SKIP</div>
-    {% else %}
-      <div class="label">⁇ UNKNOWN ⁇</div>
     {% endif %}
   </div>
 
-  <!-- Footer -->
-  <div class="footer">
-    <span>★ THE VERDICT · {{ slotNumber }}/{{ totalSlots }} ★</span>
-    <span class="meta">VOL. {{ vol }} · ISSUE {{ issue }}</span>
+  <!-- RIGHT 40% — cream content, 4 equal rows -->
+  <div class="content-col">
+
+    <!-- Row 1: title + kicker (streaming status · language) -->
+    <div class="row row-title">
+      <div class="kicker">{% if card.platform and card.platform.length > 0 %}&#9733; {{ card.platform[0] | upper }} &middot; {{ card.language | upper }}{% else %}&#9733; {{ card.language | upper }}{% endif %}</div>
+      <div class="title">{{ card.filmTitle }}</div>
+    </div>
+
+    <!-- Row 2: one-line caption -->
+    <div class="row row-caption">
+      <div class="caption">{{ card.oneLineVerdict }}</div>
+    </div>
+
+    <!-- Row 3: ★ score seal (shared include; in-flow via the wrapper above) -->
+    <div class="row row-seal">
+      {% include "_tbsi-stamp.html" %}
+    </div>
+
+    <!-- Row 4: verdict stamp — EXPLICIT per kind. The fallback branch renders a
+         glaring "UNKNOWN" (and the verdict-KIND class won't match any .verdict-*
+         rule, so the box is unstyled too) instead of silently defaulting. -->
+    <div class="row row-verdict">
+      <div class="verdict-stamp verdict-{{ card.verdictKind }}">
+        <div class="kicker">&#9733; THE VERDICT &#9733;</div>
+        {% if card.verdictKind == "must-watch" %}
+          <div class="label">MUST WATCH</div>
+        {% elif card.verdictKind == "worth-a-try" %}
+          <div class="label">WORTH A TRY</div>
+        {% elif card.verdictKind == "divisive" %}
+          <div class="label">WATCH IT</div>
+        {% elif card.verdictKind == "skip" %}
+          <div class="label">SKIP</div>
+        {% else %}
+          <div class="label">&#8263; UNKNOWN &#8263;</div>
+        {% endif %}
+      </div>
+    </div>
+
   </div>
 
 </div>

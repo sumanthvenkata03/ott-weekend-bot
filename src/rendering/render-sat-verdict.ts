@@ -266,7 +266,7 @@ export async function renderSatVerdict(
     await renderToPNG({
       templateName: "sat-verdict-card",
       data: cardCtx as unknown as Record<string, unknown>,
-      width: 1080, height: 1080,
+      width: 1080, height: 1350,
       outputPath: cardPath,
     });
     cardPaths.push(cardPath);
