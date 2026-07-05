@@ -28,14 +28,37 @@
   }
 
   /* ── LEFT 60% — poster shown in FULL (object-fit:contain, never cropped).
-     The ink matte fills the slot space the portrait poster doesn't cover, so it
-     reads as a deliberate dark frame. Vermillion border treatment kept. ── */
+     The slot space the portrait poster doesn't cover is filled by a blurred,
+     darkened copy of the SAME poster (ambient colour, not flat black).
+     Vermillion border treatment kept. ── */
   .poster-col {
     position: relative;
     overflow: hidden;
     background-color: var(--ink);
     border: 4px solid var(--vermillion);
   }
+  /* Ambient fill: same poster, object-fit:cover (allowed to crop — pure fill),
+     heavily blurred + darkened. scale(1.15) overfills so the blur has no
+     transparent halo at the slot edges. Behind everything (z-index 0). It's an
+     <img> (not a CSS background-image) so the renderer's per-<img> wait covers it. */
+  .poster-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transform: scale(1.15);
+    filter: blur(28px) brightness(0.5);
+    z-index: 0;
+  }
+  /* Subtle ink tint over the blurred fill — keeps the heat chip + poster edges
+     legible while letting the poster's colours read through. Do NOT fully cover. */
+  .poster-scrim {
+    position: absolute;
+    inset: 0;
+    background: rgba(20, 16, 14, 0.25);
+    z-index: 1;
+  }
+  /* Foreground poster — unchanged: full, sharp, never cropped, on top. */
   .poster-img {
     position: absolute;
     inset: 0;
@@ -172,6 +195,8 @@
   <!-- LEFT 60% — poster + heat chip -->
   <div class="poster-col">
     {% if card.posterUrl %}
+      <img src="{{ card.posterUrl }}" class="poster-bg" alt="" aria-hidden="true" onerror="this.style.display='none'" />
+      <div class="poster-scrim"></div>
       <img src="{{ card.posterUrl }}" class="poster-img" alt="" onerror="this.style.display='none'" />
     {% endif %}
     <div class="poster-fallback {% if card.posterUrl %}poster-fallback-hidden{% endif %}">
