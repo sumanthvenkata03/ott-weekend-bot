@@ -1,12 +1,14 @@
 // scripts/movie-lookup/sources.ts
-// Pluggable image/data source adapters for the internal movie-lookup tool.
+// Pluggable image/video/data source adapters for the internal movie-lookup tool.
 //
-// Each source is a small adapter with a common interface. Endpoints aggregate
-// across the registered adapters and dedupe, so a NEW source (Fanart.tv, TVDB,
-// …) is added later by writing one adapter and pushing it into IMAGE_SOURCES —
-// no endpoint change required.
+// Each source is a small adapter behind a common interface. Endpoints aggregate
+// across the registered adapters and dedupe, so a NEW source (Fanart.tv, TVDB, …)
+// is added later by writing one adapter and pushing it into SOURCES — no endpoint
+// change required. Each adapter call returns { items, raw } so the tool can show
+// the complete unmodified source payload in its raw-JSON view.
 //
-// Currently registered: TMDb (movie + person images) and OMDb (movie poster).
+// Currently registered: TMDb (movie images + person images + videos) and OMDb
+// (movie poster). Wikipedia background lives in wiki.ts (a different source kind).
 //
 // READ-ONLY + no cache writes: these adapters do DIRECT, UNCACHED TMDb/OMDb GETs
 // (they mirror the base URLs + env-var names the pipeline uses — TMDB_API_KEY /
@@ -75,13 +77,29 @@ export interface ImageItem {
   voteAverage?: number;
 }
 
+export interface VideoItem {
+  source: string;
+  site: string;                         // "YouTube" | "Vimeo" | …
+  key: string;                          // provider video key
+  name: string;
+  type: string;                         // Trailer | Teaser | Clip | Featurette | …
+  official: boolean;
+  url: string;                          // watch URL (opens in a new tab)
+  thumbUrl?: string;                    // provider thumbnail if easy
+  publishedAt?: string;
+}
+
+/** Every adapter call returns its items AND the raw source payload (for raw-JSON). */
+export interface SourcePayload<T> { items: T[]; raw?: unknown; }
+
 export interface MovieImageContext { tmdbId: number; imdbId?: string; }
 export interface PersonImageContext { tmdbId: number; }
 
-export interface ImageSourceAdapter {
+export interface SourceAdapter {
   name: string;
-  getMovieImages(ctx: MovieImageContext): Promise<ImageItem[]>;
-  getPersonImages(ctx: PersonImageContext): Promise<ImageItem[]>;
+  getMovieImages(ctx: MovieImageContext): Promise<SourcePayload<ImageItem>>;
+  getPersonImages(ctx: PersonImageContext): Promise<SourcePayload<ImageItem>>;
+  getMovieVideos?(ctx: MovieImageContext): Promise<SourcePayload<VideoItem>>;
 }
 
 // ── TMDb response shapes we read ─────────────────────────────────────────────
@@ -94,9 +112,16 @@ interface TmdbImage {
 }
 interface TmdbMovieImages { id: number; posters?: TmdbImage[]; backdrops?: TmdbImage[]; }
 interface TmdbPersonImages { id: number; profiles?: TmdbImage[]; }
+interface TmdbVideo {
+  id?: string; key: string; site: string; type: string; name: string;
+  official?: boolean; published_at?: string;
+}
+interface TmdbVideosResponse { id: number; results?: TmdbVideo[]; }
+
+const VIDEO_TYPE_RANK: Record<string, number> = { Trailer: 0, Teaser: 1, Clip: 2, Featurette: 3 };
 
 // ── TMDb adapter ─────────────────────────────────────────────────────────────
-export const tmdbImageSource: ImageSourceAdapter = {
+export const tmdbSource: SourceAdapter = {
   name: "tmdb",
   async getMovieImages(ctx) {
     const res = await tmdbGet<TmdbMovieImages>(`/movie/${ctx.tmdbId}/images`, {
@@ -104,38 +129,51 @@ export const tmdbImageSource: ImageSourceAdapter = {
       include_image_language: "en,hi,te,ta,ml,kn,mr,bn,pa,null",
     });
     const posters = (res.posters ?? []).map((im): ImageItem => ({
-      source: "tmdb",
-      kind: "poster",
-      fullUrl: `${IMG_BASE}original${im.file_path}`,
-      thumbUrl: `${IMG_BASE}w342${im.file_path}`,
-      width: im.width,
-      height: im.height,
-      ...(im.iso_639_1 ? { language: langName(im.iso_639_1) } : {}),
-      voteAverage: im.vote_average,
+      source: "tmdb", kind: "poster",
+      fullUrl: `${IMG_BASE}original${im.file_path}`, thumbUrl: `${IMG_BASE}w342${im.file_path}`,
+      width: im.width, height: im.height,
+      ...(im.iso_639_1 ? { language: langName(im.iso_639_1) } : {}), voteAverage: im.vote_average,
     }));
     const backdrops = (res.backdrops ?? []).map((im): ImageItem => ({
-      source: "tmdb",
-      kind: "backdrop",
-      fullUrl: `${IMG_BASE}original${im.file_path}`,
-      thumbUrl: `${IMG_BASE}w780${im.file_path}`,
-      width: im.width,
-      height: im.height,
-      ...(im.iso_639_1 ? { language: langName(im.iso_639_1) } : {}),
-      voteAverage: im.vote_average,
+      source: "tmdb", kind: "backdrop",
+      fullUrl: `${IMG_BASE}original${im.file_path}`, thumbUrl: `${IMG_BASE}w780${im.file_path}`,
+      width: im.width, height: im.height,
+      ...(im.iso_639_1 ? { language: langName(im.iso_639_1) } : {}), voteAverage: im.vote_average,
     }));
-    return [...posters, ...backdrops];
+    return { items: [...posters, ...backdrops], raw: res };
   },
   async getPersonImages(ctx) {
     const res = await tmdbGet<TmdbPersonImages>(`/person/${ctx.tmdbId}/images`, {});
-    return (res.profiles ?? []).map((im): ImageItem => ({
-      source: "tmdb",
-      kind: "profile",
-      fullUrl: `${IMG_BASE}original${im.file_path}`,
-      thumbUrl: `${IMG_BASE}w185${im.file_path}`,
-      width: im.width,
-      height: im.height,
-      voteAverage: im.vote_average,
+    const items = (res.profiles ?? []).map((im): ImageItem => ({
+      source: "tmdb", kind: "profile",
+      fullUrl: `${IMG_BASE}original${im.file_path}`, thumbUrl: `${IMG_BASE}w185${im.file_path}`,
+      width: im.width, height: im.height, voteAverage: im.vote_average,
     }));
+    return { items, raw: res };
+  },
+  async getMovieVideos(ctx) {
+    const res = await tmdbGet<TmdbVideosResponse>(`/movie/${ctx.tmdbId}/videos`, {});
+    const items = (res.results ?? [])
+      .filter((v) => v.key && v.site)
+      .map((v): VideoItem => ({
+        source: "tmdb",
+        site: v.site,
+        key: v.key,
+        name: v.name,
+        type: v.type,
+        official: !!v.official,
+        url: v.site === "YouTube"
+          ? `https://www.youtube.com/watch?v=${v.key}`
+          : v.site === "Vimeo" ? `https://vimeo.com/${v.key}` : v.key,
+        ...(v.site === "YouTube" ? { thumbUrl: `https://img.youtube.com/vi/${v.key}/hqdefault.jpg` } : {}),
+        ...(v.published_at ? { publishedAt: v.published_at } : {}),
+      }))
+      .sort((a, b) =>
+        Number(b.official) - Number(a.official) ||
+        (VIDEO_TYPE_RANK[a.type] ?? 9) - (VIDEO_TYPE_RANK[b.type] ?? 9) ||
+        (b.publishedAt ?? "").localeCompare(a.publishedAt ?? "")
+      );
+    return { items, raw: res };
   },
 };
 
@@ -143,30 +181,28 @@ export const tmdbImageSource: ImageSourceAdapter = {
 // The existing omdb.ts DROPS the Poster field (fetchOmdbByImdbId → OmdbData has
 // no poster), and editing it to expose Poster is forbidden. So this adapter does
 // its own read-only OMDb GET by IMDb id to surface the single OMDb poster. OMDb
-// has no person endpoint ⇒ getPersonImages returns [].
-export const omdbImageSource: ImageSourceAdapter = {
+// has no person or video endpoint.
+export const omdbSource: SourceAdapter = {
   name: "omdb",
   async getMovieImages(ctx) {
-    if (!ctx.imdbId) return [];
+    if (!ctx.imdbId) return { items: [] };
     const raw = await omdbGet({ i: ctx.imdbId });
     const poster = raw?.["Poster"];
-    if (typeof poster !== "string" || poster === "N/A" || !/^https?:\/\//.test(poster)) return [];
-    return [{
-      source: "omdb",
-      kind: "poster",
-      fullUrl: poster,
-      thumbUrl: poster,
-    }];
+    if (typeof poster !== "string" || poster === "N/A" || !/^https?:\/\//.test(poster)) {
+      return { items: [], raw };
+    }
+    return { items: [{ source: "omdb", kind: "poster", fullUrl: poster, thumbUrl: poster }], raw };
   },
   async getPersonImages() {
-    return []; // OMDb exposes no person images
+    return { items: [] }; // OMDb exposes no person images
   },
 };
 
 // ── Registry — push a new adapter here to add a source (no endpoint changes) ──
-export const IMAGE_SOURCES: ImageSourceAdapter[] = [tmdbImageSource, omdbImageSource];
+export const SOURCES: SourceAdapter[] = [tmdbSource, omdbSource];
 
-function dedupe(items: ImageItem[]): ImageItem[] {
+/** Dedupe images by full URL (exported for tests). */
+export function dedupeImages(items: ImageItem[]): ImageItem[] {
   const seen = new Set<string>();
   const out: ImageItem[] = [];
   for (const it of items) {
@@ -177,20 +213,56 @@ function dedupe(items: ImageItem[]): ImageItem[] {
   return out;
 }
 
+/** Dedupe videos by provider key (exported for tests). */
+export function dedupeVideos(items: VideoItem[]): VideoItem[] {
+  const seen = new Set<string>();
+  const out: VideoItem[] = [];
+  for (const it of items) {
+    const k = `${it.site}:${it.key}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(it);
+  }
+  return out;
+}
+
+export interface Aggregated<T> { items: T[]; raw: Record<string, unknown>; sources: string[]; }
+
+async function runAdapters<T>(
+  call: (s: SourceAdapter) => Promise<SourcePayload<T>> | undefined,
+  dedupeFn: (items: T[]) => T[]
+): Promise<Aggregated<T>> {
+  const settled = await Promise.allSettled(
+    SOURCES.map(async (s) => {
+      const p = call(s);
+      return p ? { name: s.name, payload: await p } : null;
+    })
+  );
+  const raw: Record<string, unknown> = {};
+  const all: T[] = [];
+  for (const r of settled) {
+    if (r.status !== "fulfilled" || !r.value) continue;
+    const { name, payload } = r.value;
+    if (payload.raw !== undefined) raw[name] = payload.raw;
+    all.push(...payload.items);
+  }
+  const items = dedupeFn(all);
+  const sources = [...new Set((items as { source?: string }[]).map((i) => i.source).filter(Boolean) as string[])];
+  return { items, raw, sources };
+}
+
 /** Aggregate movie images across all registered sources; one failing source
- *  never sinks the others (Promise.allSettled). Deduped by full URL. */
-export async function aggregateMovieImages(ctx: MovieImageContext): Promise<ImageItem[]> {
-  const settled = await Promise.allSettled(IMAGE_SOURCES.map((s) => s.getMovieImages(ctx)));
-  return dedupe(settled.flatMap((r) => (r.status === "fulfilled" ? r.value : [])));
+ *  never sinks the others. Deduped by full URL. */
+export function aggregateMovieImages(ctx: MovieImageContext): Promise<Aggregated<ImageItem>> {
+  return runAdapters<ImageItem>((s) => s.getMovieImages(ctx), dedupeImages);
 }
 
 /** Aggregate person images across all registered sources. Deduped by full URL. */
-export async function aggregatePersonImages(ctx: PersonImageContext): Promise<ImageItem[]> {
-  const settled = await Promise.allSettled(IMAGE_SOURCES.map((s) => s.getPersonImages(ctx)));
-  return dedupe(settled.flatMap((r) => (r.status === "fulfilled" ? r.value : [])));
+export function aggregatePersonImages(ctx: PersonImageContext): Promise<Aggregated<ImageItem>> {
+  return runAdapters<ImageItem>((s) => s.getPersonImages(ctx), dedupeImages);
 }
 
-/** Which registered sources actually contributed, for UI/debug. */
-export function contributingSources(items: ImageItem[]): string[] {
-  return [...new Set(items.map((i) => i.source))];
+/** Aggregate movie videos across sources that expose them. Deduped by key. */
+export function aggregateMovieVideos(ctx: MovieImageContext): Promise<Aggregated<VideoItem>> {
+  return runAdapters<VideoItem>((s) => s.getMovieVideos?.(ctx), dedupeVideos);
 }

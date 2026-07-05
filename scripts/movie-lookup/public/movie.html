@@ -81,6 +81,24 @@
     .gimg .src.omdb{background:var(--brass);color:var(--ink);}
     .gimg .dim{position:absolute;bottom:6px;right:6px;font-family:var(--mono);font-size:9px;background:rgba(26,22,20,.72);color:var(--cream);padding:2px 6px;border-radius:2px;}
 
+    /* videos */
+    .vidgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;}
+    .vid{display:flex;gap:10px;border:1px solid var(--line);border-radius:2px;background:#fbf6ea;overflow:hidden;text-decoration:none;color:inherit;transition:transform .08s,border-color .08s;}
+    .vid:hover{transform:translateY(-2px);border-color:var(--vermillion);}
+    .vthumb{position:relative;flex:0 0 120px;aspect-ratio:16/9;background:#1a1614 center/cover no-repeat;display:flex;align-items:center;justify-content:center;}
+    .vthumb .play{color:var(--cream);font-size:22px;text-shadow:0 2px 8px rgba(0,0,0,.6);}
+    .vmeta{display:flex;flex-direction:column;justify-content:center;padding:6px 10px 6px 0;min-width:0;}
+    .vname{font-family:var(--serif);font-weight:700;font-size:14px;line-height:1.2;}
+    .vtype{font-family:var(--mono);font-size:10px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-top:4px;}
+
+    /* background (wikipedia) */
+    .bgcard{display:grid;grid-template-columns:120px 1fr;gap:18px;border:1px solid var(--line);border-radius:2px;background:#fbf6ea;padding:16px;}
+    @media (max-width:560px){.bgcard{grid-template-columns:1fr;}}
+    .bgthumb{width:100%;border:1px solid var(--ink);border-radius:2px;}
+    .bgtitle{font-family:var(--serif);font-weight:900;font-size:20px;}
+    .bgdesc{font-family:var(--serif);font-style:italic;font-weight:400;font-size:15px;color:var(--ink-soft);}
+    .bgextract{font-family:var(--serif);font-size:15px;line-height:1.55;margin:8px 0 10px;}
+
     /* raw */
     details.raw{margin-top:12px;border:1px solid var(--line);border-radius:2px;background:#fbf6ea;}
     details.raw summary{cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--oxblood);padding:12px 14px;user-select:none;}
@@ -153,6 +171,8 @@
     async function getJson(url){ const r = await fetch(url); const d = await r.json().catch(()=>({error:"bad JSON"})); if(!r.ok) throw new Error(d.error||("HTTP "+r.status)); return d; }
 
     let DETAIL = null;
+    const RAW = {};
+    function renderRaw(){ const el = $("#rawPre"); if (el) el.textContent = JSON.stringify(RAW, null, 2); }
 
     (async function init(){
       if (!id) { setStatus("No movie id in URL.", true); return; }
@@ -162,6 +182,8 @@
         renderDetail(DETAIL);
         setStatus("");
         loadImages(id, DETAIL.imdbId);
+        loadVideos(id);
+        loadBackground(id, DETAIL.title, DETAIL.year);
       } catch (e) { setStatus("Failed to load: " + e.message, true); }
     })();
 
@@ -236,7 +258,17 @@
           <div class="grid" id="grid"></div>
         </div>
 
-        <div class="seclabel"><span>Raw Data</span><span class="count">complete source payloads</span></div>
+        <div id="videosWrap" class="hidden">
+          <div class="seclabel"><span>Videos &amp; Trailers</span><span class="count" id="videoCount"></span></div>
+          <div class="vidgrid" id="videos"></div>
+        </div>
+
+        <div id="bgWrap" class="hidden">
+          <div class="seclabel"><span>Background</span><span class="count" id="bgCount"></span></div>
+          <div id="bg"></div>
+        </div>
+
+        <div class="seclabel"><span>Raw Data</span><span class="count">complete source payloads (movie · credits · omdb · images · videos · wiki)</span></div>
         <details class="raw">
           <summary>▸ Show raw JSON (rawData)</summary>
           <pre id="rawPre"></pre>
@@ -246,7 +278,7 @@
 
       renderCast(d.cast||[]);
       renderCrew(d.crew||[]);
-      $("#rawPre").textContent = JSON.stringify(d.rawData, null, 2);
+      RAW.detail = d.rawData; renderRaw();
       $("#rawCopy").addEventListener("click", ()=>{ navigator.clipboard.writeText($("#rawPre").textContent).then(()=>{ $("#rawCopy").textContent="Copied ✓"; setTimeout(()=>$("#rawCopy").textContent="Copy JSON",1200); }); });
     }
 
@@ -277,7 +309,48 @@
         $("#galleryWrap").classList.remove("hidden");
         $("#tabPosters").addEventListener("click", ()=>{curTab="posters";syncTabs();renderGrid();});
         $("#tabBackdrops").addEventListener("click", ()=>{curTab="backdrops";syncTabs();renderGrid();});
+        RAW.images = g.rawData; renderRaw();
       } catch(e){ /* gallery best-effort */ }
+    }
+
+    // ── Videos / trailers ──
+    async function loadVideos(mid){
+      try {
+        const v = await getJson("/api/movie/"+encodeURIComponent(mid)+"/videos");
+        RAW.videos = v.rawData; renderRaw();
+        const vids = v.videos||[];
+        $("#videoCount").textContent = vids.length + (vids.length===1?" video":" videos") + ((v.sources||[]).length?"  ·  "+v.sources.join(", "):"");
+        if (!vids.length){ $("#videos").innerHTML = `<div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft)">No videos available.</div>`; }
+        else {
+          $("#videos").innerHTML = vids.map(v=>`
+            <a class="vid" href="${esc(v.url)}" target="_blank" rel="noopener">
+              <span class="vthumb"${v.thumbUrl?` style="background-image:url('${esc(v.thumbUrl)}')"`:""}><span class="play">▶</span></span>
+              <span class="vmeta"><span class="vname">${esc(v.name)}</span><span class="vtype">${esc(v.type)}${v.official?" · official":""} · ${esc(v.site)}</span></span>
+            </a>`).join("");
+        }
+        $("#videosWrap").classList.remove("hidden");
+      } catch(e){ /* videos best-effort */ }
+    }
+
+    // ── Wikipedia background ──
+    async function loadBackground(mid, title, year){
+      try {
+        const b = await getJson("/api/movie/"+encodeURIComponent(mid)+"/wiki?title="+encodeURIComponent(title)+(year?"&year="+year:""));
+        RAW.background = b.results; renderRaw();
+        const found = (b.results||[]).filter(r=>r.found);
+        $("#bgWrap").classList.remove("hidden");
+        if (!found.length){ $("#bgCount").textContent="no article found"; $("#bg").innerHTML = `<div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft)">No Wikipedia article found for this title.</div>`; return; }
+        $("#bgCount").textContent = found.map(r=>r.source).join(", ");
+        $("#bg").innerHTML = found.map(r=>`
+          <div class="bgcard">
+            ${r.thumbnail?`<img class="bgthumb" src="${esc(r.thumbnail)}" alt="" />`:""}
+            <div class="bgbody">
+              <div class="bgtitle">${esc(r.title)}${r.description?` <span class="bgdesc">— ${esc(r.description)}</span>`:""}</div>
+              <div class="bgextract">${esc(r.extract)}</div>
+              <a class="link" href="${esc(r.url)}" target="_blank" rel="noopener">Read full article on ${esc(r.source)} ↗</a>
+            </div>
+          </div>`).join("");
+      } catch(e){ /* background best-effort */ }
     }
     function syncTabs(){ $("#tabPosters").classList.toggle("active",curTab==="posters"); $("#tabBackdrops").classList.toggle("active",curTab==="backdrops"); }
     function renderGrid(){

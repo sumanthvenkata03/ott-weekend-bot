@@ -65,7 +65,7 @@ export function parseQuery(raw: string): ParsedQuery {
 }
 
 // ── TMDb /search/multi shapes ────────────────────────────────────────────────
-interface MultiHit {
+export interface MultiHit {
   id: number;
   media_type?: string;
   title?: string;
@@ -236,11 +236,16 @@ export interface RankedSearch {
   candidates: RankedResult[];
 }
 
-/** Full Google-style ranked search. */
-export async function rankedSearch(raw: string, limit = DEFAULT_SEARCH_LIMIT): Promise<RankedSearch> {
-  const pq = parseQuery(raw);
-  const hits = await gatherCandidates(pq);
-  const ranked = hits
+/** PURE ranking (no network) — dedupe by mediaType:id, score, sort, cap. Exported
+ *  so the tool's tests can prove order-independence / soft boosts offline. */
+export function rankHits(pq: ParsedQuery, hits: MultiHit[], limit = DEFAULT_SEARCH_LIMIT): RankedResult[] {
+  const byKey = new Map<string, MultiHit>();
+  for (const h of hits) {
+    const mt = h.media_type === "tv" ? "tv" : "movie";
+    const key = `${mt}:${h.id}`;
+    if (!byKey.has(key)) byKey.set(key, h);
+  }
+  return [...byKey.values()]
     .map((h) => scoreHit(pq, h))
     .sort((a, b) =>
       b.score - a.score ||
@@ -249,7 +254,13 @@ export async function rankedSearch(raw: string, limit = DEFAULT_SEARCH_LIMIT): P
       a.id - b.id // fully deterministic: identical candidate sets rank identically regardless of typed word order
     )
     .slice(0, limit);
+}
 
+/** Full Google-style ranked search (fetch + rank). */
+export async function rankedSearch(raw: string, limit = DEFAULT_SEARCH_LIMIT): Promise<RankedSearch> {
+  const pq = parseQuery(raw);
+  const hits = await gatherCandidates(pq);
+  const ranked = rankHits(pq, hits, limit);
   return {
     query: raw,
     parsed: {

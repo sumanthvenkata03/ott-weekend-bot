@@ -19,6 +19,8 @@ import { dirname, join } from "node:path";
 import {
   movieDetail,
   allMovieImages,
+  movieVideos,
+  movieBackground,
   fullCredits,
   personDetail,
   isAllowedImageUrl,
@@ -105,6 +107,13 @@ const server = createServer(async (req, res) => {
         return sendJson(res, 200, await allMovieImages(id, imdbId));
       }
       if (seg[3] === "credits") return sendJson(res, 200, await fullCredits(id));
+      if (seg[3] === "videos") return sendJson(res, 200, await movieVideos(id));
+      if (seg[3] === "wiki") {
+        const title = (url.searchParams.get("title") ?? "").trim();
+        if (!title) return sendJson(res, 400, { error: "title is required for wiki lookup" });
+        const yr = Number.parseInt(url.searchParams.get("year") ?? "", 10);
+        return sendJson(res, 200, await movieBackground(id, title, Number.isFinite(yr) ? yr : undefined));
+      }
       return sendJson(res, 404, { error: `no route ${path}` });
     }
     if (seg[0] === "api" && seg[1] === "person" && seg[2]) {

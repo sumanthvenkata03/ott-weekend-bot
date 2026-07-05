@@ -20,11 +20,13 @@ import {
   omdbGet,
   aggregateMovieImages,
   aggregatePersonImages,
-  contributingSources,
+  aggregateMovieVideos,
   img,
   langName,
   type ImageItem,
+  type VideoItem,
 } from "./sources.js";
+import { aggregateBackground, type BackgroundResult } from "./wiki.js";
 
 // ── TMDb response shapes we read (defensive — every field optional) ──────────
 interface TmdbMovieBase {
@@ -142,8 +144,10 @@ export interface PersonDetail {
   rawData: Record<string, unknown>;
 }
 
-export interface MovieImages { id: number; posters: ImageItem[]; backdrops: ImageItem[]; sources: string[]; }
+export interface MovieImages { id: number; posters: ImageItem[]; backdrops: ImageItem[]; sources: string[]; rawData: Record<string, unknown>; }
 export interface MovieCredits { id: number; cast: CastMember[]; crew: CrewMember[]; rawData: Record<string, unknown>; }
+export interface MovieVideos { id: number; videos: VideoItem[]; sources: string[]; rawData: Record<string, unknown>; }
+export interface MovieBackground { id: number; results: BackgroundResult[]; }
 
 function genderName(g: number | undefined): string | undefined {
   return g === 1 ? "Female" : g === 2 ? "Male" : g === 3 ? "Non-binary" : undefined;
@@ -254,13 +258,26 @@ export async function movieDetail(id: number): Promise<MovieDetail> {
 
 // ── 3. Full image gallery (aggregated across sources) ────────────────────────
 export async function allMovieImages(tmdbId: number, imdbId?: string): Promise<MovieImages> {
-  const items = await aggregateMovieImages({ tmdbId, ...(imdbId ? { imdbId } : {}) });
+  const agg = await aggregateMovieImages({ tmdbId, ...(imdbId ? { imdbId } : {}) });
   return {
     id: tmdbId,
-    posters: items.filter((i) => i.kind === "poster"),
-    backdrops: items.filter((i) => i.kind === "backdrop"),
-    sources: contributingSources(items),
+    posters: agg.items.filter((i) => i.kind === "poster"),
+    backdrops: agg.items.filter((i) => i.kind === "backdrop"),
+    sources: agg.sources,
+    rawData: agg.raw,
   };
+}
+
+// ── 3b. Videos / trailers (aggregated across sources) ────────────────────────
+export async function movieVideos(tmdbId: number): Promise<MovieVideos> {
+  const agg = await aggregateMovieVideos({ tmdbId });
+  return { id: tmdbId, videos: agg.items, sources: agg.sources, rawData: agg.raw };
+}
+
+// ── 3c. Wikipedia (or future) background ─────────────────────────────────────
+export async function movieBackground(tmdbId: number, title: string, year?: number): Promise<MovieBackground> {
+  const results = await aggregateBackground(title, year);
+  return { id: tmdbId, results };
 }
 
 // ── 4. Full cast + crew ──────────────────────────────────────────────────────
@@ -276,7 +293,7 @@ export async function fullCredits(id: number): Promise<MovieCredits> {
 
 // ── 5. Person detail + full image gallery ────────────────────────────────────
 export async function personDetail(id: number): Promise<PersonDetail> {
-  const [person, images] = await Promise.all([
+  const [person, imagesAgg] = await Promise.all([
     tmdbGet<TmdbPerson>(`/person/${id}`, { append_to_response: "combined_credits" }),
     aggregatePersonImages({ tmdbId: id }),
   ]);
@@ -308,9 +325,9 @@ export async function personDetail(id: number): Promise<PersonDetail> {
     popularity: person.popularity,
     profileUrl: img(person.profile_path, "w300"),
     knownFor,
-    images,
-    imageSources: contributingSources(images),
-    rawData: { tmdb: { person } },
+    images: imagesAgg.items,
+    imageSources: imagesAgg.sources,
+    rawData: { tmdb: { person, images: imagesAgg.raw["tmdb"] } },
   };
 }
 

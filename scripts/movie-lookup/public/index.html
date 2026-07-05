@@ -27,11 +27,30 @@
     .rule-row{display:flex;align-items:center;gap:10px;margin:10px 0 0;}
     .rule-row::before,.rule-row::after{content:"";flex:1;height:1px;background:var(--line);}
     .rule-row span{font-family:var(--mono);font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:var(--vermillion);}
-    .search{display:flex;gap:10px;margin:26px auto 8px;max-width:640px;}
+
+    .searchzone{max-width:640px;margin:26px auto 8px;position:relative;}
+    .search{display:flex;gap:10px;}
     .search input{flex:1;font-family:var(--serif);font-size:20px;color:var(--ink);background:#fbf6ea;border:1.5px solid var(--ink);border-radius:2px;padding:12px 16px;outline:none;}
     .search input:focus{border-color:var(--vermillion);box-shadow:0 0 0 3px rgba(163,50,35,.14);}
     .search button{font-family:var(--mono);font-weight:700;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--cream);background:var(--vermillion);border:1.5px solid var(--maroon);border-radius:2px;padding:0 22px;cursor:pointer;}
     .search button:hover{background:var(--oxblood);}
+    .hint{font-family:var(--mono);font-size:10px;color:var(--ink-soft);text-align:center;margin-top:6px;letter-spacing:.02em;}
+
+    /* auto-suggest dropdown */
+    .suggest{position:absolute;left:0;right:0;top:calc(100% + 4px);background:var(--paper);border:1.5px solid var(--ink);border-radius:2px;box-shadow:0 16px 40px rgba(26,22,20,.28);z-index:40;overflow:hidden;display:none;}
+    .suggest.open{display:block;}
+    .sitem{display:flex;gap:10px;align-items:center;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--line);text-decoration:none;color:inherit;}
+    .sitem:last-child{border-bottom:none;}
+    .sitem.active,.sitem:hover{background:#fbf6ea;}
+    .sitem .st{flex:0 0 38px;height:57px;background:#e6dcc6 center/cover no-repeat;border:1px solid var(--line);border-radius:2px;}
+    .sitem .st.empty{display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:7px;color:var(--ink-soft);text-align:center;}
+    .sitem .sinfo{min-width:0;flex:1;}
+    .sitem .stitle{font-family:var(--serif);font-weight:700;font-size:15px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .sitem .smeta{font-family:var(--mono);font-size:10px;color:var(--ink-soft);margin-top:2px;}
+    .sitem .sbadge{font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--cream);background:var(--green);padding:1px 5px;border-radius:2px;}
+    .sitem .sbadge.tv{background:var(--brass);color:var(--ink);}
+    .sfoot{font-family:var(--mono);font-size:9px;color:var(--ink-soft);text-align:center;padding:5px;letter-spacing:.06em;text-transform:uppercase;background:#fbf6ea;}
+
     .status{text-align:center;font-family:var(--mono);font-size:12px;color:var(--ink-soft);min-height:18px;margin:4px 0 0;}
     .status.err{color:var(--vermillion);font-weight:700;}
     .seclabel{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.24em;text-transform:uppercase;color:var(--oxblood);margin:30px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px;display:flex;justify-content:space-between;align-items:baseline;}
@@ -59,10 +78,14 @@
       <div class="rule-row"><span>Est. MMXXVI</span></div>
     </div>
 
-    <form class="search" id="searchForm">
-      <input id="q" type="text" placeholder="Type a film name…  e.g.  Kalki 2898 AD" autocomplete="off" autofocus />
-      <button type="submit">Search</button>
-    </form>
+    <div class="searchzone">
+      <form class="search" id="searchForm" autocomplete="off">
+        <input id="q" type="text" placeholder="Type a film name…  e.g.  telugu boss" autocomplete="off" autofocus />
+        <button type="submit">Search</button>
+      </form>
+      <div class="hint">Type any words, any order · language/year help ranking · ↑↓ to navigate · Enter for full results</div>
+      <div class="suggest" id="suggest"></div>
+    </div>
     <div class="status" id="status"></div>
 
     <div id="candsWrap" class="hidden">
@@ -75,29 +98,109 @@
 
   <script>
     const $ = (s) => document.querySelector(s);
-    const statusEl = $("#status");
+    const statusEl = $("#status"), qEl = $("#q"), sug = $("#suggest");
     const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
     function setStatus(m, err){ statusEl.textContent = m||""; statusEl.classList.toggle("err", !!err); }
 
-    // Preserve the last query in the URL so back-nav from the detail page restores it.
+    // ── In-memory cache + stale-request guard (newest query wins) ──
+    const cache = new Map();          // query -> candidates[]
+    let seq = 0;                      // request sequence
+    let inflight = null;              // AbortController for the live suggest fetch
+    const SUGGEST_LIMIT = 8;
+
+    async function fetchRanked(q, limit){
+      const key = q + "|" + limit;
+      if (cache.has(key)) return cache.get(key);
+      if (inflight) inflight.abort();
+      inflight = new AbortController();
+      const r = await fetch("/api/search?q=" + encodeURIComponent(q) + "&limit=" + limit, { signal: inflight.signal });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "HTTP " + r.status);
+      cache.set(key, data);
+      if (cache.size > 60) cache.delete(cache.keys().next().value); // bound cache
+      return data;
+    }
+
+    // ── Auto-suggest (debounced) ──
+    let debounceT = null, activeIdx = -1, curSug = [];
+    qEl.addEventListener("input", () => {
+      const q = qEl.value.trim();
+      clearTimeout(debounceT);
+      if (q.length < 2) { closeSuggest(); return; }
+      debounceT = setTimeout(() => runSuggest(q), 280);
+    });
+
+    async function runSuggest(q){
+      const mySeq = ++seq;
+      try {
+        const data = await fetchRanked(q, SUGGEST_LIMIT);
+        if (mySeq !== seq) return;                 // a newer keystroke already fired — ignore stale
+        renderSuggest(data.candidates || []);
+      } catch (e) {
+        if (e.name === "AbortError") return;        // superseded
+        if (mySeq === seq) closeSuggest();
+      }
+    }
+
+    function renderSuggest(cands){
+      curSug = cands; activeIdx = -1;
+      if (!cands.length){ closeSuggest(); return; }
+      sug.innerHTML = cands.map((c, i) => {
+        const href = c.mediaType === "movie" ? `/movie.html?id=${c.id}` : "javascript:void(0)";
+        const thumb = c.thumb ? `<span class="st" style="background-image:url('${esc(c.thumb)}')"></span>` : `<span class="st empty">no img</span>`;
+        const badge = c.mediaType === "tv" ? `<span class="sbadge tv">series</span>` : `<span class="sbadge">film</span>`;
+        return `<a class="sitem" data-i="${i}" data-type="${c.mediaType}" data-id="${c.id}" href="${href}">
+          ${thumb}
+          <span class="sinfo">
+            <span class="stitle">${esc(c.title)}</span>
+            <span class="smeta">${esc(c.year||"—")}${c.language?" · "+esc(c.language):""} · score ${esc(c.score)}</span>
+          </span>
+          ${badge}
+        </a>`;
+      }).join("") + `<div class="sfoot">↵ open · ↑↓ navigate · Enter (empty) = full results</div>`;
+      sug.classList.add("open");
+      sug.querySelectorAll(".sitem").forEach(el => el.addEventListener("click", (e) => {
+        if (el.dataset.type === "tv"){ e.preventDefault(); setStatus("Series detail isn’t supported (movie-only).", true); }
+      }));
+    }
+    function closeSuggest(){ sug.classList.remove("open"); sug.innerHTML=""; curSug=[]; activeIdx=-1; }
+
+    function highlight(idx){
+      const items = sug.querySelectorAll(".sitem");
+      items.forEach(el => el.classList.remove("active"));
+      if (idx >= 0 && items[idx]){ items[idx].classList.add("active"); items[idx].scrollIntoView({block:"nearest"}); }
+      activeIdx = idx;
+    }
+
+    qEl.addEventListener("keydown", (e) => {
+      if (!sug.classList.contains("open")) return;
+      if (e.key === "ArrowDown"){ e.preventDefault(); highlight(Math.min(activeIdx+1, curSug.length-1)); }
+      else if (e.key === "ArrowUp"){ e.preventDefault(); highlight(Math.max(activeIdx-1, -1)); }
+      else if (e.key === "Enter" && activeIdx >= 0){
+        const c = curSug[activeIdx];
+        if (c && c.mediaType === "movie"){ e.preventDefault(); location.href = "/movie.html?id=" + c.id; }
+      } else if (e.key === "Escape"){ closeSuggest(); }
+    });
+    document.addEventListener("click", (e) => { if (!e.target.closest(".searchzone")) closeSuggest(); });
+
+    // ── Full search on submit (Enter with no active suggestion) ──
     const params = new URLSearchParams(location.search);
-    if (params.get("q")) { $("#q").value = params.get("q"); doSearch(params.get("q")); }
+    if (params.get("q")) { qEl.value = params.get("q"); doSearch(params.get("q")); }
 
     $("#searchForm").addEventListener("submit", (e) => {
       e.preventDefault();
-      const q = $("#q").value.trim();
+      const q = qEl.value.trim();
       if (!q) return;
+      closeSuggest();
       history.replaceState(null, "", "/?q=" + encodeURIComponent(q));
       doSearch(q);
     });
 
     async function doSearch(q) {
       $("#candsWrap").classList.add("hidden");
-      setStatus("Searching TMDb for “" + q + "” …");
+      setStatus("Searching for “" + q + "” …");
       try {
-        const r = await fetch("/api/search?q=" + encodeURIComponent(q));
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || "HTTP " + r.status);
+        const data = await fetchRanked(q, 30);
         if (!data.candidates.length) { setStatus("No matches found.", true); return; }
         const p = data.parsed || {};
         const bits = [];
@@ -106,17 +209,14 @@
         if (p.year) bits.push("year: " + p.year);
         setStatus(data.count + " result" + (data.count === 1 ? "" : "s") + " (ranked)" + (bits.length ? "  ·  " + bits.join("  ·  ") : ""));
         render(data.candidates);
-      } catch (err) { setStatus("Search failed: " + err.message, true); }
+      } catch (err) { if (err.name !== "AbortError") setStatus("Search failed: " + err.message, true); }
     }
 
     function render(cands) {
       $("#candCount").textContent = cands.length + " result" + (cands.length === 1 ? "" : "s");
       $("#cands").innerHTML = cands.map((c) => {
-        const thumb = c.thumb
-          ? `<span class="thumb" style="background-image:url('${esc(c.thumb)}')"></span>`
-          : `<span class="thumb empty">no image</span>`;
+        const thumb = c.thumb ? `<span class="thumb" style="background-image:url('${esc(c.thumb)}')"></span>` : `<span class="thumb empty">no image</span>`;
         const badge = c.mediaType === "tv" ? `<span class="badge tv">series</span>` : `<span class="badge">film</span>`;
-        // Series have no movie-detail endpoint; link films to the detail page.
         const href = c.mediaType === "movie" ? `/movie.html?id=${c.id}` : "javascript:void(0)";
         return `<a class="cand" href="${href}" ${c.mediaType==="tv"?'data-tv="1"':''}>
           ${thumb}

@@ -31,8 +31,8 @@ Then open: **http://127.0.0.1:5178**
 
 | Page | Purpose |
 |---|---|
-| `GET /` | Search page. Type a film name; click a result → detail page. |
-| `GET /movie.html?id={tmdbId}` | Full detail page: all fields, image gallery, full clickable cast + crew, person modal, raw-JSON view. |
+| `GET /` | Search page with **fast auto-suggest** (debounced live dropdown, in-memory cache, stale-request cancellation, ↑↓/Enter keyboard nav). Click a suggestion → detail; Enter → full ranked results grid. |
+| `GET /movie.html?id={tmdbId}` | Full detail page: all fields, **full image gallery** (posters + backdrops, view + full-res download), **Videos/Trailers** (YouTube), **Wikipedia background** (summary + link), full clickable cast + crew, person modal with their own gallery, and a combined **raw-JSON** view (movie · credits · omdb · images · videos · wiki). |
 
 ## Search — Google-style (search.ts)
 
@@ -62,18 +62,40 @@ and labelled; series have no detail page (detail is movie-only).
 | `GET /api/movie/:id` | Full detail incl. full cast + crew, ratings, and `rawData` (complete source payloads) |
 | `GET /api/movie/:id/images[?imdbId=tt…]` | ALL posters + backdrops aggregated across every registered image source, deduped, full-res |
 | `GET /api/movie/:id/credits` | Full cast + crew (name, role/character, department, person id, profile photo) |
+| `GET /api/movie/:id/videos` | Trailers/teasers/clips aggregated across sources (TMDb → YouTube), deduped, sorted official-trailer-first |
+| `GET /api/movie/:id/wiki?title=…&year=…` | Wikipedia background: article summary/extract + canonical link, confidence-guarded (no wrong-article guessing) |
 | `GET /api/person/:id` | Person detail + FULL image gallery (profile + all images) aggregated across sources |
 | `GET /api/download?url={imageUrl}` | Streams an image with an attachment header (SSRF-guarded to TMDb + Amazon/IMDb image CDNs) |
 | `GET /api/movie?id={tmdbId}` · `GET /api/images?id={tmdbId}` | Query-style aliases kept for compatibility |
 
 ## Source-adapter pattern (add sources without a rewrite)
 
-`sources.ts` defines `ImageSourceAdapter { name, getMovieImages(ctx), getPersonImages(ctx) }`.
-The endpoints call `aggregateMovieImages` / `aggregatePersonImages`, which run every
-adapter in `IMAGE_SOURCES` and dedupe by full URL. To add **Fanart.tv / TVDB** later,
-write one adapter and push it into `IMAGE_SOURCES` — no endpoint changes.
+`sources.ts` defines `SourceAdapter { name, getMovieImages, getPersonImages, getMovieVideos? }`
+— each method returns `{ items, raw }` so raw payloads flow into the raw-JSON view.
+Endpoints call `aggregateMovieImages` / `aggregatePersonImages` / `aggregateMovieVideos`,
+which run every adapter in `SOURCES` and dedupe. `wiki.ts` mirrors the pattern for
+background (`BACKGROUND_SOURCES`). To add **Fanart.tv / TVDB** later, write one adapter
+and push it into the registry — no endpoint changes.
 
-Registered now: `tmdbImageSource` (movie + person images), `omdbImageSource` (movie poster).
+Registered now: `tmdbSource` (movie images + person images + videos), `omdbSource`
+(movie poster), `wikipediaSource` (background).
+
+## Tests + full regression
+
+Tool-local tests live in `tool.check.ts` (named `*.check.ts`, NOT `*.test.ts`, so the
+repo's default `npx vitest run` never collects them — the main suite stays exactly 190).
+
+```bash
+# tool tests only
+npx vitest run --config scripts/movie-lookup/vitest.config.ts
+
+# full regression: tsc==44 + main suite==190 + drop-hash green + tool tests
+npx tsx scripts/movie-lookup/regression.ts
+```
+
+They cover: tokenizer + ranking (order-independence, soft language/year boosts,
+non-matching-language is soft, dedupe, series included), adapter aggregation/dedupe,
+TMDb adapter shapes (mocked network), and the Wikipedia matching helpers.
 
 ## Notes / limits
 
