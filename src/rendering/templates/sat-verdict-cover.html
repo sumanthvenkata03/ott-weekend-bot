@@ -196,24 +196,26 @@
   }
 
   /* ── Bottom swipe cue ── */
-  /* Bottom scrim: strong + tall enough that the swipe cue keeps reliable
-     contrast over ANY bottom-row posters (incl. dark ones like Nevermind /
-     Rao Bahadur). Paired with the cue's own text-shadow. */
+  /* Scrim band: the cue now sits ~25% up from the bottom (clear space beneath it
+     so it can't be clipped/covered in-feed), so the scrim is a soft horizontal
+     band centered on the cue's new position rather than a bottom-edge gradient.
+     Fades at both edges (no hard line) and, with the cue's own text-shadow, keeps
+     "SWIPE FOR MORE" legible over ANY bottom-row posters. */
   .bottom-scrim {
     position: absolute;
-    bottom: 0; left: 0; right: 0;
-    height: 210px;
+    bottom: 288px; left: 0; right: 0;
+    height: 150px;
     z-index: 5;
     background: linear-gradient(to top,
-      rgba(20, 16, 14, 0.96) 0%,
-      rgba(20, 16, 14, 0.86) 40%,
-      rgba(20, 16, 14, 0.45) 72%,
+      rgba(20, 16, 14, 0.0) 0%,
+      rgba(20, 16, 14, 0.68) 34%,
+      rgba(20, 16, 14, 0.68) 66%,
       rgba(20, 16, 14, 0.0) 100%);
     pointer-events: none;
   }
   .swipe {
     position: absolute;
-    bottom: 46px;
+    bottom: 338px;
     left: 0; right: 0;
     z-index: 10;
     display: flex;
