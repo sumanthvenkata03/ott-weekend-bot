@@ -267,6 +267,9 @@ export async function renderSatVerdict(
       templateName: "sat-verdict-card",
       data: cardCtx as unknown as Record<string, unknown>,
       width: 1080, height: 1350,
+      // 3x source PNG (3240x4050) — sharpest source IG will accept on downscale.
+      // Cover stays at the default 2x (unchanged).
+      deviceScaleFactor: 3,
       outputPath: cardPath,
     });
     cardPaths.push(cardPath);

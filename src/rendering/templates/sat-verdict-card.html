@@ -136,26 +136,26 @@
   /* Row 1 — title + small kicker */
   .row-title .kicker {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 14px; font-weight: 700;
+    font-size: 15px; font-weight: 700;
     letter-spacing: 0.18em; text-transform: uppercase;
     color: var(--vermillion);
-    margin-bottom: 12px;
+    margin-bottom: 14px;
   }
   .row-title .title {
     font-family: 'Playfair Display', serif;
     font-weight: 900;
-    font-size: 48px;
+    font-size: 60px;
     line-height: 1.0;
     letter-spacing: -1px;
     color: var(--ink);
   }
-  /* Row 2 — one-line caption */
+  /* Row 2 — one-line caption: heavier + bigger, full ink (a strong line, not a whisper) */
   .row-caption .caption {
     font-family: 'Playfair Display', serif;
     font-style: italic;
-    font-weight: 400;
-    font-size: 27px;
-    line-height: 1.32;
+    font-weight: 700;
+    font-size: 31px;
+    line-height: 1.3;
     color: var(--ink);
   }
   /* Row 3 — ★ seal (in-flow, centered). The shared _tbsi-stamp.html markup +
@@ -163,7 +163,7 @@
      per-template positioning wrapper differs: in-flow (not absolute) so it
      centers in its row. viewBox 0 0 200 200 rescales from this size. */
   .tbsi-stamp-wrap {
-    width: 188px; height: 188px;
+    width: 290px; height: 290px;
     transform: rotate(-6deg);
     filter: drop-shadow(0 5px 12px rgba(20, 16, 14, 0.28));
     pointer-events: none;
@@ -176,13 +176,13 @@
     display: inline-flex; flex-direction: column;
     align-items: center; justify-content: center;
     text-align: center;
-    min-width: 240px;
-    padding: 16px 26px;
+    min-width: 340px;
+    padding: 26px 30px;
     font-family: 'Playfair Display', serif;
     font-weight: 700;
   }
-  .verdict-stamp .kicker { font-size: 13px; font-weight: 500; letter-spacing: 3px; margin-bottom: 9px; }
-  .verdict-stamp .label { font-size: 48px; letter-spacing: 2px; line-height: 0.94; }
+  .verdict-stamp .kicker { font-size: 15px; font-weight: 500; letter-spacing: 3px; margin-bottom: 12px; }
+  .verdict-stamp .label { font-size: 70px; letter-spacing: 2px; line-height: 0.94; }
   .verdict-must-watch { background: var(--vermillion); color: var(--cream); border: 3px solid var(--cream); box-shadow: inset 0 0 0 5px var(--vermillion); }
   .verdict-worth-a-try { background: var(--ink); color: var(--brass); border: 3px solid var(--brass); }
   .verdict-skip { background: transparent; color: var(--vermillion); border: 6px solid var(--vermillion); }

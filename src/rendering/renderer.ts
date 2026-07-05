@@ -130,6 +130,9 @@ export interface RenderOptions {
   width: number;
   height: number;
   outputPath: string;
+  /** Screenshot pixel density. Defaults to 2 (unchanged for every existing
+   *  caller); the Sat Verdict card passes 3 for a sharper 3x source PNG. */
+  deviceScaleFactor?: number;
 }
 
 /**
@@ -137,7 +140,7 @@ export interface RenderOptions {
  * Returns the absolute path of the written file.
  */
 export async function renderToPNG(options: RenderOptions): Promise<string> {
-  const { templateName, data, width, height, outputPath } = options;
+  const { templateName, data, width, height, outputPath, deviceScaleFactor = 2 } = options;
 
   // 1. Render template HTML
   const html = env.render(`${templateName}.html`, data);
@@ -145,7 +148,7 @@ export async function renderToPNG(options: RenderOptions): Promise<string> {
   // 2. Set up browser + page
   const browser = await getBrowser();
   const page: Page = await browser.newPage();
-  await page.setViewport({ width, height, deviceScaleFactor: 2 });
+  await page.setViewport({ width, height, deviceScaleFactor });
 
   // 3. Load HTML
   //    We intentionally do NOT wait on networkidle0: a single hanging CDN
