@@ -97,32 +97,27 @@ export interface SatVerdictCard extends CardEnrichment {
   cast: string[];
 }
 
-/** Full context for the Sat Verdict cover slide (1080x1350) */
-export interface SatVerdictCoverContext extends RenderBase {
-  pillarLabel: "SAT VERDICT";
-  hotTake: string;
-  filmCount: number;
-  weekendDates: string;
-  /** Hero film for the cover (the Must Watch with highest priority) */
-  hero: SatVerdictCard;
-  /** 3-poster inset strip near the bottom of the cover — one tile per verdict film, in original verdict order, max 3 */
-  posterStrip: SatVerdictPosterStripTile[];
-  /** Titles of Skip films trimmed beyond the card cap — listed in the cover's
-   *  "ALSO SKIPPING" footer so the verdict stays complete. Capped to the first
-   *  few names by the renderer; the remainder is counted in alsoSkippingMore.
-   *  Empty = no footer. */
-  alsoSkipping: string[];
-  /** Count of trimmed Skip titles beyond those shown in `alsoSkipping` — drives
-   *  the "+N MORE" tail on the footer. 0 = every trimmed skip is named. */
-  alsoSkippingMore: number;
-}
-
-/** One tile in the Sat Verdict cover poster strip */
-export interface SatVerdictPosterStripTile {
+/** One poster tile on the Sat Verdict cover's Verdict Grid poster wall. */
+export interface SatVerdictCoverTile {
   posterUrl?: string;
-  posterFallbackColor: string;
+  fallbackColor: string;
   filmTitle: string;
   language: string;
+  /** Border-color class derived from the film's verdict:
+   *  "skip" (vermillion) | "watchit" (divisive→green) | "try" (worth-a-try→cream) | "mustwatch" (green) */
+  verdictClass: "skip" | "watchit" | "try" | "mustwatch";
+}
+
+/**
+ * Full context for the Sat Verdict cover slide (1080x1350) — the Verdict Grid:
+ * a poster wall of every verdict film, each tile framed in its verdict color,
+ * under a fixed title + verdict legend. Chrome (issue №, VOL, date range,
+ * masthead, TURN) is stripped; the cover is pure ruling-at-a-glance.
+ */
+export interface SatVerdictCoverContext extends RenderBase {
+  pillarLabel: "SAT VERDICT";
+  /** Films split into poster-wall rows by the renderer (e.g. 2/3/2 for 7). */
+  gridRows: SatVerdictCoverTile[][];
 }
 
 /** Full context for a Sat Verdict body card slide (1080x1080) */

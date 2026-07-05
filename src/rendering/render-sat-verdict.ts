@@ -10,6 +10,7 @@ import type { Release, Verdict } from "../shared/types.js";
 import type {
   SatVerdictCard,
   SatVerdictCoverContext,
+  SatVerdictCoverTile,
   SatVerdictCardContext,
 } from "./types.js";
 import {
@@ -62,6 +63,39 @@ function verdictKind(v: Verdict): "must-watch" | "worth-a-try" | "divisive" | "s
   if (v.includes("Worth a Try")) return "worth-a-try";
   if (v.includes("Divisive")) return "divisive";
   return "skip";
+}
+
+/** Cover verdict-border class per verdict tier. Divisive renders as the "WATCH
+ *  IT" green tier; the four classes map to two colors (green/vermillion/cream). */
+const VERDICT_BORDER_CLASS: Record<SatVerdictCard["verdictKind"], SatVerdictCoverTile["verdictClass"]> = {
+  "must-watch":  "mustwatch",
+  "worth-a-try": "try",
+  "divisive":    "watchit",
+  "skip":        "skip",
+};
+
+/**
+ * Split N films into poster-wall rows for the 4:5 Verdict Grid cover.
+ * Known counts get a hand-tuned symmetric pattern (7 → 2/3/2); anything else
+ * falls back to rows of 3 so the grid always fills gracefully.
+ */
+function distributeGridRows<T>(items: T[]): T[][] {
+  const patterns: Record<number, number[]> = {
+    1: [1], 2: [2], 3: [3], 4: [2, 2], 5: [2, 3],
+    6: [3, 3], 7: [2, 3, 2], 8: [3, 2, 3], 9: [3, 3, 3],
+  };
+  let sizes = patterns[items.length];
+  if (!sizes) {
+    sizes = [];
+    for (let rem = items.length; rem > 0; rem -= 3) sizes.push(Math.min(3, rem));
+  }
+  const rows: T[][] = [];
+  let i = 0;
+  for (const size of sizes) {
+    rows.push(items.slice(i, i + size));
+    i += size;
+  }
+  return rows;
 }
 
 function platformLogoStem(p: string): string {
@@ -142,35 +176,29 @@ export async function renderSatVerdict(
 
   await cleanOldRenders(outputDir, baseCtx.date);
 
-  // 1. Cover slide
+  // 1. Cover slide — the Verdict Grid: a poster wall of EVERY verdict film, each
+  //    tile framed in its verdict color (SKIP vermillion, WATCH IT/Divisive green,
+  //    WORTH A TRY cream, MUST WATCH green). Prominence order → biggest film
+  //    leads the wall. `alsoSkipping` is no longer surfaced on the cover (the grid
+  //    shows all rulings); it stays a param for caller compatibility.
   const coverPath = `${outputDir}/sat-verdict-${baseCtx.date}-cover.png`;
-  const posterStrip = cards.slice(0, 3).map(c => ({
-    posterUrl: c.posterUrl,
-    posterFallbackColor: c.fallbackColor,
+  const coverTiles: SatVerdictCoverTile[] = cards.map(c => ({
+    ...(c.posterUrl ? { posterUrl: c.posterUrl } : {}),
+    fallbackColor: c.fallbackColor,
     filmTitle: c.filmTitle,
     language: c.language,
+    verdictClass: VERDICT_BORDER_CLASS[c.verdictKind],
   }));
-  // ALSO SKIPPING footer: show at most ALSO_SKIPPING_MAX_NAMES titles, then a
-  // "+N MORE" tail, so a long trimmed-skip list can't overrun the single line.
-  const ALSO_SKIPPING_MAX_NAMES = 4;
-  const alsoSkippingNames = alsoSkipping.slice(0, ALSO_SKIPPING_MAX_NAMES);
-  const alsoSkippingMore = Math.max(0, alsoSkipping.length - ALSO_SKIPPING_MAX_NAMES);
   const coverCtx: SatVerdictCoverContext = {
     ...baseCtx,
-    hotTake: draft.hotTake,
-    filmCount: cards.length,
-    weekendDates: draft.weekendDates,
-    hero,
-    posterStrip,
-    alsoSkipping: alsoSkippingNames,
-    alsoSkippingMore,
+    gridRows: distributeGridRows(coverTiles),
   };
   await renderToPNG({
     templateName: "sat-verdict-cover",
     data: coverCtx as unknown as Record<string, unknown>,
-    // 1:1 square to match the 1080x1080 body cards — a mixed-ratio carousel makes
-    // Instagram crop the odd slide out (the 4:5 cover lost its masthead + footer).
-    width: 1080, height: 1080,
+    // 4:5 portrait (Instagram portrait) so the whole verdict grid stays visible
+    // uncropped in-feed while scrolling. Body cards remain 1080x1080.
+    width: 1080, height: 1350,
     outputPath: coverPath,
   });
 

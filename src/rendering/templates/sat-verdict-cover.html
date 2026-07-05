@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;0,800;1,400;1,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&family=Inter:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --ink: #1A1614;
@@ -10,43 +10,55 @@
     --vermillion: #A33223;
     --brass: #C49A3F;
     --bottle: #2E5742;
+    --oxblood: #682D25;
+    --maroon: #581F16;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
     width: 1080px;
-    height: 1080px;
+    height: 1350px;
     overflow: hidden;
     font-family: 'Playfair Display', Georgia, serif;
     background: var(--ink);
     color: var(--cream);
   }
-  .canvas {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-  }
+  .canvas { position: relative; width: 100%; height: 100%; overflow: hidden; }
 
-  /* Hero layer: image overlay on a colored fallback background */
-  .hero {
+  /* ── Verdict Grid: a poster wall of every verdict film, filling the 4:5 frame.
+     Rows are pre-split by the renderer (e.g. 2 / 3 / 2 for 7). ── */
+  .grid {
     position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 100%;
-    background-color: {{ hero.fallbackColor }};
-    overflow: hidden;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 1;
   }
-  .hero-img {
+  .row { display: flex; flex: 1 1 0; min-height: 0; }
+  .tile {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    border: 7px solid var(--cream);
+    background-color: var(--ink);
+  }
+  /* Verdict-color borders (mapped from each film's actual verdict).
+     Thick (7px) + bright so each ruling reads at a glance. */
+  .tile.skip      { border-color: var(--vermillion); }  /* SKIP */
+  .tile.mustwatch { border-color: var(--bottle);     }  /* MUST WATCH (green) */
+  .tile.watchit   { border-color: var(--bottle);     }  /* WATCH IT — divisive tier renders green */
+  .tile.try       { border-color: var(--cream);      }  /* WORTH A TRY — light border, reads on the scrim */
+
+  .tile-img {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
-    object-position: center top;
+    object-position: center 22%;
     z-index: 2;
   }
-
-  /* Fallback typography (always rendered, hidden when an image loads on top) */
-  .hero-fallback {
+  .tile-fallback {
     position: absolute;
     inset: 0;
     z-index: 1;
@@ -54,476 +66,233 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 80px;
     text-align: center;
+    padding: 18px;
     color: var(--cream);
   }
-  .hero-fallback-hidden { display: none; }
-  .hero-fallback .lang-tag {
-    font-family: 'Playfair Display', serif;
-    font-size: 32px;
-    letter-spacing: 12px;
-    color: rgba(244, 236, 220, 0.7);
-    margin-bottom: 30px;
-  }
-  .hero-fallback .title-big {
-    font-family: 'Playfair Display', serif;
-    font-size: 120px;
+  .tile-fallback .lang {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
     font-weight: 700;
-    letter-spacing: -2px;
-    line-height: 0.95;
-  }
-  .hero-fallback .rule {
-    width: 200px;
-    height: 1.5px;
-    background: var(--cream);
-    margin: 40px 0;
-    opacity: 0.6;
-  }
-  .hero-fallback .credit {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 22px;
-    letter-spacing: 4px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
     opacity: 0.7;
+    margin-bottom: 10px;
+  }
+  .tile-fallback .title {
+    font-family: 'Playfair Display', serif;
+    font-size: 26px;
+    font-weight: 800;
+    line-height: 1.02;
   }
 
-  /* Bottom gradient overlay for text readability */
-  .overlay {
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    height: 65%;
-    background: linear-gradient(to top,
-      rgba(20, 16, 14, 0.97) 0%,
-      rgba(20, 16, 14, 0.92) 35%,
-      rgba(20, 16, 14, 0.7) 65%,
-      rgba(20, 16, 14, 0.0) 100%);
-    z-index: 5;
-  }
-
-  /* Top scrim — a subtle dark gradient behind the masthead row so the brand
-     name stays legible over BRIGHT hero posters (e.g. light floral art), where
-     brass-on-light was washing out. Sits above the hero image (z 2) and the
-     bottom overlay (z 5) but below the masthead text (z 10). Fades to nothing
-     by ~220px so it never reads as a heavy bar. */
+  /* ── Top scrim: LIGHT + short so the two top posters stay recognizable.
+     Legibility for the title/legend comes from text-shadow + the chips' own
+     pill backgrounds, not from darkening the whole top row. ── */
   .top-scrim {
     position: absolute;
     top: 0; left: 0; right: 0;
-    height: 220px;
+    height: 300px;
+    z-index: 5;
     background: linear-gradient(to bottom,
-      rgba(20, 16, 14, 0.62) 0%,
-      rgba(20, 16, 14, 0.32) 55%,
+      rgba(20, 16, 14, 0.72) 0%,
+      rgba(20, 16, 14, 0.40) 48%,
       rgba(20, 16, 14, 0.0) 100%);
-    z-index: 6;
     pointer-events: none;
   }
 
-  /* Top masthead */
-  .masthead {
+  /* Tiny brand mark (masthead shrunk to a mark) — top-left */
+  .mark {
     position: absolute;
-    top: 50px;
-    left: 70px;
-    right: 70px;
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
+    top: 46px;
+    left: 56px;
     z-index: 10;
-  }
-  .masthead .label {
-    font-family: 'Playfair Display', serif;
-    font-size: 24px;
-    font-weight: 700;
-    letter-spacing: 4px;
-    color: var(--brass);
-    text-shadow: 0 1px 4px rgba(20, 16, 14, 0.7);
-  }
-  .masthead .date {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 22px;
+    font-size: 15px;
     font-weight: 700;
+    letter-spacing: 0.22em;
     color: var(--brass);
-    text-shadow: 0 1px 4px rgba(20, 16, 14, 0.7);
-  }
-  /* Centered pillar SEAL mount — the big "★ SATURDAY VERDICT ★" badge (component
-     in _seal.html) is dropped here, horizontally centered in the top band. Top is
-     nudged to 96px (8.9% of 1080) rather than the nominal 5%/54px, which would
-     overlap the masthead wordmark (y≈50–82); 96px clears it by ~14px and stays
-     well left of the issue stamp (seal ends x≈770; stamp starts x≈845). The seal
-     REPLACES the old small sub-masthead label — don't say "Saturday Verdict" twice. */
-  .seal-mount {
-    position: absolute;
-    top: 96px;
-    left: 0;
-    right: 0;
-    text-align: center;
-    z-index: 10;
+    text-shadow: 0 2px 6px rgba(20, 16, 14, 0.9);
   }
 
-  /* Tilted corner stamp */
-  .corner-stamp {
+  /* Hero title — bold + prominent, cleared left of the top-right poster's key art */
+  .title {
     position: absolute;
-    top: 130px;
-    right: 70px;
-    transform: rotate(-8deg);
-    background: var(--vermillion);
-    border: 2px solid var(--cream);
-    padding: 14px 22px;
-    text-align: center;
+    top: 34px;
+    right: 300px;
     z-index: 10;
-    box-shadow: inset 0 0 0 4px var(--vermillion);
+    width: 640px;
+    text-align: right;
   }
-  .corner-stamp .kicker {
-    font-family: 'Playfair Display', serif;
-    font-size: 14px;
-    font-weight: 500;
-    letter-spacing: 3px;
-    color: var(--cream);
-  }
-  .corner-stamp .num {
-    font-family: 'Playfair Display', serif;
-    font-size: 28px;
+  .title .kicker {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
     font-weight: 700;
+    letter-spacing: 0.34em;
+    color: var(--brass);
+    text-transform: uppercase;
+    margin-bottom: 14px;
+    text-shadow: 0 2px 6px rgba(20, 16, 14, 0.9);
+  }
+  .title .line {
+    font-family: 'Playfair Display', serif;
+    font-weight: 900;
+    font-size: 58px;
+    line-height: 0.94;
     letter-spacing: 1px;
     color: var(--cream);
-    margin-top: 2px;
+    text-transform: uppercase;
+    text-shadow:
+      0 2px 5px rgba(20, 16, 14, 0.98),
+      0 4px 14px rgba(20, 16, 14, 0.95),
+      0 10px 34px rgba(20, 16, 14, 0.85);
+  }
+  .title .rule {
+    margin-top: 18px;
+    margin-left: auto;
+    width: 200px;
+    height: 3px;
+    background: var(--brass);
   }
 
-  /* Title block — bottom-anchored. On the 1080 square it ends at y≈760, above the
-     swipe cue (≈790) and poster strip (≈835). Headline/hot-take sized down from
-     the old 4:5 cover so a 3-line ruling + 2-line dek still clear the strip. */
-  .title-block {
+  /* ── Verdict legend (key) — decodes the poster borders ── */
+  .legend {
     position: absolute;
-    bottom: 320px;
-    left: 70px;
-    right: 70px;
+    top: 372px;
+    left: 56px;
+    right: 56px;
     z-index: 10;
-  }
-  .title-block .kicker {
-    font-family: 'Playfair Display', serif;
-    font-size: 20px;
-    font-weight: 500;
-    letter-spacing: 6px;
-    color: var(--brass);
-    margin-bottom: 12px;
-    text-transform: uppercase;
-  }
-  .title-block .headline {
-    font-family: 'Playfair Display', serif;
-    font-size: 48px;
-    font-weight: 700;
-    letter-spacing: -1px;
-    line-height: 1.04;
-    color: var(--cream);
-  }
-  .title-block .hot-take {
-    font-family: 'Playfair Display', serif;
-    font-style: italic;
-    font-size: 25px;
-    font-weight: 400;
-    line-height: 1.3;
-    color: var(--brass);
-    margin-top: 14px;
-  }
-  /* "ALSO SKIPPING" — only shown when the selector trims Skip films past the
-     card cap. Sits as the last line of the title block (which is bottom-anchored
-     at y=1050, growing upward), so it never collides with the swipe cue
-     (y≈1070) or poster strip (y=1080) below. */
-  .title-block .also-skipping {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: rgba(244, 236, 220, 0.6);
-    margin-top: 16px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .title-block .also-skipping .lead { color: var(--vermillion); }
-
-  /* Poster strip — 3 inset tiles bottom-anchored above the footer (square cover:
-     tiles span y≈841–965, footer rule ≈992). Tile group is 690px wide centered
-     (210*3 + 30*2), starting at x=195 (step 240). */
-  .poster-strip {
-    position: absolute;
-    bottom: 115px;
-    left: 0; right: 0;
-    height: 124px;
-    z-index: 8;
-  }
-  .strip-tile {
-    position: absolute;
-    top: 0;
-    width: 210px;
-    height: 124px;
-    border: 1.5px solid var(--brass);
-    overflow: hidden;
-  }
-  .strip-img {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    z-index: 2;
-  }
-  .strip-fallback {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
+    gap: 12px;
     align-items: center;
-    justify-content: center;
-    padding: 10px;
-    text-align: center;
-    color: var(--cream);
   }
-  .strip-fallback-hidden { display: none; }
-  .strip-fallback .lang {
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 14px;
+    background: rgba(20, 16, 14, 0.62);
+    border: 1px solid rgba(244, 236, 220, 0.16);
+    border-radius: 999px;
+  }
+  .chip .dot {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+  }
+  .chip .dot.skip      { background: var(--vermillion); }
+  .chip .dot.mustwatch { background: var(--bottle); }
+  .chip .dot.watchit   { background: var(--bottle); }
+  .chip .dot.try       { background: var(--cream); }
+  .chip .lbl {
     font-family: 'Inter', sans-serif;
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 2px;
-    opacity: 0.7;
-    margin-bottom: 6px;
-    text-transform: uppercase;
-  }
-  .strip-fallback .title {
-    font-family: 'Playfair Display', serif;
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 1.1;
-  }
-  /* Footer mark */
-  .footer {
-    position: absolute;
-    bottom: 50px;
-    left: 70px;
-    right: 70px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-top: 1.5px solid rgba(196, 154, 63, 0.5);
-    padding-top: 18px;
-    z-index: 10;
-  }
-  .footer .brand {
-    font-family: 'Playfair Display', serif;
-    font-size: 18px;
-    letter-spacing: 4px;
-    color: var(--brass);
-  }
-  .footer .meta {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 16px;
-    letter-spacing: 1px;
-    color: var(--brass);
-  }
-
-  /* ── Swipe affordances (additive) ── */
-
-  /* A — centered swipe cue. Sat's strip sits flush above the footer, so the
-     cue lives in the gap between the title block and the poster strip (top:1080). */
-  .swipe-cue {
-    position: absolute;
-    left: 70px;
-    right: 70px;
-    bottom: 280px;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
-  }
-  .swipe-cue-rule {
-    width: 64px;
-    height: 1px;
-    background: var(--vermillion);
-  }
-  .swipe-cue-text {
-    font-family: 'JetBrains Mono', monospace;
     font-size: 14px;
     font-weight: 700;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: var(--vermillion);
-    white-space: nowrap;
+    color: var(--cream);
   }
 
-  /* B — page-turn dog-ear, pinned to the cover's true bottom-right corner */
-  .page-turn {
+  /* ── Bottom swipe cue ── */
+  /* Bottom scrim: strong + tall enough that the swipe cue keeps reliable
+     contrast over ANY bottom-row posters (incl. dark ones like Nevermind /
+     Rao Bahadur). Paired with the cue's own text-shadow. */
+  .bottom-scrim {
     position: absolute;
-    right: 0;
-    bottom: 0;
-    z-index: 11;
+    bottom: 0; left: 0; right: 0;
+    height: 210px;
+    z-index: 5;
+    background: linear-gradient(to top,
+      rgba(20, 16, 14, 0.96) 0%,
+      rgba(20, 16, 14, 0.86) 40%,
+      rgba(20, 16, 14, 0.45) 72%,
+      rgba(20, 16, 14, 0.0) 100%);
     pointer-events: none;
-    display: flex;
-    align-items: flex-end;
-    gap: 8px;
   }
-  .page-turn-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    color: var(--vermillion);
-    margin-bottom: 8px;
-  }
-  .page-turn-svg .tri { fill: var(--brass); }
-  .page-turn-svg .fold-line { stroke: var(--ink); stroke-width: 1; }
-  .page-turn-svg .turn-arrow {
-    fill: var(--ink);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 16px;
-  }
-
-  /* D — chevron-trail gutter. No 2x2 grid here: pin to the canvas right edge,
-     a ~200px band vertically centered over the hero (clear of corner-stamp,
-     title block, strip + page-turn). z-index above the dark overlay (5). */
-  /* Seated in the hero's UPPER third (was 426 → overlapped poster title
-     treatments like "the boy", which sit at the poster's bottom). 300 keeps the
-     chevrons clear of bottom wordmarks while staying below the corner stamp. */
-  .swipe-gutter {
+  .swipe {
     position: absolute;
-    top: 230px;
-    right: 0;
-    height: 170px;
-    width: 19%;
-    z-index: 9;
-    pointer-events: none;
-    background: rgba(26, 22, 20, 0.40);
+    bottom: 46px;
+    left: 0; right: 0;
+    z-index: 10;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 14px;
   }
-  .swipe-gutter .chev { display: block; }
-  .swipe-gutter .chev-1 { opacity: 0.6; }
-  .swipe-gutter .chev-2 { opacity: 0.8; }
-  .swipe-gutter .chev-3 { opacity: 1.0; }
-  .swipe-gutter .chev path {
-    fill: none;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+  .swipe .txt {
+    font-family: 'Inter', sans-serif;
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--cream);
+    text-shadow: 0 2px 8px rgba(20, 16, 14, 0.95);
   }
-  /* dark underlay halo — legibility over bright posters; does NOT touch the veil */
-  .swipe-gutter .chev .chev-halo {
-    stroke: #1A1614;
-    stroke-width: 13;
-    opacity: 0.45;
+  .swipe .chev {
+    font-family: 'Inter', sans-serif;
+    font-size: 30px;
+    font-weight: 900;
+    line-height: 1;
+    color: var(--brass);
+    text-shadow: 0 2px 8px rgba(20, 16, 14, 0.95);
   }
-  .swipe-gutter .chev .chev-line {
-    stroke: #F4ECDC;
-    stroke-width: 9;
-  }
+  .swipe .chev .c1 { opacity: 0.45; }
+  .swipe .chev .c2 { opacity: 0.72; }
+  .swipe .chev .c3 { opacity: 1.0; }
 </style>
 </head>
 <body>
-{% import "_seal.html" as components %}
 <div class="canvas">
 
-  <!-- HERO IMAGE LAYER -->
-  <div class="hero">
-    {% if hero.posterUrl %}
-      <img src="{{ hero.posterUrl }}" class="hero-img" alt="" onerror="this.style.display='none'" />
-    {% endif %}
-    <div class="hero-fallback {% if hero.posterUrl %}hero-fallback-hidden{% endif %}">
-      <div class="lang-tag">{{ hero.language | upper }}</div>
-      <div class="title-big">{{ hero.filmTitle }}</div>
-      <div class="rule"></div>
-      <div class="credit">
-        {% if hero.director %}DIR · {{ hero.director | upper }}{% endif %}
+  <!-- POSTER WALL — every verdict film, verdict-color borders, rows pre-split by the renderer -->
+  <div class="grid">
+    {% for row in gridRows %}
+    <div class="row">
+      {% for tile in row %}
+      <div class="tile {{ tile.verdictClass }}" style="background-color: {{ tile.fallbackColor }};">
+        {% if tile.posterUrl %}
+          <img class="tile-img" src="{{ tile.posterUrl }}" alt="" onerror="this.style.display='none'" />
+        {% endif %}
+        <div class="tile-fallback">
+          <div class="lang">{{ tile.language | upper }}</div>
+          <div class="title">{{ tile.filmTitle }}</div>
+        </div>
       </div>
-    </div>
-  </div>
-
-  <!-- DARK GRADIENT OVERLAY -->
-  <div class="overlay"></div>
-
-  <!-- TOP SCRIM — keeps the masthead legible over bright posters -->
-  <div class="top-scrim"></div>
-
-  <!-- D — chevron-trail gutter: translucent veil over the hero's right edge -->
-  <div class="swipe-gutter">
-    <svg class="chev chev-1" viewBox="0 0 36 72" width="36" height="72" aria-hidden="true">
-      <path class="chev-halo" d="M11 14 L27 36 L11 58" />
-      <path class="chev-line" d="M11 14 L27 36 L11 58" />
-    </svg>
-    <svg class="chev chev-2" viewBox="0 0 36 72" width="36" height="72" aria-hidden="true">
-      <path class="chev-halo" d="M11 14 L27 36 L11 58" />
-      <path class="chev-line" d="M11 14 L27 36 L11 58" />
-    </svg>
-    <svg class="chev chev-3" viewBox="0 0 36 72" width="36" height="72" aria-hidden="true">
-      <path class="chev-halo" d="M11 14 L27 36 L11 58" />
-      <path class="chev-line" d="M11 14 L27 36 L11 58" />
-    </svg>
-  </div>
-
-  <!-- MASTHEAD -->
-  <div class="masthead">
-    <span class="label">★ THE BIG SCREEN INDEX</span>
-    <span class="date">{{ date | date('weekday-dd-mm') }}</span>
-  </div>
-
-  <!-- CENTERED PILLAR SEAL — the "★ SATURDAY THEATRICAL VERDICT ★" focal badge -->
-  <div class="seal-mount">{{ components.seal("SATURDAY THEATRICAL VERDICT") | safe }}</div>
-
-  <!-- ISSUE NUMBER CORNER STAMP -->
-  <div class="corner-stamp">
-    <div class="kicker">★ ISSUE ★</div>
-    <div class="num">№ {{ issue }}</div>
-  </div>
-
-  <!-- TITLE BLOCK -->
-  <div class="title-block">
-    <div class="kicker">★ THE WEEK'S RULING ★</div>
-    <div class="headline">{{ hero.oneLineVerdict }}</div>
-    {# Dek is constrained at the source (≤140 chars, complete thought). The 150
-       guard only fires on a non-compliant overshoot, and the truncate filter
-       breaks at a word boundary — never mid-word. #}
-    <div class="hot-take">{{ hotTake | truncate(150) }}</div>
-    {% if alsoSkipping and alsoSkipping.length > 0 %}
-    <div class="also-skipping"><span class="lead">★ ALSO SKIPPING ·</span> {{ alsoSkipping | join(" · ") }}{% if alsoSkippingMore > 0 %} · +{{ alsoSkippingMore }} MORE{% endif %}</div>
-    {% endif %}
-  </div>
-
-  <!-- A — centered swipe cue, in the gap above the poster strip -->
-  <div class="swipe-cue">
-    <span class="swipe-cue-rule"></span>
-    <span class="swipe-cue-text">{% if filmCount >= 2 %}SWIPE FOR ALL {{ filmCount }} →{% else %}SWIPE  →{% endif %}</span>
-    <span class="swipe-cue-rule"></span>
-  </div>
-
-  <!-- POSTER STRIP — 3 inset tiles representing each verdict film -->
-  <div class="poster-strip">
-    {% for tile in posterStrip %}
-    <div class="strip-tile" style="left: {{ 195 + loop.index0 * 240 }}px; background-color: {{ tile.posterFallbackColor }};">
-      {% if tile.posterUrl %}
-        <img src="{{ tile.posterUrl }}" class="strip-img" alt="" onerror="this.style.display='none'" />
-      {% endif %}
-      <div class="strip-fallback {% if tile.posterUrl %}strip-fallback-hidden{% endif %}">
-        <div class="lang">{{ tile.language | upper }}</div>
-        <div class="title">{{ tile.filmTitle }}</div>
-      </div>
+      {% endfor %}
     </div>
     {% endfor %}
   </div>
 
-  <!-- FOOTER -->
-  <div class="footer">
-    <span class="brand">★ THE VERDICT · VOL. {{ vol }}</span>
-    <span class="meta">{{ filmCount }} {{ "FILM" | pluralize(filmCount, "FILMS") }} · {{ weekendDates }}</span>
+  <!-- TOP SCRIM -->
+  <div class="top-scrim"></div>
+
+  <!-- TINY BRAND MARK -->
+  <div class="mark">&#9733; TBSI</div>
+
+  <!-- HERO TITLE -->
+  <div class="title">
+    <div class="kicker">&#9733; THE WEEK&#8217;S RULING</div>
+    <div class="line">Saturday</div>
+    <div class="line">Theatrical</div>
+    <div class="line">Verdict</div>
+    <div class="rule"></div>
   </div>
 
-  <!-- B — page-turn dog-ear, true bottom-right corner of the cover -->
-  <div class="page-turn">
-    <span class="page-turn-label">TURN</span>
-    <svg class="page-turn-svg" width="64" height="64" viewBox="0 0 64 64" aria-hidden="true">
-      <path class="tri" d="M64 0 L64 64 L0 64 Z" />
-      <line class="fold-line" x1="64" y1="0" x2="0" y2="64" />
-      <text class="turn-arrow" x="46" y="52" text-anchor="middle">&#8594;</text>
-    </svg>
+  <!-- VERDICT LEGEND -->
+  <div class="legend">
+    <span class="chip"><span class="dot mustwatch"></span><span class="lbl">Must Watch</span></span>
+    <span class="chip"><span class="dot try"></span><span class="lbl">Worth a Try</span></span>
+    <span class="chip"><span class="dot watchit"></span><span class="lbl">Watch It</span></span>
+    <span class="chip"><span class="dot skip"></span><span class="lbl">Skip</span></span>
+  </div>
+
+  <!-- BOTTOM SWIPE CUE -->
+  <div class="bottom-scrim"></div>
+  <div class="swipe">
+    <span class="txt">Swipe for More</span>
+    <span class="chev"><span class="c1">&#8250;</span><span class="c2">&#8250;</span><span class="c3">&#8594;</span></span>
   </div>
 
 </div>
