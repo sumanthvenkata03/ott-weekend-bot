@@ -21,6 +21,7 @@ import {
   allMovieImages,
   movieVideos,
   movieBackground,
+  movieProviders,
   fullCredits,
   personDetail,
   isAllowedImageUrl,
@@ -43,6 +44,7 @@ const STATIC: Record<string, string> = {
   "/": "index.html",
   "/index.html": "index.html",
   "/movie.html": "movie.html",
+  "/person.html": "person.html",
 };
 
 async function serveStatic(file: string, res: ServerResponse): Promise<void> {
@@ -107,7 +109,14 @@ const server = createServer(async (req, res) => {
         return sendJson(res, 200, await allMovieImages(id, imdbId));
       }
       if (seg[3] === "credits") return sendJson(res, 200, await fullCredits(id));
-      if (seg[3] === "videos") return sendJson(res, 200, await movieVideos(id));
+      if (seg[3] === "videos") {
+        const title = url.searchParams.get("title") ?? undefined;
+        const yr = Number.parseInt(url.searchParams.get("year") ?? "", 10);
+        return sendJson(res, 200, await movieVideos(id, title, Number.isFinite(yr) ? yr : undefined));
+      }
+      if (seg[3] === "providers") {
+        return sendJson(res, 200, await movieProviders(id, url.searchParams.get("country") ?? "IN"));
+      }
       if (seg[3] === "wiki") {
         const title = (url.searchParams.get("title") ?? "").trim();
         if (!title) return sendJson(res, 400, { error: "title is required for wiki lookup" });

@@ -27,12 +27,54 @@ Then open: **http://127.0.0.1:5178**
 - Change the port with `MOVIE_LOOKUP_PORT=5200 npx tsx scripts/movie-lookup/server.ts`.
 - Stop with `Ctrl+C`.
 
+## API keys (env vars)
+
+All read from the environment (`.env` or shell). **Every key-requiring adapter
+degrades gracefully** — if a key is absent that source simply contributes nothing;
+no crash, other sources still work.
+
+| Env var | Powers | Needed? |
+|---|---|---|
+| `TMDB_API_KEY` | Search, detail, images, credits, **videos (TMDb)**, **watch-providers**, person detail + filmography | **Required** (already set for the pipeline) |
+| `OMDB_API_KEY` | OMDb poster + IMDb/RT/Metacritic ratings | Optional (already set for the pipeline) |
+| `FANART_API_KEY` | Extra movie art via **Fanart.tv** (posters/backgrounds/thumbs) | Optional — set to enable |
+| `TVDB_API_KEY` | Extra movie art via **TheTVDB** (v4 login → artworks) | Optional — set to enable |
+| `YOUTUBE_API_KEY` | Extra genuine trailer/clip links via the **YouTube Data API** | Optional — set to enable |
+
+Get keys: Fanart.tv → `fanart.tv/get-an-api-key`; TVDB → `thetvdb.com/api-information` (v4);
+YouTube → Google Cloud Console → enable "YouTube Data API v3" → API key.
+
+## Key health check
+
+Verify every key actually WORKS (live) — so a missing/expired/wrong key reads
+FAIL/SKIPPED instead of the tool silently returning empty:
+
+```bash
+npx tsx scripts/movie-lookup/keycheck.ts
+```
+
+It hits each source once with a fixed well-known target and prints one line each:
+
+| Status | Meaning |
+|---|---|
+| ✅ **OK** | Key is set **and** the live call succeeded (brief evidence shown) |
+| ⏭️ **SKIPPED** | No key set for that source — not a failure, that source is just off |
+| ❌ **FAIL** | Key **is** set but the call failed (reason shown: 401 bad key / 403 quota / bad token exchange / network) |
+
+Ends with a `OK · SKIPPED · FAIL` summary. **Exit code**: `0` if no *set* key failed
+(missing keys don't fail the gate), non-zero if any set key FAILED — so it's usable
+as a health gate. Keys are never printed. It makes live calls on purpose; it writes
+nothing to `cache.sqlite` and runs no job. (The offline *status-mapping* logic is unit
+-tested in `tool.check.ts`; the live calls stay in this on-demand script, out of
+`regression.ts`.)
+
 ## Pages
 
 | Page | Purpose |
 |---|---|
 | `GET /` | Search page with **fast auto-suggest** (debounced live dropdown, in-memory cache, stale-request cancellation, ↑↓/Enter keyboard nav). Click a suggestion → detail; Enter → full ranked results grid. |
-| `GET /movie.html?id={tmdbId}` | Full detail page: all fields, **full image gallery** (posters + backdrops, view + full-res download), **Videos/Trailers** (YouTube), **Wikipedia background** (summary + link), full clickable cast + crew, person modal with their own gallery, and a combined **raw-JSON** view (movie · credits · omdb · images · videos · wiki). |
+| `GET /movie.html?id={tmdbId}` | Full detail page: all fields, **merged image gallery** (TMDb + OMDb + Fanart.tv + TVDB), **Where to Watch** (providers), **Videos/Trailers** (TMDb + YouTube), **Wikipedia background**, full clickable cast + crew, and a combined **raw-JSON** view (movie · credits · omdb · images · videos · wiki · providers). |
+| `GET /person.html?id={personId}` | Rich person page: bio, **age** (or age-at-death), birthday/place, a.k.a., profile, **filmography poster grid** (click a film → its detail), and full image gallery (view + download). |
 
 ## Search — Google-style (search.ts)
 
@@ -60,11 +102,12 @@ and labelled; series have no detail page (detail is movie-only).
 |---|---|
 | `GET /api/search?q={words}[&limit=N]` | Google-style tokenized/ranked search (movies + series), order-independent |
 | `GET /api/movie/:id` | Full detail incl. full cast + crew, ratings, and `rawData` (complete source payloads) |
-| `GET /api/movie/:id/images[?imdbId=tt…]` | ALL posters + backdrops aggregated across every registered image source, deduped, full-res |
+| `GET /api/movie/:id/images[?imdbId=tt…]` | ALL posters + backdrops aggregated across TMDb + OMDb + Fanart.tv + TVDB, deduped, full-res |
 | `GET /api/movie/:id/credits` | Full cast + crew (name, role/character, department, person id, profile photo) |
-| `GET /api/movie/:id/videos` | Trailers/teasers/clips aggregated across sources (TMDb → YouTube), deduped, sorted official-trailer-first |
-| `GET /api/movie/:id/wiki?title=…&year=…` | Wikipedia background: article summary/extract + canonical link, confidence-guarded (no wrong-article guessing) |
-| `GET /api/person/:id` | Person detail + FULL image gallery (profile + all images) aggregated across sources |
+| `GET /api/movie/:id/videos[?title=…&year=…]` | Trailers/teasers/clips: TMDb `/videos` **+ YouTube Data API**, deduped by video id, official-first |
+| `GET /api/movie/:id/providers[?country=IN]` | Where to watch — TMDb watch-providers (JustWatch): per-country flatrate/free/ads/rent/buy |
+| `GET /api/movie/:id/wiki?title=…&year=…` | Wikipedia background: article summary/extract + canonical link, confidence-guarded |
+| `GET /api/person/:id` | Rich person detail: bio, age, place, a.k.a., **filmography** (cast+crew with posters) + FULL image gallery |
 | `GET /api/download?url={imageUrl}` | Streams an image with an attachment header (SSRF-guarded to TMDb + Amazon/IMDb image CDNs) |
 | `GET /api/movie?id={tmdbId}` · `GET /api/images?id={tmdbId}` | Query-style aliases kept for compatibility |
 
@@ -77,8 +120,28 @@ which run every adapter in `SOURCES` and dedupe. `wiki.ts` mirrors the pattern f
 background (`BACKGROUND_SOURCES`). To add **Fanart.tv / TVDB** later, write one adapter
 and push it into the registry — no endpoint changes.
 
-Registered now: `tmdbSource` (movie images + person images + videos), `omdbSource`
-(movie poster), `wikipediaSource` (background).
+Registered now: `tmdbSource` (movie/person images + videos), `omdbSource` (movie
+poster), `fanartSource` (Fanart.tv movie art — key), `tvdbSource` (TheTVDB movie
+art + **people images** — key), `youtubeSource` (YouTube trailers — key),
+`wikidataSource` (**person images** via Wikidata P18 + Commons — no key),
+`wikipediaPersonSource` (**person lead image** — no key), `wikipediaSource`
+(background). Key-gated adapters return empty when their key is unset.
+
+### Person image gallery — multi-source (no new keys)
+
+A person's gallery aggregates + dedupes across: **TMDb** person images, **Wikidata
+→ Wikimedia Commons** (P18 image + P373 category — the highest-yield keyless
+source), **Wikipedia** lead image (search-resolved, name-guarded), and **TheTVDB**
+people images (reuses `TVDB_API_KEY`). Each image is tagged with its source. The
+person is resolved once (TMDb `external_ids` → `wikidata_id` / `imdb_id`; SPARQL
+`P345` fallback) and that identity is passed to every adapter.
+
+- **No NEW key required** — Wikidata / Commons / Wikipedia are keyless; TVDB reuses
+  the existing `TVDB_API_KEY`. (Fanart.tv has **no** actor/person image API — only
+  movie/tv/music — so it contributes nothing for people, by design.)
+- Yield scales with how well-photographed the person is on open sources, e.g.
+  Samantha Ruth Prabhu → 32 images (Commons category has 24), Nayanthara → 12,
+  vs a sparsely-covered person → a handful. Duplicate URLs across sources are merged.
 
 ## Tests + full regression
 

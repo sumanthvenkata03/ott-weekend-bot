@@ -72,8 +72,15 @@ interface TmdbPerson {
   popularity?: number;
   profile_path?: string | null;
   combined_credits?: {
-    cast?: { id: number; title?: string; name?: string; character?: string; release_date?: string; first_air_date?: string; media_type?: string; popularity?: number }[];
+    cast?: CombinedCredit[];
+    crew?: CombinedCredit[];
   };
+  external_ids?: { imdb_id?: string | null; wikidata_id?: string | null };
+}
+interface CombinedCredit {
+  id: number; title?: string; name?: string; character?: string; job?: string;
+  release_date?: string; first_air_date?: string; media_type?: string;
+  poster_path?: string | null; popularity?: number;
 }
 
 // ── Public shapes returned to the UI ─────────────────────────────────────────
@@ -124,6 +131,10 @@ export interface MovieDetail {
 }
 
 export interface PersonKnownFor { id: number; title: string; year?: number; character?: string; mediaType?: string; }
+export interface FilmographyItem {
+  id: number; title: string; year?: number; mediaType: string;
+  role: string; department: "cast" | "crew"; posterUrl?: string; popularity?: number;
+}
 export interface PersonDetail {
   id: number;
   name: string;
@@ -131,6 +142,8 @@ export interface PersonDetail {
   biography?: string;
   birthday?: string;
   deathday?: string;
+  age?: number;
+  ageAtDeath?: boolean;
   placeOfBirth?: string;
   gender?: string;
   alsoKnownAs?: string[];
@@ -139,6 +152,7 @@ export interface PersonDetail {
   popularity?: number;
   profileUrl?: string;
   knownFor: PersonKnownFor[];
+  filmography: FilmographyItem[];
   images: ImageItem[];
   imageSources: string[];
   rawData: Record<string, unknown>;
@@ -149,8 +163,55 @@ export interface MovieCredits { id: number; cast: CastMember[]; crew: CrewMember
 export interface MovieVideos { id: number; videos: VideoItem[]; sources: string[]; rawData: Record<string, unknown>; }
 export interface MovieBackground { id: number; results: BackgroundResult[]; }
 
+export interface ProviderEntry { name: string; logoUrl?: string; }
+export interface ProviderCountry { link?: string; flatrate: ProviderEntry[]; free: ProviderEntry[]; ads: ProviderEntry[]; rent: ProviderEntry[]; buy: ProviderEntry[]; }
+export interface MovieProviders { id: number; prefer: string; countries: Record<string, ProviderCountry>; rawData: Record<string, unknown>; }
+
+interface TmdbProvider { provider_name: string; logo_path?: string | null; display_priority?: number; }
+interface TmdbProvidersForCountry { link?: string; flatrate?: TmdbProvider[]; free?: TmdbProvider[]; ads?: TmdbProvider[]; rent?: TmdbProvider[]; buy?: TmdbProvider[]; }
+interface TmdbProvidersResponse { id?: number; results?: Record<string, TmdbProvidersForCountry>; }
+
 function genderName(g: number | undefined): string | undefined {
   return g === 1 ? "Female" : g === 2 ? "Male" : g === 3 ? "Non-binary" : undefined;
+}
+
+/** Age in whole years from birthday to deathday (age at death) or `now` (current
+ *  age). Exported/pure for tests. Returns undefined on missing/invalid birthday. */
+export function computeAge(birthday: string | undefined, deathday: string | undefined, now: Date): number | undefined {
+  if (!birthday || !/^\d{4}-\d{2}-\d{2}/.test(birthday)) return undefined;
+  const b = new Date(birthday);
+  const end = deathday && /^\d{4}-\d{2}-\d{2}/.test(deathday) ? new Date(deathday) : now;
+  if (Number.isNaN(b.getTime()) || Number.isNaN(end.getTime())) return undefined;
+  let age = end.getFullYear() - b.getFullYear();
+  const m = end.getMonth() - b.getMonth();
+  if (m < 0 || (m === 0 && end.getDate() < b.getDate())) age--;
+  return age >= 0 && age < 130 ? age : undefined;
+}
+
+/** Build a deduped filmography (one row per film, cast+crew roles merged), newest
+ *  first. Exported/pure for tests. */
+export function buildFilmography(cc: { cast?: CombinedCredit[]; crew?: CombinedCredit[] } | undefined): FilmographyItem[] {
+  const byId = new Map<string, FilmographyItem>();
+  const add = (c: CombinedCredit, department: "cast" | "crew", role: string) => {
+    const mt = c.media_type ?? "movie";
+    const k = `${mt}:${c.id}`;
+    const existing = byId.get(k);
+    const year = yearOf(c.release_date ?? c.first_air_date);
+    if (existing) {
+      if (role && !existing.role.split(", ").includes(role)) existing.role += `, ${role}`;
+      return;
+    }
+    byId.set(k, {
+      id: c.id, title: c.title ?? c.name ?? "(untitled)",
+      ...(year !== undefined ? { year } : {}),
+      mediaType: mt, role: role || (department === "cast" ? "Actor" : "Crew"), department,
+      ...(c.poster_path ? { posterUrl: img(c.poster_path, "w185") } : {}),
+      ...(c.popularity !== undefined ? { popularity: c.popularity } : {}),
+    });
+  };
+  for (const c of cc?.cast ?? []) add(c, "cast", c.character ? `as ${c.character}` : "Actor");
+  for (const c of cc?.crew ?? []) add(c, "crew", c.job ?? "Crew");
+  return [...byId.values()].sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || (b.popularity ?? 0) - (a.popularity ?? 0));
 }
 function yearOf(d: string | null | undefined): number | undefined {
   if (!d) return undefined;
@@ -268,10 +329,28 @@ export async function allMovieImages(tmdbId: number, imdbId?: string): Promise<M
   };
 }
 
-// ── 3b. Videos / trailers (aggregated across sources) ────────────────────────
-export async function movieVideos(tmdbId: number): Promise<MovieVideos> {
-  const agg = await aggregateMovieVideos({ tmdbId });
+// ── 3b. Videos / trailers (aggregated: TMDb /videos + YouTube Data API) ──────
+export async function movieVideos(tmdbId: number, title?: string, year?: number): Promise<MovieVideos> {
+  const agg = await aggregateMovieVideos({ tmdbId, ...(title ? { title } : {}), ...(year ? { year } : {}) });
   return { id: tmdbId, videos: agg.items, sources: agg.sources, rawData: agg.raw };
+}
+
+// ── 3d. Streaming availability — TMDb watch-providers (JustWatch), no new key ─
+export async function movieProviders(tmdbId: number, prefer = "IN"): Promise<MovieProviders> {
+  const raw = await tmdbGet<TmdbProvidersResponse>(`/movie/${tmdbId}/watch/providers`);
+  const results = raw.results ?? {};
+  const mapKind = (list: TmdbProvider[] | undefined): ProviderEntry[] =>
+    (list ?? []).slice().sort((a, b) => (a.display_priority ?? 99) - (b.display_priority ?? 99))
+      .map((p) => ({ name: p.provider_name, ...(p.logo_path ? { logoUrl: img(p.logo_path, "w92") } : {}) }));
+  const countries: Record<string, ProviderCountry> = {};
+  for (const [code, c] of Object.entries(results)) {
+    countries[code] = {
+      link: c.link,
+      flatrate: mapKind(c.flatrate), free: mapKind(c.free), ads: mapKind(c.ads),
+      rent: mapKind(c.rent), buy: mapKind(c.buy),
+    };
+  }
+  return { id: tmdbId, prefer, countries, rawData: { tmdb: raw } };
 }
 
 // ── 3c. Wikipedia (or future) background ─────────────────────────────────────
@@ -293,10 +372,16 @@ export async function fullCredits(id: number): Promise<MovieCredits> {
 
 // ── 5. Person detail + full image gallery ────────────────────────────────────
 export async function personDetail(id: number): Promise<PersonDetail> {
-  const [person, imagesAgg] = await Promise.all([
-    tmdbGet<TmdbPerson>(`/person/${id}`, { append_to_response: "combined_credits" }),
-    aggregatePersonImages({ tmdbId: id }),
-  ]);
+  // Fetch identity first (name + IMDb + Wikidata ids) so the keyless (Wikidata/
+  // Commons/Wikipedia) and keyed (TVDB) person-image adapters can resolve the
+  // SAME human — TMDb's own /person/images is sparse for people.
+  const person = await tmdbGet<TmdbPerson>(`/person/${id}`, { append_to_response: "combined_credits,external_ids" });
+  const imagesAgg = await aggregatePersonImages({
+    tmdbId: id,
+    ...(person.name ? { name: person.name } : {}),
+    ...(person.external_ids?.imdb_id ? { imdbId: person.external_ids.imdb_id } : {}),
+    ...(person.external_ids?.wikidata_id ? { wikidataId: person.external_ids.wikidata_id } : {}),
+  });
 
   const knownFor: PersonKnownFor[] = (person.combined_credits?.cast ?? [])
     .slice()
@@ -310,6 +395,8 @@ export async function personDetail(id: number): Promise<PersonDetail> {
       ...(c.media_type ? { mediaType: c.media_type } : {}),
     }));
 
+  const age = computeAge(person.birthday ?? undefined, person.deathday ?? undefined, new Date());
+
   return {
     id: person.id,
     name: person.name,
@@ -317,6 +404,7 @@ export async function personDetail(id: number): Promise<PersonDetail> {
     biography: person.biography || undefined,
     birthday: person.birthday ?? undefined,
     deathday: person.deathday ?? undefined,
+    ...(age !== undefined ? { age, ageAtDeath: !!person.deathday } : {}),
     placeOfBirth: person.place_of_birth ?? undefined,
     gender: genderName(person.gender),
     alsoKnownAs: person.also_known_as && person.also_known_as.length > 0 ? person.also_known_as : undefined,
@@ -325,9 +413,10 @@ export async function personDetail(id: number): Promise<PersonDetail> {
     popularity: person.popularity,
     profileUrl: img(person.profile_path, "w300"),
     knownFor,
+    filmography: buildFilmography(person.combined_credits),
     images: imagesAgg.items,
     imageSources: imagesAgg.sources,
-    rawData: { tmdb: { person, images: imagesAgg.raw["tmdb"] } },
+    rawData: { tmdb: { person }, images: imagesAgg.raw },
   };
 }
 
@@ -337,6 +426,9 @@ const ALLOWED_IMAGE_HOSTS = new Set([
   "m.media-amazon.com",
   "images-na.ssl-images-amazon.com",
   "ia.media-imdb.com",
+  "assets.fanart.tv",          // Fanart.tv artwork
+  "artworks.thetvdb.com",      // TVDB artwork
+  "upload.wikimedia.org",      // Wikimedia Commons / Wikipedia images
 ]);
 export function isAllowedImageUrl(raw: string): boolean {
   try {

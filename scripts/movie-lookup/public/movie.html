@@ -81,6 +81,15 @@
     .gimg .src.omdb{background:var(--brass);color:var(--ink);}
     .gimg .dim{position:absolute;bottom:6px;right:6px;font-family:var(--mono);font-size:9px;background:rgba(26,22,20,.72);color:var(--cream);padding:2px 6px;border-radius:2px;}
 
+    /* providers */
+    .pcountry{border:1px solid var(--line);border-radius:2px;background:#fbf6ea;padding:10px 14px;margin-bottom:10px;}
+    .pcode{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--oxblood);margin-bottom:6px;}
+    .prow{display:flex;gap:10px;align-items:flex-start;padding:4px 0;}
+    .prow .pk{font-family:var(--mono);font-size:10px;text-transform:uppercase;color:var(--ink-soft);flex:0 0 70px;padding-top:4px;}
+    .prow .pv{display:flex;flex-wrap:wrap;gap:6px;flex:1;}
+    .pchip{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:11px;padding:3px 8px 3px 4px;border:1px solid var(--green);border-radius:2px;background:#fff;color:var(--green);font-weight:700;}
+    .pchip img{width:18px;height:18px;border-radius:3px;}
+
     /* videos */
     .vidgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;}
     .vid{display:flex;gap:10px;border:1px solid var(--line);border-radius:2px;background:#fbf6ea;overflow:hidden;text-decoration:none;color:inherit;transition:transform .08s,border-color .08s;}
@@ -157,7 +166,6 @@
   </div>
 
   <!-- person modal -->
-  <div class="modal" id="modal"><div class="sheet" id="sheet"></div></div>
 
   <script>
     const $ = (s) => document.querySelector(s);
@@ -182,7 +190,8 @@
         renderDetail(DETAIL);
         setStatus("");
         loadImages(id, DETAIL.imdbId);
-        loadVideos(id);
+        loadProviders(id);
+        loadVideos(id, DETAIL.title, DETAIL.year);
         loadBackground(id, DETAIL.title, DETAIL.year);
       } catch (e) { setStatus("Failed to load: " + e.message, true); }
     })();
@@ -258,6 +267,11 @@
           <div class="grid" id="grid"></div>
         </div>
 
+        <div id="provWrap" class="hidden">
+          <div class="seclabel"><span>Where to Watch</span><span class="count" id="provCount"></span></div>
+          <div id="providers"></div>
+        </div>
+
         <div id="videosWrap" class="hidden">
           <div class="seclabel"><span>Videos &amp; Trailers</span><span class="count" id="videoCount"></span></div>
           <div class="vidgrid" id="videos"></div>
@@ -313,10 +327,33 @@
       } catch(e){ /* gallery best-effort */ }
     }
 
-    // ── Videos / trailers ──
-    async function loadVideos(mid){
+    // ── Where to watch (providers) ──
+    async function loadProviders(mid){
       try {
-        const v = await getJson("/api/movie/"+encodeURIComponent(mid)+"/videos");
+        const p = await getJson("/api/movie/"+encodeURIComponent(mid)+"/providers?country=IN");
+        RAW.providers = p.rawData; renderRaw();
+        const countries = p.countries || {};
+        const order = [p.prefer||"IN", "US", "GB"].filter((c,i,a)=>a.indexOf(c)===i);
+        const rest = Object.keys(countries).filter(c=>!order.includes(c)).sort();
+        const codes = [...order.filter(c=>countries[c]), ...rest];
+        $("#provWrap").classList.remove("hidden");
+        if (!codes.length){ $("#provCount").textContent="none listed"; $("#providers").innerHTML=`<div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft)">No streaming providers listed (JustWatch via TMDb).</div>`; return; }
+        $("#provCount").textContent = codes.length+" region"+(codes.length===1?"":"s");
+        const kinds = [["flatrate","Stream"],["free","Free"],["ads","With ads"],["rent","Rent"],["buy","Buy"]];
+        $("#providers").innerHTML = codes.map(code=>{
+          const c = countries[code];
+          const rows = kinds.filter(([k])=>(c[k]||[]).length).map(([k,label])=>`
+            <div class="prow"><span class="pk">${label}</span><span class="pv">${c[k].map(pr=>`<span class="pchip">${pr.logoUrl?`<img src="${esc(pr.logoUrl)}" alt=""/>`:""}${esc(pr.name)}</span>`).join("")}</span></div>`).join("");
+          if (!rows) return "";
+          return `<div class="pcountry"><div class="pcode">${esc(code)}${c.link?` · <a class="link" href="${esc(c.link)}" target="_blank" rel="noopener">JustWatch ↗</a>`:""}</div>${rows}</div>`;
+        }).join("") || `<div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft)">No streaming providers listed.</div>`;
+      } catch(e){ /* providers best-effort */ }
+    }
+
+    // ── Videos / trailers ──
+    async function loadVideos(mid, title, year){
+      try {
+        const v = await getJson("/api/movie/"+encodeURIComponent(mid)+"/videos?title="+encodeURIComponent(title||"")+(year?"&year="+year:""));
         RAW.videos = v.rawData; renderRaw();
         const vids = v.videos||[];
         $("#videoCount").textContent = vids.length + (vids.length===1?" video":" videos") + ((v.sources||[]).length?"  ·  "+v.sources.join(", "):"");
@@ -325,7 +362,7 @@
           $("#videos").innerHTML = vids.map(v=>`
             <a class="vid" href="${esc(v.url)}" target="_blank" rel="noopener">
               <span class="vthumb"${v.thumbUrl?` style="background-image:url('${esc(v.thumbUrl)}')"`:""}><span class="play">▶</span></span>
-              <span class="vmeta"><span class="vname">${esc(v.name)}</span><span class="vtype">${esc(v.type)}${v.official?" · official":""} · ${esc(v.site)}</span></span>
+              <span class="vmeta"><span class="vname">${esc(v.name)}</span><span class="vtype">${esc(v.type)}${v.official?" · official":""} · ${esc(v.source)}${v.channel?" · "+esc(v.channel):""}</span></span>
             </a>`).join("");
         }
         $("#videosWrap").classList.remove("hidden");
@@ -378,56 +415,11 @@
     $("#lb").addEventListener("click", e=>{ if(e.target===$("#lb")) closeLb(); });
 
     // ── Person modal ──
-    async function openPerson(pid){
-      const sheet=$("#sheet"); $("#modal").classList.add("open");
-      sheet.innerHTML = `<button class="x" id="pClose">Close ✕</button><div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft);padding:20px 0">Loading person…</div>`;
-      $("#pClose").addEventListener("click", closePerson);
-      try {
-        const p = await getJson("/api/person/"+encodeURIComponent(pid));
-        const pic = p.profileUrl ? `<img class="ppic" src="${esc(p.profileUrl)}" alt="" />` : `<div class="ppic" style="aspect-ratio:2/3"></div>`;
-        const m=[];
-        if(p.knownForDepartment) m.push("Known for: "+esc(p.knownForDepartment));
-        if(p.birthday) m.push("Born "+esc(p.birthday)+(p.placeOfBirth?" · "+esc(p.placeOfBirth):""));
-        if(p.deathday) m.push("Died "+esc(p.deathday));
-        if(p.gender) m.push(esc(p.gender));
-        if(p.imdbId) m.push(`<a class="link" href="https://www.imdb.com/name/${esc(p.imdbId)}" target="_blank" rel="noopener">${esc(p.imdbId)} ↗</a>`);
-        m.push(`<a class="link" href="https://www.themoviedb.org/person/${p.id}" target="_blank" rel="noopener">TMDb ${p.id} ↗</a>`);
+    // Clicking a cast/crew person opens the rich person page (bio + age +
+    // filmography poster grid + full image gallery).
+    function openPerson(pid){ location.href = "/person.html?id=" + pid; }
 
-        const kf = (p.knownFor||[]).map(k=> k.mediaType==="movie"
-          ? `<a href="/movie.html?id=${k.id}">${esc(k.title)}${k.year?" ("+k.year+")":""}</a>`
-          : `<span>${esc(k.title)}${k.year?" ("+k.year+")":""}</span>`).join("");
-
-        const imgs = p.images||[];
-        const gallery = imgs.length
-          ? `<div class="grid" style="margin-top:6px">${imgs.map((im,i)=>`<div class="gimg" data-pi="${i}"><img loading="lazy" src="${esc(im.thumbUrl)}" alt=""/><span class="src">${esc(im.source)}</span>${im.width?`<span class="dim">${im.width}×${im.height}</span>`:""}</div>`).join("")}</div>`
-          : `<div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft);margin-top:8px">No additional images available.</div>`;
-
-        sheet.innerHTML = `
-          <button class="x" id="pClose">Close ✕</button>
-          <div class="phead">
-            <div>${pic}</div>
-            <div>
-              <h2>${esc(p.name)}</h2>
-              <div class="pmeta">${m.join("<br>")}</div>
-              ${kf?`<div style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--oxblood);margin-top:12px">Known For</div><div class="kf">${kf}</div>`:""}
-              ${p.biography?`<div class="bio">${esc(p.biography)}</div>`:""}
-            </div>
-          </div>
-          <div style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--oxblood);margin:20px 0 8px;border-bottom:1px solid var(--line);padding-bottom:6px">
-            Image Gallery — ${imgs.length} image${imgs.length===1?"":"s"}${(p.imageSources||[]).length?"  ·  "+p.imageSources.join(", "):""}
-          </div>
-          ${gallery}`;
-        $("#pClose").addEventListener("click", closePerson);
-        sheet.querySelectorAll(".gimg").forEach(el=> el.addEventListener("click", ()=> openLb(imgs[Number(el.dataset.pi)])));
-      } catch(e){
-        sheet.innerHTML = `<button class="x" id="pClose">Close ✕</button><div style="font-family:var(--mono);font-size:12px;color:var(--vermillion);padding:20px 0">Failed to load person: ${esc(e.message)}</div>`;
-        $("#pClose").addEventListener("click", closePerson);
-      }
-    }
-    function closePerson(){ $("#modal").classList.remove("open"); }
-    $("#modal").addEventListener("click", e=>{ if(e.target===$("#modal")) closePerson(); });
-
-    document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ if($("#lb").classList.contains("open")) closeLb(); else closePerson(); } });
+    document.addEventListener("keydown", e=>{ if(e.key==="Escape" && $("#lb").classList.contains("open")) closeLb(); });
   </script>
 </body>
 </html>

@@ -18,10 +18,23 @@ vi.mock("ofetch", () => ({ ofetch: vi.fn() }));
 
 import { ofetch } from "ofetch";
 import { parseQuery, rankHits, type MultiHit } from "./search.js";
-import { tmdbSource, dedupeImages, dedupeVideos, type ImageItem, type VideoItem } from "./sources.js";
+import {
+  tmdbSource, fanartSource, tvdbSource, youtubeSource,
+  wikidataSource, wikipediaPersonSource,
+  extractWikidataImages, extractCommonsCategory,
+  dedupeImages, dedupeVideos, type ImageItem, type VideoItem,
+} from "./sources.js";
+import { computeAge, buildFilmography, movieProviders } from "./lookup.js";
 import { overlapRatio, titleTokens } from "./wiki.js";
+import { runCheck, describeError } from "./keycheck.js";
 
-beforeAll(() => { process.env.TMDB_API_KEY = "test-key"; });
+beforeAll(() => {
+  process.env.TMDB_API_KEY = "test-key";
+  // Ensure the new-key adapters see NO key so graceful-degradation is deterministic.
+  delete process.env.FANART_API_KEY;
+  delete process.env.TVDB_API_KEY;
+  delete process.env.YOUTUBE_API_KEY;
+});
 
 const HITS: MultiHit[] = [
   { id: 1, media_type: "movie", title: "Boss", original_language: "en", release_date: "2011-06-01", popularity: 50, vote_count: 500 },
@@ -131,6 +144,170 @@ describe("tmdb adapter shapes (mocked network)", () => {
     expect(items[0]!.name).toBe("Official Trailer"); // official trailer sorts first
     expect(items[0]!.url).toBe("https://www.youtube.com/watch?v=trailerKey");
     expect(items[0]!.thumbUrl).toBe("https://img.youtube.com/vi/trailerKey/hqdefault.jpg");
+  });
+});
+
+describe("new adapters — graceful degradation when the key env var is absent", () => {
+  it("Fanart.tv returns empty (no crash) with FANART_API_KEY unset", async () => {
+    expect(await fanartSource.getMovieImages({ tmdbId: 1 })).toEqual({ items: [] });
+  });
+  it("TVDB returns empty (no crash) with TVDB_API_KEY unset", async () => {
+    expect(await tvdbSource.getMovieImages({ tmdbId: 1, imdbId: "tt1" })).toEqual({ items: [] });
+  });
+  it("YouTube returns empty (no crash) with YOUTUBE_API_KEY unset", async () => {
+    expect(await youtubeSource.getMovieVideos!({ tmdbId: 1, title: "X" })).toEqual({ items: [] });
+  });
+  it("YouTube returns empty when a key is present but no title is given", async () => {
+    process.env.YOUTUBE_API_KEY = "yt-key";
+    try {
+      expect(await youtubeSource.getMovieVideos!({ tmdbId: 1 })).toEqual({ items: [] });
+    } finally { delete process.env.YOUTUBE_API_KEY; }
+  });
+});
+
+describe("YouTube adapter mapping (mocked network)", () => {
+  it("maps search items to genuine YouTube watch URLs, flags official channels", async () => {
+    process.env.YOUTUBE_API_KEY = "yt-key";
+    vi.mocked(ofetch).mockResolvedValueOnce({
+      items: [{
+        id: { videoId: "abc123" },
+        snippet: { title: "Official Trailer", channelTitle: "Studio Official", publishedAt: "2024-01-01T00:00:00Z", thumbnails: { medium: { url: "https://i.ytimg.com/vi/abc123/mq.jpg" } } },
+      }],
+    });
+    try {
+      const { items } = await youtubeSource.getMovieVideos!({ tmdbId: 1, title: "Film", year: 2024 });
+      expect(items[0]!.url).toBe("https://www.youtube.com/watch?v=abc123");
+      expect(items[0]!.source).toBe("youtube");
+      expect(items[0]!.official).toBe(true);
+      expect(items[0]!.channel).toBe("Studio Official");
+    } finally { delete process.env.YOUTUBE_API_KEY; }
+  });
+});
+
+describe("person detail helpers", () => {
+  it("computeAge = current age when alive", () => {
+    expect(computeAge("1990-06-01", undefined, new Date("2020-06-01"))).toBe(30);
+    expect(computeAge("1990-06-02", undefined, new Date("2020-06-01"))).toBe(29); // birthday not yet reached
+  });
+  it("computeAge = age at death when deathday present", () => {
+    expect(computeAge("1950-01-01", "2000-01-01", new Date("2024-01-01"))).toBe(50);
+  });
+  it("computeAge is undefined for missing/invalid birthday", () => {
+    expect(computeAge(undefined, undefined, new Date())).toBeUndefined();
+    expect(computeAge("not-a-date", undefined, new Date())).toBeUndefined();
+  });
+  it("buildFilmography dedupes per film, merges roles, sorts newest-first, builds posters", () => {
+    const filmo = buildFilmography({
+      cast: [
+        { id: 10, title: "New Film", release_date: "2022-05-01", media_type: "movie", character: "Hero", poster_path: "/p.jpg", popularity: 9 },
+        { id: 11, name: "Old Show", first_air_date: "2015-01-01", media_type: "tv", character: "Guest" },
+      ],
+      crew: [
+        { id: 10, title: "New Film", release_date: "2022-05-01", media_type: "movie", job: "Producer" }, // same film as cast
+      ],
+    });
+    expect(filmo.map((f) => f.id)).toEqual([10, 11]); // 2022 before 2015
+    expect(filmo[0]!.role).toContain("as Hero");
+    expect(filmo[0]!.role).toContain("Producer");   // cast + crew roles merged onto one row
+    expect(filmo[0]!.posterUrl).toBe("https://image.tmdb.org/t/p/w185/p.jpg");
+    expect(filmo[0]!.mediaType).toBe("movie");
+  });
+});
+
+describe("watch-providers mapping (mocked network)", () => {
+  it("maps TMDb watch/providers into per-country flatrate/rent/buy", async () => {
+    vi.mocked(ofetch).mockResolvedValueOnce({
+      id: 1,
+      results: {
+        IN: { link: "https://justwatch.com/in", flatrate: [{ provider_name: "Netflix", display_priority: 1, logo_path: "/n.jpg" }], rent: [{ provider_name: "Apple TV", display_priority: 2 }] },
+      },
+    });
+    const p = await movieProviders(1, "IN");
+    expect(Object.keys(p.countries)).toContain("IN");
+    expect(p.countries["IN"]!.flatrate.map((x) => x.name)).toEqual(["Netflix"]);
+    expect(p.countries["IN"]!.flatrate[0]!.logoUrl).toBe("https://image.tmdb.org/t/p/w92/n.jpg");
+    expect(p.countries["IN"]!.rent.map((x) => x.name)).toEqual(["Apple TV"]);
+  });
+});
+
+describe("person-image sources (Wikidata/Commons/Wikipedia/TVDB)", () => {
+  it("Wikidata is graceful-empty when the person can't be resolved (no ids)", async () => {
+    expect(await wikidataSource.getPersonImages({ tmdbId: 1 })).toEqual({ items: [] });
+  });
+  it("Wikipedia is graceful-empty with no name", async () => {
+    expect(await wikipediaPersonSource.getPersonImages({ tmdbId: 1 })).toEqual({ items: [] });
+  });
+  it("TVDB person is graceful-empty with no name / no key", async () => {
+    expect(await tvdbSource.getPersonImages({ tmdbId: 1 })).toEqual({ items: [] });
+  });
+  it("extractWikidataImages reads P18 filenames; extractCommonsCategory reads P373", () => {
+    const entity = { claims: { P18: [{ mainsnak: { datavalue: { value: "Sneha.jpg" } } }], P373: [{ mainsnak: { datavalue: { value: "Sneha (actress)" } } }] } };
+    expect(extractWikidataImages(entity)).toEqual(["Sneha.jpg"]);
+    expect(extractCommonsCategory(entity)).toBe("Sneha (actress)");
+    expect(extractWikidataImages({})).toEqual([]);
+    expect(extractCommonsCategory(null)).toBeUndefined();
+  });
+  it("Wikipedia adapter tags source='wikipedia' and confidence-guards the name", async () => {
+    // Matching title → image attached, tagged wikipedia.
+    vi.mocked(ofetch).mockResolvedValueOnce({
+      type: "standard", title: "Sneha",
+      originalimage: { source: "https://upload.wikimedia.org/sneha.jpg", width: 800, height: 1200 },
+      thumbnail: { source: "https://upload.wikimedia.org/sneha_thumb.jpg" },
+    });
+    const ok = await wikipediaPersonSource.getPersonImages({ tmdbId: 1, name: "Sneha" });
+    expect(ok.items).toHaveLength(1);
+    expect(ok.items[0]!.source).toBe("wikipedia");
+    expect(ok.items[0]!.fullUrl).toBe("https://upload.wikimedia.org/sneha.jpg");
+
+    // Wrong-person title → guarded out (no image attached).
+    vi.mocked(ofetch).mockResolvedValueOnce({
+      type: "standard", title: "Completely Different Person",
+      originalimage: { source: "https://upload.wikimedia.org/other.jpg" },
+    });
+    const wrong = await wikipediaPersonSource.getPersonImages({ tmdbId: 1, name: "Sneha" });
+    expect(wrong.items).toEqual([]);
+  });
+  it("dedupe across sources keeps one per URL and preserves source tags", () => {
+    const items: ImageItem[] = [
+      { source: "tmdb", kind: "profile", fullUrl: "u1", thumbUrl: "t1" },
+      { source: "wikidata", kind: "profile", fullUrl: "u1", thumbUrl: "t1" }, // same URL → deduped
+      { source: "wikipedia", kind: "profile", fullUrl: "u2", thumbUrl: "t2" },
+      { source: "tvdb", kind: "profile", fullUrl: "u3", thumbUrl: "t3" },
+    ];
+    const out = dedupeImages(items);
+    expect(out.map((i) => i.fullUrl)).toEqual(["u1", "u2", "u3"]);
+    expect(out.map((i) => i.source)).toEqual(["tmdb", "wikipedia", "tvdb"]); // first-seen wins for u1
+  });
+});
+
+describe("keycheck status mapping (offline — MISSING vs PRESENT-but-BROKEN)", () => {
+  it("SKIPPED when the env var is unset (live probe NOT called)", async () => {
+    const probe = vi.fn(async () => "x");
+    const r = await runCheck("Src", "NO_SUCH_KEY", probe, {});
+    expect(r.status).toBe("SKIPPED");
+    expect(r.detail).toContain("no NO_SUCH_KEY set");
+    expect(probe).not.toHaveBeenCalled();
+  });
+  it("OK when the key is present and the probe resolves (evidence surfaced)", async () => {
+    const r = await runCheck("Src", "K", async () => "got \"Foo\"", { K: "key-value" });
+    expect(r.status).toBe("OK");
+    expect(r.detail).toContain('got "Foo"');
+  });
+  it("FAIL when the key is PRESENT but the probe throws (a dead key must NOT pass)", async () => {
+    const r = await runCheck("Src", "K", async () => { throw { status: 401, data: { status_message: "Invalid API key" } }; }, { K: "bad" });
+    expect(r.status).toBe("FAIL");
+    expect(r.detail).toContain("K set but call failed");
+    expect(r.detail).toContain("401 unauthorized");
+  });
+  it("FAIL surfaces 403 quota distinctly from 401", async () => {
+    const r = await runCheck("Src", "K", async () => { throw { status: 403, data: { error: { message: "quotaExceeded" } } }; }, { K: "k" });
+    expect(r.status).toBe("FAIL");
+    expect(r.detail).toContain("403 forbidden");
+  });
+  it("describeError maps statuses + a network error, never echoes a key", () => {
+    expect(describeError({ status: 401 })).toContain("401 unauthorized");
+    expect(describeError({ status: 400, data: { error: { message: "API key not valid" } } })).toContain("400 bad request");
+    expect(describeError(new Error("socket hang up"))).toContain("socket hang up");
   });
 });
 
