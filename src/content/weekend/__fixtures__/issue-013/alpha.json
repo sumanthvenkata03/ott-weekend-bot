@@ -1,0 +1,46 @@
+{
+  "found": true,
+  "criticRatings": [
+    {
+      "source": "Bollywood Hungama",
+      "url": "https://www.bollywoodhungama.com/movie/alpha/critic-review/alpha-movie-review/alpha-is-mounted-on-a-grand-scale-but-suffers-due-to-a-weak-script/",
+      "explicitScore": 2,
+      "sentimentScore": 2
+    },
+    {
+      "source": "India TV",
+      "url": "https://www.indiatvnews.com/entertainment/movie-review/alpha-movie-review-rating-alia-bhatt-sharvari-shiv-rawail-yrf-film-1304",
+      "explicitScore": 2.5,
+      "sentimentScore": 2.5
+    },
+    {
+      "source": "Bollywood Bubble",
+      "url": "https://www.bollywoodbubble.com/movie-reviews/alpha-review-alia-bhatt-sharvari-led-spy-actioner-struggles-to-keep-you-engrossed/",
+      "explicitScore": 2,
+      "sentimentScore": 1.5
+    },
+    {
+      "source": "The Hollywood Reporter India",
+      "url": "https://www.hollywoodreporterindia.com/reviews/theatrical/alpha-movie-review-the-yrf-spy-franchise-finds-its-most-hesitant-soldier",
+      "explicitScore": null,
+      "sentimentScore": 2
+    }
+  ],
+  "buzzNote": "high anticipation as first female-led YRF Spy Universe entry, but lowest franchise opening",
+  "summaryLine": "Grand-scale spy spectacle sunk by a weak, unengaging screenplay.",
+  "theRead": "Critics agree Alpha looks lavish and that Alia Bhatt brings conviction to a female-led entry in the YRF Spy Universe, with Sharvari holding her own in the action. The near-unanimous knock is the writing: a thin, predictable screenplay and lackluster direction that squander the scale and leave the film emotionally hollow. Most reviews land mixed-to-negative, treating it as a franchise low point.",
+  "watchIf": "Watch if you liked the YRF Spy Universe spectacle of War and Tiger 3.",
+  "sources": [
+    "Bollywood Hungama",
+    "India TV",
+    "Bollywood Bubble",
+    "The Hollywood Reporter India"
+  ],
+  "audience": {
+    "imdbRating": null,
+    "imdbVotes": null,
+    "letterboxd": null,
+    "tmdbVoteAverage": 6,
+    "tmdbVoteCount": 3
+  }
+}

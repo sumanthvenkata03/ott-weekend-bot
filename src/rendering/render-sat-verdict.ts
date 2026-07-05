@@ -57,9 +57,10 @@ const LANGUAGE_FALLBACK_COLORS: Record<string, string> = {
   "Other":     "#1A1614",
 };
 
-function verdictKind(v: Verdict): "must-watch" | "worth-a-try" | "skip" {
+function verdictKind(v: Verdict): "must-watch" | "worth-a-try" | "divisive" | "skip" {
   if (v.includes("Must Watch")) return "must-watch";
   if (v.includes("Worth a Try")) return "worth-a-try";
+  if (v.includes("Divisive")) return "divisive";
   return "skip";
 }
 
@@ -257,7 +258,7 @@ if (isMainModule) {
     // Verification-only: a Wed→Fri (3-day) range so the cover footer crop shows
     // the narrowed window. In the live job this string is window-derived.
     weekendDates: "Jun 17 — Jun 19, 2026",
-    caption: "Three verdicts, three different calls.",
+    caption: "Four verdicts, four different calls — including one the critics can't agree on.",
     hashtags: "#OTTReleases #Malayalam #WeekendWatch",
     hotTake: "A quiet Malayalam grief drama says more in 90 minutes than three loud Hindi releases manage all week.",
     verdicts: [
@@ -358,6 +359,42 @@ if (isMainModule) {
           sources: [],
         },
       },
+      {
+        filmTitle: "Kaalam",
+        language: "Tamil",
+        platform: ["Netflix"],
+        verdict: "⚖️ Divisive",
+        oneLineVerdict: "Critics are split down the middle — a bold, messy swing.",
+        watchIf: "Watch if you like ambitious films that don't fully land but stay with you.",
+        skipIf: "Skip if you want a clean consensus pick.",
+        whereItWins: "Its ambition and two standout set-pieces.",
+        whereItLoses: "A wildly uneven middle hour.",
+        watchSetup: "Go in ready to argue about it after.",
+        // Verification-only sample research crafted to look DIVISIVE: ★3.2 (in the
+        // 2.3–3.7 band), 4 credible critics, an explicit love/pan split (8.0 vs 4.0
+        // on /10 → range 4.0 fires). The verdict is set directly here to exercise
+        // the green stamp; the live job computes the tier from real reviews.
+        research: {
+          found: true,
+          criticRatings: [
+            { source: "The Hindu", url: "https://www.thehindu.com/reviews/kaalam", explicitScore: 4, sentimentScore: 4.5 },
+            { source: "Cinema Express", url: "https://www.cinemaexpress.com/reviews/kaalam", explicitScore: 3.75, sentimentScore: 4 },
+            { source: "Flickonclick", url: "https://www.flickonclick.com/kaalam-review", explicitScore: 2, sentimentScore: 1.5 },
+            { source: "The Hollywood Reporter India", url: "https://www.hollywoodreporterindia.com/reviews/kaalam", explicitScore: null, sentimentScore: 2.5 },
+          ],
+          credibleCriticCount: 4,
+          audienceScore: null,
+          buzzNote: "polarizing reactions out of festival screenings",
+          tbsiScore: 6.4,
+          star: 3.2,
+          verdict: "Divisive",
+          confidence: "high",
+          summaryLine: "Critics are split down the middle — a bold, messy swing.",
+          theRead: "One camp calls it the year's most ambitious Tamil film; another says it collapses under its own ideas. No middle ground.",
+          watchIf: "Watch if you like ambitious films that divide the room.",
+          sources: ["The Hindu", "Cinema Express", "Flickonclick"],
+        },
+      },
     ],
     releases: [
       {
@@ -434,18 +471,39 @@ if (isMainModule) {
         sources: ["TMDb"],
         fetchedAt: new Date().toISOString(),
       },
+      {
+        id: "sample-4",
+        title: "Kaalam",
+        language: "Tamil",
+        isSeries: false,
+        platform: ["Netflix"],
+        releaseDate: "2026-06-18",
+        genre: ["Drama", "Thriller"],
+        runtime: 156,
+        director: "Vetri Maaran",
+        cast: ["Dhanush", "Aishwarya Rajesh"],
+        synopsis: "An ambitious, polarizing epic critics can't agree on.",
+        posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
+        // Sample ratings — mid, DIVISIVE (a real love/pan critic split, see the verdict above).
+        tbsiScore: 6.4, tbsiSourceCount: 4,
+        imdbRating: 6.5,
+        // Prominence: card 2 (between Pati Patni 900 and Pennum Porattum 400).
+        tmdbPopularity: 500,
+        subtitleLanguages: ["English"],
+        sources: ["TMDb"],
+        fetchedAt: new Date().toISOString(),
+      },
     ],
   };
 
   try {
-    // Sample trimmed-skips (6 names) so the render exercises the cover's
-    // "ALSO SKIPPING" overflow — shows 4 names then "+2 MORE". The live job
-    // feeds the real trimmed list from selectVerdictCards. The unrated
-    // "NO SCORE YET" seal is already exercised by card 3 (Pati Patni — no
-    // ratings, older release → UNRATED).
-    const result = await renderSatVerdict(sampleDraft, 42, "output/review/sat-verdict", [
-      "Deewana", "Sitting", "Dark Giant", "Loafer Returns", "Nayagan 2", "Quick Cut",
-    ]);
+    // No ALSO SKIPPING names: the live selector now cards EVERY judged film
+    // (Must Watch / Worth a Try / Skip), so trimmedSkips is always empty and the
+    // cover never names an un-carded film. Passing [] keeps the sample honest to
+    // that policy. The unrated "NO SCORE YET" seal is still exercised by card 3
+    // (Pati Patni — no ratings, older release → UNRATED), and card 3 also proves
+    // a Skip verdict now renders a full card.
+    const result = await renderSatVerdict(sampleDraft, 42, "output/review/sat-verdict", []);
     log.success(`\n✓ Render complete:`);
     log.success(`   Cover : ${result.coverPath}`);
     log.success(`   Cards : ${result.cardPaths.length}`);

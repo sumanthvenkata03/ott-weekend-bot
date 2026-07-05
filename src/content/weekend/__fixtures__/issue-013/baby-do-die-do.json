@@ -1,0 +1,60 @@
+{
+  "found": true,
+  "criticRatings": [
+    {
+      "source": "Bollywood Hungama",
+      "url": "https://www.bollywoodhungama.com/movie/baby-do-die-do/critic-review/baby-do-die-do-movie-review/baby-do-die-do-works-due-to-a-terrific-performance/",
+      "explicitScore": 3,
+      "sentimentScore": 4
+    },
+    {
+      "source": "Koimoi",
+      "url": "https://www.koimoi.com/bollywood-movies/movie-reviews/baby-do-die-do-movie-review-huma-qureshis-mute-act-screams-dekh-bhai-dekh-at-the-highest-decibel-her-slow-badlapur-world-wins-with-a-mic-drop-climax/",
+      "explicitScore": 3.5,
+      "sentimentScore": 4
+    },
+    {
+      "source": "Outlook India",
+      "url": "https://www.outlookindia.com/art-entertainment/movie-review/baby-do-die-do-review-huma-qureshi-elevates-a-stylish-thriller-that-runs-out-of-surprises",
+      "explicitScore": 3.5,
+      "sentimentScore": 3.5
+    },
+    {
+      "source": "Scroll.in",
+      "url": "https://scroll.in/reel/1093957/review-baby-do-die-do-has-trouble-keeping-up-with-its-killer-title-and-killer-heroine",
+      "explicitScore": null,
+      "sentimentScore": 2.5
+    },
+    {
+      "source": "The Hollywood Reporter India",
+      "url": "https://www.hollywoodreporterindia.com/reviews/theatrical/baby-do-die-do-movie-review-huma-qureshi-leads-a-slick-and-subversive-urban-assassin-thriller",
+      "explicitScore": null,
+      "sentimentScore": 3.5
+    },
+    {
+      "source": "The Federal",
+      "url": "https://thefederal.com/film-reviews/baby-do-die-do-huma-qureshi-nachiket-samant-hindi-film-review-bollywood-248850",
+      "explicitScore": null,
+      "sentimentScore": 1.5
+    }
+  ],
+  "buzzNote": "low pre-release buzz despite critical curiosity",
+  "summaryLine": "Huma Qureshi dazzles in a stylish but uneven noir thriller.",
+  "theRead": "Critics broadly praise Huma Qureshi's near-silent turn as a deaf-mute assassin and Nachiket Samant's bold, rain-soaked noir styling as a genuine break from Bollywood convention. The recurring knock is a cluttered, predictable second half that struggles to sustain its inventive premise, with a minority calling the film an incoherent mess. Consensus lands at 'ambitious and distinctive, if not fully realized.'",
+  "watchIf": "Watch if you liked Badlapur's grim revenge or a stylish urban-assassin noir.",
+  "sources": [
+    "Bollywood Hungama",
+    "Koimoi",
+    "Outlook India",
+    "Scroll.in",
+    "The Hollywood Reporter India",
+    "The Federal"
+  ],
+  "audience": {
+    "imdbRating": null,
+    "imdbVotes": null,
+    "letterboxd": null,
+    "tmdbVoteAverage": 0,
+    "tmdbVoteCount": 0
+  }
+}

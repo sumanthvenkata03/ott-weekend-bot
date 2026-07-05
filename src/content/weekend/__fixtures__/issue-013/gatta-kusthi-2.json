@@ -1,0 +1,48 @@
+{
+  "found": true,
+  "criticRatings": [
+    {
+      "source": "Flickonclick",
+      "url": "https://www.flickonclick.com/gatta-kusthi-2-review/",
+      "explicitScore": 2,
+      "sentimentScore": 1.5
+    },
+    {
+      "source": "The Hollywood Reporter India",
+      "url": "https://www.hollywoodreporterindia.com/reviews/theatrical/gatta-kushti-2-movie-review-vishnu-vishal-sequel-cant-wrestle-with-its-own-contradictions",
+      "explicitScore": null,
+      "sentimentScore": 2.5
+    },
+    {
+      "source": "Only Kollywood",
+      "url": "https://www.onlykollywood.com/gatta-kusthi-2-movie-review/",
+      "explicitScore": 3.75,
+      "sentimentScore": 4
+    },
+    {
+      "source": "CinemaSpeak",
+      "url": "https://www.cinemaspeak.in/2026/07/movie-review-gatta-kusthi-2.html",
+      "explicitScore": 4,
+      "sentimentScore": 4.5
+    }
+  ],
+  "buzzNote": "strong opening buzz; fans hailing it a family entertainer",
+  "summaryLine": "Fun family entertainer, but critics split over regressive gender politics.",
+  "theRead": "Critics are sharply divided on this sequel: crowd-pleasing outlets praise the lead pairing, Vishnu Vishal's comic timing, child actor Zara, and its warm family-entertainer packaging. More critical voices, however, say the writing is uneven and the film's gender politics are muddled or regressive, undercutting its own progressive messaging. The consensus is an enjoyable commercial watch that stumbles when it tries to say something meaningful.",
+  "watchIf": "Watch if you liked the original Gatta Kusthi or Vishnu Vishal's family-comedy entertainers.",
+  "sources": [
+    "Flickonclick",
+    "The Hollywood Reporter India",
+    "Only Kollywood",
+    "CinemaSpeak",
+    "India Today",
+    "The Hindu"
+  ],
+  "audience": {
+    "imdbRating": null,
+    "imdbVotes": null,
+    "letterboxd": null,
+    "tmdbVoteAverage": 0,
+    "tmdbVoteCount": 0
+  }
+}

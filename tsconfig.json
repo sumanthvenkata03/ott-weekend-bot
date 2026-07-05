@@ -44,5 +44,8 @@
     "moduleResolution": "nodenext",
     "esModuleInterop": true,
     "resolveJsonModule": true,
-  }
+  },
+  // One-off offline runners live outside rootDir 'src' and are executed via tsx
+  // (own transpile); excluded so they don't trip TS6059 on the src build.
+  "exclude": ["scripts"]
 }

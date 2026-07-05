@@ -1,0 +1,60 @@
+{
+  "found": true,
+  "criticRatings": [
+    {
+      "source": "123telugu",
+      "url": "https://www.123telugu.com/reviews/satya-devs-rao-bahadur-telugu-movie-review-and-rating.html",
+      "explicitScore": 3,
+      "sentimentScore": 3
+    },
+    {
+      "source": "Great Andhra",
+      "url": "https://www.greatandhra.com/movies/reviews/rao-bahadur-movie-review-a-royal-drama-that-moves-at-snail-speed/",
+      "explicitScore": 2.5,
+      "sentimentScore": 2.5
+    },
+    {
+      "source": "TrackTollywood",
+      "url": "https://tracktollywood.com/rao-bahadur-review",
+      "explicitScore": 2.75,
+      "sentimentScore": 2.75
+    },
+    {
+      "source": "M9 News",
+      "url": "https://www.m9.news/reviews/rao-bahadur-movie-review-rating/",
+      "explicitScore": 2.5,
+      "sentimentScore": 3
+    },
+    {
+      "source": "Gulte",
+      "url": "https://www.gulte.com/movienews/419123/rao-bahadur",
+      "explicitScore": null,
+      "sentimentScore": 4
+    },
+    {
+      "source": "Telugu360",
+      "url": "https://www.telugu360.com/rao-bahadur-movie-review/",
+      "explicitScore": null,
+      "sentimentScore": 3.5
+    }
+  ],
+  "buzzNote": "",
+  "summaryLine": "Satyadev shines in a sincere but sluggishly paced drama.",
+  "theRead": "Critics widely praise Satyadev's committed, one-man-show performance as a terminally ill man in this 1991-set drama from director Venkatesh Maha. The near-universal knock is pacing: a self-indulgent, overstretched screenplay makes the first half a tiresome slog, and the more purposeful finish only partly redeems it. Reviewers respect the ambition and unconventional storytelling even where the execution drags.",
+  "watchIf": "Watch if you liked slow-burn, performance-driven dramas like C/o Kancharapalem.",
+  "sources": [
+    "123telugu",
+    "Great Andhra",
+    "TrackTollywood",
+    "M9 News",
+    "Gulte",
+    "Telugu360"
+  ],
+  "audience": {
+    "imdbRating": null,
+    "imdbVotes": null,
+    "letterboxd": null,
+    "tmdbVoteAverage": 0,
+    "tmdbVoteCount": 0
+  }
+}

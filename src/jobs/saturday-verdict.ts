@@ -28,6 +28,8 @@ import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
 import { getIssueNumberForToday } from "../shared/issue-number.js";
 import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
+import { selectVerdictCards, type VerdictEntry } from "../content/weekend/verdict-select.js";
+import { archiveRawResearch, appendVerdictLog } from "../content/weekend/research-archive.js";
 
 // ── Grounded-research dials (Phase 1) ──
 /** Deep-research (web search) only the top N films by importance; the rest get
@@ -66,37 +68,12 @@ export function pickVerdictWindow(now: Date): { startDate: string; endDate: stri
   };
 }
 
-/** Buzz/notability-first importance, mirroring Wed Drop's tmdbPopularity sort,
- *  with quality (tbsiScore) and audience-size (imdbVotes) tie-breaks so equally
- *  buzzy films still order sensibly. A missing release scores 0 (sorts last). */
-function importanceOf(r: Release | undefined): [number, number, number] {
-  return [r?.tmdbPopularity ?? 0, r?.tbsiScore ?? 0, r?.imdbVotes ?? 0];
-}
-
-function compareImportanceDesc(a: VerdictEntry, b: VerdictEntry): number {
-  const ai = importanceOf(a.release);
-  const bi = importanceOf(b.release);
-  return (bi[0] - ai[0]) || (bi[1] - ai[1]) || (bi[2] - ai[2]);
-}
-
-function verdictKind(v: VerdictSlide["verdict"]): "must-watch" | "worth-a-try" | "skip" {
-  if (v.includes("Must Watch")) return "must-watch";
-  if (v.includes("Worth a Try")) return "worth-a-try";
-  return "skip";
-}
-
-interface VerdictEntry {
-  slide: VerdictSlide;
-  // Explicit | undefined (not optional) so `.find()`'s result assigns cleanly
-  // under exactOptionalPropertyTypes — a film may have no matching release.
-  release: Release | undefined;
-  /** Grounded research backing this entry (the slide also carries it). */
-  research: VerdictResearch;
-}
-
 /** Map a grounded verdict to the emoji tier the renderer/selector key on. */
 function toEmojiVerdict(v: GroundedVerdict): VerdictSlide["verdict"] {
-  return v === "Must Watch" ? "🔥 Must Watch" : v === "Worth a Try" ? "👀 Worth a Try" : "⏭️ Skip";
+  return v === "Must Watch" ? "🔥 Must Watch"
+    : v === "Worth a Try" ? "👀 Worth a Try"
+    : v === "Divisive" ? "⚖️ Divisive"
+    : "⏭️ Skip";
 }
 
 /** Run `fn` over `items` with at most `limit` in flight at once. Order preserved. */
@@ -136,70 +113,16 @@ async function researchFilmCached(film: Release): Promise<VerdictResearch> {
     { ttlSeconds: RESEARCH_CACHE_TTL_HOURS * 3600 }
   );
   if (!miss) log.info(`  cache hit — ${film.title}`);
+  // Persist the raw blob to the durable archive (write-if-absent, no-throw). This
+  // runs whether the blob was freshly fetched or served from cache, so the archive
+  // survives the 24h cache TTL. Zero network — it only writes what we already have.
+  archiveRawResearch(key, raw);
   // Score with a FRESH audience signal, never the one frozen in the cached blob:
   // audience is deterministic aggregator data (not research output), so re-deriving
   // it from the current film keeps newly-threaded fields (e.g. tmdbVoteCount) live
   // and avoids serving stale aggregator values. Cached criticRatings are still
   // reused — this triggers no web search. DO NOT re-freeze audience into the cache.
   return scoreResearch({ ...raw, audience: audienceSignalOf(film) });
-}
-
-/**
- * EDITORIAL DIAL — how many ⏭️ Skip cards the carousel is allowed to spend.
- * Skips are the least engaging slides, so we cap them low and route the rest to
- * the cover's "ALSO SKIPPING" footer (the verdict stays complete without
- * bloating the carousel). Tune this up/down to taste; it never affects Must
- * Watch or Worth a Try, only how many Skips get a full card.
- */
-const MAX_SKIP_CARDS = 2;
-
-/**
- * Deterministic card selection — the JOB decides the count, not the LLM.
- *
- * Buckets the LLM's tier assignments and fills up to `maxCards` slots by
- * priority: ALL Must Watch (cap-exempt — never trimmed), then Worth a Try by
- * importance desc, then Skip by notability desc but only up to MAX_SKIP_CARDS
- * (and never past the remaining slots).
- *
- * Returns the cards in carousel order — hero first (top Must Watch, else top
- * Worth a Try), then the remaining Must Watch, then Worth a Try, then Skip —
- * plus EVERY judged Skip that didn't get a card (for the cover's "ALSO
- * SKIPPING" footer, so the verdict stays complete without spending extra cards).
- */
-export function selectVerdictCards(
-  entries: VerdictEntry[],
-  maxCards = 10
-): { selected: VerdictEntry[]; trimmedSkips: VerdictEntry[] } {
-  const must  = entries.filter(e => verdictKind(e.slide.verdict) === "must-watch").sort(compareImportanceDesc);
-  const worth = entries.filter(e => verdictKind(e.slide.verdict) === "worth-a-try").sort(compareImportanceDesc);
-  const skip  = entries.filter(e => verdictKind(e.slide.verdict) === "skip").sort(compareImportanceDesc);
-
-  // 1. ALL Must Watch — exempt from the cap. If they alone exceed maxCards,
-  //    every one of them still ships (Worth a Try / Skip then get nothing).
-  const selected: VerdictEntry[] = [...must];
-
-  // 2. Worth a Try (importance desc) until the carousel reaches maxCards.
-  for (const e of worth) {
-    if (selected.length >= maxCards) break;
-    selected.push(e);
-  }
-
-  // 3. Skip (notable first) — capped at MAX_SKIP_CARDS AND the remaining slots.
-  let skipsCarded = 0;
-  for (const e of skip) {
-    if (selected.length >= maxCards) break;
-    if (skipsCarded >= MAX_SKIP_CARDS) break;
-    selected.push(e);
-    skipsCarded++;
-  }
-
-  // EVERY judged Skip not carded — surfaced on the cover, not rendered as cards.
-  const selectedSet = new Set(selected);
-  const trimmedSkips = skip.filter(e => !selectedSet.has(e));
-
-  // `selected` is already hero-first: Must Watch leads, so selected[0] is the
-  // top Must Watch; when there are none it's the top Worth a Try.
-  return { selected, trimmedSkips };
 }
 
 async function main(deliver = true) {
@@ -247,7 +170,8 @@ async function main(deliver = true) {
     })),
   ];
 
-  // Per-film research log line.
+  // Per-film research log line + durable per-verdict archive log (no-throw).
+  const runAt = new Date().toISOString();
   for (const { film, research } of researched) {
     if (research.verdict !== null && research.star !== null) {
       log.info(
@@ -260,6 +184,16 @@ async function main(deliver = true) {
         ` · ${research.credibleCriticCount} credible critic(s) of ${research.criticRatings.length} found`
       );
     }
+    appendVerdictLog({
+      runAt,
+      title: film.title,
+      imdbId: film.imdbId,
+      criticCount: research.criticRatings.length,
+      tbsiScore: research.tbsiScore,
+      star: research.star,
+      verdict: research.verdict,
+      confidence: research.confidence,
+    });
   }
 
   // Partition: only films with a grounded verdict become carousel candidates;
@@ -288,7 +222,7 @@ async function main(deliver = true) {
     release: film,
     research,
   }));
-  const { selected, trimmedSkips } = selectVerdictCards(entries, 10);
+  const { selected, trimmedSkips } = selectVerdictCards(entries);
 
   // Tier counts across all grounded candidates, for the selection log.
   const poolTally = entries.reduce<Record<string, number>>((acc, e) => {
@@ -326,9 +260,10 @@ async function main(deliver = true) {
     releases: selected.map(e => e.release).filter((r): r is Release => r !== undefined),
   };
 
-  // ALSO SKIPPING = ONLY genuine trimmed Skip-verdict films. No-score
-  // (found:false / "too early to call") films are NOT skips — we never judged
-  // them — so they are omitted entirely rather than listed as "skipping".
+  // ALSO SKIPPING is now always empty: selectVerdictCards cards EVERY judged
+  // film (Must Watch / Worth a Try / Skip), so no Skip is ever trimmed. Kept as
+  // trimmedSkips (guaranteed []) so the cover's footer never names an un-carded
+  // film. No-score films (never judged) remain omitted entirely.
   const alsoSkipping = trimmedSkips.map(e => e.slide.filmTitle);
 
   // Verdict tally for the SELECTED carousel (what actually ships).

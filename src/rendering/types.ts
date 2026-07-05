@@ -87,7 +87,7 @@ export interface SatVerdictCard extends CardEnrichment {
   platform: string[];
   platformLogos: string[];     // ["netflix", "jiohotstar"] — filename stems
   verdict: Verdict;
-  verdictKind: "must-watch" | "worth-a-try" | "skip";  // for template styling
+  verdictKind: "must-watch" | "worth-a-try" | "divisive" | "skip";  // for template styling
   oneLineVerdict: string;
   watchIf: string;
   posterUrl?: string;

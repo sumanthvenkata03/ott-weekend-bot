@@ -1,0 +1,46 @@
+{
+  "found": true,
+  "criticRatings": [
+    {
+      "source": "123telugu",
+      "url": "https://www.123telugu.com/reviews/nagabandham-telugu-movie-review-and-rating.html",
+      "explicitScore": 2.75,
+      "sentimentScore": 2.5
+    },
+    {
+      "source": "Telugu Mirchi",
+      "url": "https://www.telugumirchi.com/reviews/nagabandham-movie-review.html/amp",
+      "explicitScore": 3,
+      "sentimentScore": 3
+    },
+    {
+      "source": "Great Andhra",
+      "url": "https://www.greatandhra.com/movies/reviews/nagabandham-review-stunning-visuals-tiring-narration/",
+      "explicitScore": 2.25,
+      "sentimentScore": 2
+    },
+    {
+      "source": "Gulte",
+      "url": "https://www.gulte.com/moviereviews/419249/nagabandham-review",
+      "explicitScore": 2.25,
+      "sentimentScore": 2
+    }
+  ],
+  "buzzNote": "big-budget (~Rs.110cr) mythological adventure with modest star power",
+  "summaryLine": "Lavish visuals, weak writing and bloated runtime make it a tiring watch.",
+  "theRead": "Critics uniformly praise the film's grand production design, cinematography and mostly solid VFX, calling it visually ambitious on a huge budget. But the consensus knock is a thin, meandering screenplay that leans on the trending Sanatana Dharma theme, plus a punishing three-hour-plus runtime that drains the intrigue. The result is an uneven mythological action-adventure that offers spectacle over substance.",
+  "watchIf": "Watch if you liked big-canvas mythological treasure-hunt spectacles that prize visuals over story.",
+  "sources": [
+    "123telugu",
+    "Telugu Mirchi",
+    "Great Andhra",
+    "Gulte"
+  ],
+  "audience": {
+    "imdbRating": null,
+    "imdbVotes": null,
+    "letterboxd": null,
+    "tmdbVoteAverage": 0,
+    "tmdbVoteCount": 0
+  }
+}

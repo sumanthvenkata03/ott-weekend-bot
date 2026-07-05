@@ -2,6 +2,7 @@ node_modules
 dist
 .env
 data/
+data/research-archive/
 *.log
 .DS_Store
 .claude

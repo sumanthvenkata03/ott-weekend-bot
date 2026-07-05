@@ -349,13 +349,23 @@
     color: var(--vermillion);
     border: 7px solid var(--vermillion);
   }
+  /* DIVISIVE — bottle-green (#2E5742) filled stamp with cream text/border,
+     mirroring the must-watch filled treatment. Shares the brass body bg, so it
+     also picks up the body.divisive inversions below. */
+  .verdict-divisive {
+    background: var(--bottle);
+    color: var(--cream);
+    border: 3px solid var(--cream);
+    box-shadow: inset 0 0 0 6px var(--bottle);
+  }
 
-  /* Phase 5.6 — must-watch and worth-a-try variants have a brass body bg,
-     so the default filled-brass pill goes invisible against it. Invert to
+  /* Phase 5.6 — must-watch / worth-a-try / divisive variants have a brass body
+     bg, so the default filled-brass pill goes invisible against it. Invert to
      ink bg + brass text for these variants so the pill shape stays visible.
      Skip-variant cards have a cream bg and use the default brass pill. */
   body.must-watch .pill-filled,
-  body.worth-a-try .pill-filled {
+  body.worth-a-try .pill-filled,
+  body.divisive .pill-filled {
     background: var(--ink);
     color: var(--brass);
   }
@@ -365,16 +375,19 @@
      marquee. Skip-variant cards have cream bg and use the default brass
      marquee from _design-tokens.html. */
   body.must-watch .marquee-rule,
-  body.worth-a-try .marquee-rule {
+  body.worth-a-try .marquee-rule,
+  body.divisive .marquee-rule {
     border-top-color: var(--ink);
   }
   body.must-watch .marquee-label,
-  body.worth-a-try .marquee-label {
+  body.worth-a-try .marquee-label,
+  body.divisive .marquee-label {
     color: var(--ink);
     opacity: 0.85;
   }
   body.must-watch .marquee-divider,
-  body.worth-a-try .marquee-divider {
+  body.worth-a-try .marquee-divider,
+  body.divisive .marquee-divider {
     color: var(--ink);
   }
 
@@ -384,7 +397,8 @@
      uses its own .admit-one class with explicit ink already, so it's
      unaffected by this override. */
   body.must-watch .section-label,
-  body.worth-a-try .section-label {
+  body.worth-a-try .section-label,
+  body.divisive .section-label {
     color: var(--ink);
   }
 
@@ -562,17 +576,23 @@
 
   {% include "_tbsi-stamp.html" %}
 
-  <!-- Verdict stamp -->
+  <!-- Verdict stamp — EXPLICIT per kind. The fallback branch deliberately renders
+       a glaring "UNKNOWN" (and the verdict-KIND class won't match any .verdict-*
+       rule, so the box is unstyled too) instead of silently falling through to
+       WORTH A TRY. The render env is throwOnUndefined:false with no strict/throw
+       filter, so a visible marker is the loud-failure pattern here. -->
   <div class="verdict-stamp verdict-{{ card.verdictKind }}">
-    {% if card.verdictKind == "skip" %}
-      <div class="kicker">★ THE VERDICT ★</div>
-      <div class="label">SKIP</div>
-    {% elif card.verdictKind == "must-watch" %}
-      <div class="kicker">★ THE VERDICT ★</div>
+    <div class="kicker">★ THE VERDICT ★</div>
+    {% if card.verdictKind == "must-watch" %}
       <div class="label">MUST WATCH</div>
-    {% else %}
-      <div class="kicker">★ THE VERDICT ★</div>
+    {% elif card.verdictKind == "worth-a-try" %}
       <div class="label">WORTH A TRY</div>
+    {% elif card.verdictKind == "divisive" %}
+      <div class="label">WATCH IT</div>
+    {% elif card.verdictKind == "skip" %}
+      <div class="label">SKIP</div>
+    {% else %}
+      <div class="label">⁇ UNKNOWN ⁇</div>
     {% endif %}
   </div>
 

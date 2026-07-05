@@ -1,0 +1,46 @@
+{
+  "found": true,
+  "criticRatings": [
+    {
+      "source": "Bollywood Hungama",
+      "url": "https://www.bollywoodhungama.com/movie/satluj/critic-review/satluj-movie-review/",
+      "explicitScore": 3.5,
+      "sentimentScore": 3.5
+    },
+    {
+      "source": "India TV News",
+      "url": "https://www.indiatvnews.com/amp/entertainment/movie-review/satluj-movie-review-and-rating-diljit-dosanjh-honey-trehan-1307",
+      "explicitScore": 3.5,
+      "sentimentScore": 3.5
+    },
+    {
+      "source": "Outlook India",
+      "url": "https://www.outlookindia.com/art-entertainment/movie-review/satluj-review-diljit-and-suvinder-vicky-command-one-of-the-years-most-essential-searing-films",
+      "explicitScore": 4,
+      "sentimentScore": 4.5
+    },
+    {
+      "source": "Scroll.in",
+      "url": "https://scroll.in/reel/1094035/satluj-review-a-harrowing-heart-rending-tale-of-impunity-and-courage",
+      "explicitScore": null,
+      "sentimentScore": 4
+    }
+  ],
+  "buzzNote": "Notable OTT bow after title change from 'Punjab '95'",
+  "summaryLine": "Searing, restrained true story lifted by Diljit's quietly commanding turn.",
+  "theRead": "Critics praise Satluj as a devastating, urgent chronicle of unchecked state power, powered by measured performances from Diljit Dosanjh and Suvinder Vicky and Honey Trehan's patient, non-sensational direction. The main knock is its deliberately slow, quiet pace, which asks for viewer patience and can feel repetitive, and reviewers lament its low-key direct-to-OTT release.",
+  "watchIf": "Watch if you liked politically charged true-story dramas like Shahid or Article 15.",
+  "sources": [
+    "Bollywood Hungama",
+    "India TV News",
+    "Outlook India",
+    "Scroll.in"
+  ],
+  "audience": {
+    "imdbRating": null,
+    "imdbVotes": null,
+    "letterboxd": null,
+    "tmdbVoteAverage": 0,
+    "tmdbVoteCount": 0
+  }
+}
