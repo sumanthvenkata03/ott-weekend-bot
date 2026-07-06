@@ -31,6 +31,9 @@
     .masthead .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:var(--oxblood);font-weight:700;}
     .masthead h1{font-family:var(--serif);font-weight:900;font-size:clamp(30px,6vw,54px);margin:6px 0 4px;line-height:1;}
     .masthead .sub{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--ink-soft);}
+    .nav{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin:16px 0 0;}
+    .nav a{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;text-decoration:none;color:var(--oxblood);border:1px solid var(--line);background:#fbf6ea;border-radius:2px;padding:8px 14px;}
+    .nav a:hover{border-color:var(--vermillion);color:var(--vermillion);}
     .rule-row{display:flex;align-items:center;gap:10px;margin:10px 0 0;}
     .rule-row::before,.rule-row::after{content:"";flex:1;height:1px;background:var(--line);}
     .rule-row span{font-family:var(--mono);font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:var(--vermillion);}
@@ -108,6 +111,11 @@
       <h1>The Big Screen Index</h1>
       <div class="sub">Movie Lookup &amp; Poster Gallery</div>
       <div class="rule-row"><span>Est. MMXXVI</span></div>
+      <nav class="nav">
+        <a href="/compare.html">⇄ Compare</a>
+        <a href="/releases.html">◷ In Cinemas &amp; Upcoming</a>
+        <a href="/watchlist.html">★ Watchlist</a>
+      </nav>
     </div>
 
     <div class="searchzone">

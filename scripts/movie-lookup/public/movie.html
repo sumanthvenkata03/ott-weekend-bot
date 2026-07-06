@@ -46,6 +46,9 @@
     .hero .tagline{font-family:var(--serif);font-style:italic;color:var(--oxblood);font-size:16px;margin:8px 0;}
     .metaline{font-family:var(--mono);font-size:12px;letter-spacing:.05em;margin:8px 0 14px;}
     .metaline b{color:var(--vermillion);}
+    .savebtn{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:8px 15px;border-radius:2px;cursor:pointer;border:1.5px solid var(--brass);background:transparent;color:var(--oxblood);margin:0 0 12px;}
+    .savebtn.on{background:var(--brass);color:var(--ink);}
+    .savebtn:disabled{opacity:.6;cursor:default;}
     .fields{display:grid;grid-template-columns:repeat(2,1fr);gap:16px 26px;margin-top:8px;}
     @media (max-width:640px){.fields{grid-template-columns:1fr;}}
     .field.full{grid-column:1/-1;}
@@ -292,6 +295,7 @@
             ${d.originalTitle?`<div class="orig">${esc(d.originalTitle)}</div>`:""}
             ${d.tagline?`<div class="tagline">“${esc(d.tagline)}”</div>`:""}
             <div class="metaline">${meta.join("&nbsp; · &nbsp;")}</div>
+            <button class="savebtn" id="saveBtn">☆ Save</button>
             <div class="fields">
               ${fieldFull("Synopsis", d.synopsis?esc(d.synopsis):"", "syn")}
               ${field("Genre", fieldChips(d.genre))}
@@ -353,6 +357,7 @@
 
       renderCast(d.cast||[]);
       renderCrew(d.crew||[]);
+      initSave(d);
       RAW.detail = d.rawData; renderRaw();
       $("#rawCopy").addEventListener("click", ()=>{ navigator.clipboard.writeText($("#rawPre").textContent).then(()=>{ $("#rawCopy").textContent="Copied ✓"; setTimeout(()=>$("#rawCopy").textContent="Copy JSON",1200); }); });
     }
@@ -507,6 +512,23 @@
       const dx = t.clientX - lbTsX, dy = t.clientY - lbTsY;
       if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) navLb(dx < 0 ? 1 : -1);
     }, {passive:true});
+
+    // ── Watchlist "☆ Save / ★ Saved" toggle ──
+    async function initSave(d){
+      const btn = $("#saveBtn"); if(!btn) return;
+      let saved = false;
+      try { const w = await getJson("/api/watchlist"); saved = (w.items||[]).some(i=>i.type==="film" && String(i.tmdbId)===String(d.id)); } catch(e){ /* watchlist best-effort */ }
+      const paint = ()=>{ btn.textContent = saved ? "★ Saved" : "☆ Save"; btn.classList.toggle("on", saved); };
+      paint();
+      btn.addEventListener("click", async ()=>{
+        btn.disabled = true;
+        try {
+          if (saved){ await fetch(`/api/watchlist/film/${d.id}`, { method:"DELETE" }); saved = false; }
+          else { await fetch("/api/watchlist", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ type:"film", id:d.id, title:d.title }) }); saved = true; }
+          paint();
+        } catch(e){ /* leave state */ } finally { btn.disabled = false; }
+      });
+    }
 
     // ── Person modal ──
     // Clicking a cast/crew person opens the rich person page (bio + age +

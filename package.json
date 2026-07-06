@@ -31,6 +31,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.7.0",
     "@types/nunjucks": "^3.2.6",
+    "@types/pg": "^8.20.0",
     "sharp": "^0.34.5",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
@@ -48,6 +49,7 @@
     "nunjucks": "^3.2.4",
     "ofetch": "^1.5.1",
     "p-throttle": "^8.1.0",
+    "pg": "^8.22.0",
     "puppeteer": "^24.43.1",
     "tsx": "^4.21.0",
     "zod": "^4.4.3"

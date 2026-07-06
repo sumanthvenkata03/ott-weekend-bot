@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>TBSI · Compare</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#1A1614" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink:#1A1614; --cream:#F4ECDC; --vermillion:#A33223; --brass:#C49A3F;
+      --green:#2E5742; --oxblood:#682D25; --maroon:#581F16; --paper:#F4ECDC;
+      --line:rgba(26,22,20,0.28); --ink-soft:rgba(26,22,20,0.66);
+      --serif:"Playfair Display",Georgia,serif; --sans:"Inter",system-ui,sans-serif;
+      --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+    }
+    *{box-sizing:border-box;} html,body{margin:0;padding:0;}
+    body{background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.5;
+      background-image:radial-gradient(rgba(104,45,37,0.04) 1px,transparent 1px);background-size:4px 4px;}
+    .wrap{max-width:1120px;margin:0 auto;padding:22px 22px 90px;}
+    a{color:var(--vermillion);}
+    .topbar{display:flex;justify-content:space-between;align-items:center;border-bottom:3px double var(--ink);padding-bottom:10px;gap:10px;flex-wrap:wrap;}
+    .back{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;color:var(--oxblood);}
+    .back:hover{color:var(--vermillion);}
+    .brand{font-family:var(--mono);font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:var(--ink-soft);}
+    h1{font-family:var(--serif);font-weight:900;font-size:clamp(26px,5vw,40px);margin:16px 0 2px;}
+    .lede{font-family:var(--mono);font-size:11px;color:var(--ink-soft);letter-spacing:.04em;margin-bottom:18px;}
+    .note{font-family:var(--mono);font-size:12px;color:var(--vermillion);border-left:3px solid var(--vermillion);padding:6px 0 6px 10px;margin:14px 0;}
+
+    .pickers{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+    @media (max-width:640px){.pickers{grid-template-columns:1fr;}}
+    .picker{position:relative;}
+    .picker .lab{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--oxblood);margin-bottom:6px;}
+    .picker input{width:100%;font-family:var(--serif);font-size:18px;color:var(--ink);background:#fbf6ea;border:1.5px solid var(--ink);border-radius:2px;padding:11px 14px;outline:none;}
+    .picker input:focus{border-color:var(--vermillion);box-shadow:0 0 0 3px rgba(163,50,35,.14);}
+    .chosen{display:none;align-items:center;gap:10px;margin-top:8px;border:1px solid var(--line);background:#fbf6ea;border-radius:2px;padding:8px 10px;}
+    .chosen.on{display:flex;}
+    .chosen .cth{flex:0 0 34px;height:50px;background:#e6dcc6 center/cover no-repeat;border:1px solid var(--line);border-radius:2px;}
+    .chosen .cn{font-family:var(--serif);font-weight:700;font-size:14px;line-height:1.1;}
+    .chosen .cm{font-family:var(--mono);font-size:10px;color:var(--ink-soft);}
+    .chosen .cx{margin-left:auto;font-family:var(--mono);font-size:11px;font-weight:700;color:var(--vermillion);cursor:pointer;background:none;border:none;}
+
+    .suggest{position:absolute;left:0;right:0;top:calc(100% + 4px);background:var(--paper);border:1.5px solid var(--ink);border-radius:2px;box-shadow:0 16px 40px rgba(26,22,20,.28);z-index:40;overflow:hidden;display:none;max-height:340px;overflow-y:auto;}
+    .suggest.open{display:block;}
+    .sitem{display:flex;gap:10px;align-items:center;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--line);}
+    .sitem:last-child{border-bottom:none;}
+    .sitem:hover{background:#fbf6ea;}
+    .sitem.dis{opacity:.5;cursor:not-allowed;}
+    .sitem .st{flex:0 0 34px;height:50px;background:#e6dcc6 center/cover no-repeat;border:1px solid var(--line);border-radius:2px;}
+    .sitem .st.empty{display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:7px;color:var(--ink-soft);}
+    .sitem .stitle{font-family:var(--serif);font-weight:700;font-size:14px;line-height:1.15;}
+    .sitem .smeta{font-family:var(--mono);font-size:10px;color:var(--ink-soft);}
+    .sbadge{font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--cream);background:var(--green);padding:1px 5px;border-radius:2px;margin-left:auto;}
+    .sbadge.person{background:var(--vermillion);} .sbadge.tv{background:var(--brass);color:var(--ink);} .sbadge.company{background:var(--oxblood);}
+
+    .spinner{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--vermillion);border-radius:50%;animation:spin .7s linear infinite;flex:0 0 auto;box-sizing:border-box;}
+    @keyframes spin{to{transform:rotate(360deg);}}
+    .loading{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;color:var(--ink-soft);padding:14px 2px;}
+
+    .seclabel{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.24em;text-transform:uppercase;color:var(--oxblood);margin:30px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px;}
+    .cmp{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px;}
+    .side{border:1px solid var(--line);background:#fbf6ea;border-radius:2px;overflow:hidden;}
+    .side .poster{width:100%;aspect-ratio:2/3;background:#e6dcc6 center/cover no-repeat;display:block;}
+    .side.person .poster{aspect-ratio:2/3;}
+    .side .body{padding:12px 13px 15px;}
+    .side h2{font-family:var(--serif);font-weight:900;font-size:20px;line-height:1.05;margin:0 0 4px;}
+    .side .sub{font-family:var(--mono);font-size:11px;color:var(--ink-soft);margin-bottom:8px;}
+    .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:13px;margin-top:8px;}
+    .kv .k{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--oxblood);padding-top:2px;}
+    .kv .v{font-size:13px;}
+    .chips{display:flex;flex-wrap:wrap;gap:5px;}
+    .chip{font-family:var(--mono);font-size:10px;padding:2px 7px;border:1px solid var(--line);border-radius:2px;background:#fff;}
+    .chip.plat{border-color:var(--green);color:var(--green);font-weight:700;}
+    .chip.score{border-color:var(--brass);background:rgba(196,154,63,.15);font-weight:700;}
+    a.namelink{color:var(--vermillion);text-decoration:none;}
+    .overlap{margin-top:8px;}
+    .ovitem{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:6px 0;border-bottom:1px dotted var(--line);}
+    .ovitem .on{font-weight:600;}
+    .ovitem .ors{font-family:var(--mono);font-size:10px;color:var(--ink-soft);text-align:right;}
+    .ovfilm{border:1px solid var(--line);background:#fbf6ea;border-radius:2px;overflow:hidden;text-decoration:none;color:inherit;display:block;}
+    .ovgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;}
+    .ovfilm .fp{aspect-ratio:2/3;background:#e6dcc6 center/cover no-repeat;}
+    .ovfilm .fm{padding:6px 8px 8px;} .ovfilm .ft{font-family:var(--serif);font-weight:700;font-size:13px;line-height:1.1;} .ovfilm .fy{font-family:var(--mono);font-size:10px;color:var(--ink-soft);}
+    .empty{font-family:var(--mono);font-size:12px;color:var(--ink-soft);padding:8px 0;}
+    .hidden{display:none!important;}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <a class="back" href="/">← Search</a>
+      <span class="brand">TBSI · Compare · Localhost</span>
+    </div>
+    <h1>Compare</h1>
+    <div class="lede">Two films, or two people — side by side. Pick one in each box.</div>
+
+    <div class="pickers">
+      <div class="picker">
+        <div class="lab">First</div>
+        <input id="qa" type="text" placeholder="film or person…" autocomplete="off" />
+        <div class="suggest" id="suga"></div>
+        <div class="chosen" id="cha"></div>
+      </div>
+      <div class="picker">
+        <div class="lab">Second</div>
+        <input id="qb" type="text" placeholder="film or person…" autocomplete="off" />
+        <div class="suggest" id="sugb"></div>
+        <div class="chosen" id="chb"></div>
+      </div>
+    </div>
+
+    <div id="note" class="note hidden"></div>
+    <div id="result"></div>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+    async function getJson(url){ const r = await fetch(url); const d = await r.json().catch(()=>({error:"bad JSON"})); if(!r.ok) throw new Error(d.error||("HTTP "+r.status)); return d; }
+
+    // ── mirror of compute.ts (castOverlap / sharedFilms) ──
+    function roleMap(c){ const m=new Map(); const push=(id,name,role)=>{ const e=m.get(id)||{name,roles:[]}; if(!e.roles.includes(role))e.roles.push(role); m.set(id,e); };
+      (c.cast||[]).forEach(p=>push(p.id,p.name,p.character?("as "+p.character):"Cast")); (c.crew||[]).forEach(p=>push(p.id,p.name,p.job||"Crew")); return m; }
+    function castOverlap(a,b){ const ma=roleMap(a),mb=roleMap(b),out=[]; for(const [id,ea] of ma){ const eb=mb.get(id); if(eb) out.push({id,name:ea.name,roleA:ea.roles.join(", "),roleB:eb.roles.join(", ")}); } return out; }
+    function sharedFilms(a,b){ const bIds=new Set(b.map(f=>f.id)),seen=new Set(),out=[]; for(const f of a){ if(bIds.has(f.id)&&!seen.has(f.id)){ seen.add(f.id); out.push(f); } } return out.sort((x,y)=>(y.year||0)-(x.year||0)); }
+
+    const TYPE_LABEL={person:"person",movie:"film",series:"series",company:"company"}, TYPE_CLS={person:"person",movie:"",series:"tv",company:"company"};
+    const picked = { a:null, b:null };
+
+    function makeSuggest(input, drop, chosenEl, slot){
+      let t=null, ctrl=null, cur=[];
+      input.addEventListener("input", ()=>{ const q=input.value.trim(); clearTimeout(t); if(q.length<2){drop.classList.remove("open");return;} t=setTimeout(()=>run(q),280); });
+      async function run(q){ if(ctrl)ctrl.abort(); ctrl=new AbortController();
+        drop.innerHTML=`<div class="sitem dis"><span class="spinner"></span><span class="stitle">Searching…</span></div>`; drop.classList.add("open");
+        try{ const r=await fetch("/api/search?q="+encodeURIComponent(q)+"&limit=8",{signal:ctrl.signal}); const d=await r.json(); if(!r.ok)throw 0; render(d.candidates||[]); }
+        catch(e){ if(e&&e.name==="AbortError")return; drop.classList.remove("open"); }
+      }
+      function render(cs){ cur=cs; if(!cs.length){drop.classList.remove("open");return;}
+        drop.innerHTML=cs.map((c,i)=>{ const ok=c.type==="movie"||c.type==="person"; const th=c.thumb?`<span class="st" style="background-image:url('${esc(c.thumb)}')"></span>`:`<span class="st empty">no img</span>`;
+          const sub=c.type==="person"?(c.knownForDepartment||"person"):((c.year||"—")+(c.language?" · "+c.language:""));
+          return `<div class="sitem ${ok?"":"dis"}" data-i="${i}">${th}<span><span class="stitle">${esc(c.title)}</span><br><span class="smeta">${esc(sub)}</span></span><span class="sbadge ${TYPE_CLS[c.type]||""}">${TYPE_LABEL[c.type]||c.type}</span></div>`;
+        }).join(""); drop.classList.add("open");
+        drop.querySelectorAll(".sitem[data-i]").forEach(el=>el.addEventListener("click",()=>{ const c=cur[+el.dataset.i]; if(c.type!=="movie"&&c.type!=="person")return; choose(c); }));
+      }
+      function choose(c){ picked[slot]=c; input.value=""; drop.classList.remove("open");
+        const th=c.thumb?`<span class="cth" style="background-image:url('${esc(c.thumb)}')"></span>`:`<span class="cth"></span>`;
+        chosenEl.innerHTML=`${th}<span><span class="cn">${esc(c.title)}</span><br><span class="cm">${TYPE_LABEL[c.type]||c.type}</span></span><button class="cx" title="clear">clear ✕</button>`;
+        chosenEl.classList.add("on"); chosenEl.querySelector(".cx").addEventListener("click",()=>{ picked[slot]=null; chosenEl.classList.remove("on"); chosenEl.innerHTML=""; maybeCompare(); });
+        maybeCompare();
+      }
+    }
+    document.addEventListener("click",(e)=>{ if(!e.target.closest(".picker")){ $("#suga").classList.remove("open"); $("#sugb").classList.remove("open"); } });
+
+    makeSuggest($("#qa"), $("#suga"), $("#cha"), "a");
+    makeSuggest($("#qb"), $("#sugb"), $("#chb"), "b");
+
+    function note(m){ const n=$("#note"); if(!m){n.classList.add("hidden");return;} n.textContent=m; n.classList.remove("hidden"); }
+
+    async function maybeCompare(){
+      const a=picked.a, b=picked.b; $("#result").innerHTML="";
+      if(!a||!b){ note(""); return; }
+      if(a.type!==b.type){ note("Compare two films, or two people — the picks are a "+ (TYPE_LABEL[a.type]||a.type) +" and a "+ (TYPE_LABEL[b.type]||b.type) +"."); return; }
+      note("");
+      if(a.type==="movie") return compareFilms(a,b);
+      if(a.type==="person") return comparePeople(a,b);
+      note("Only films and people can be compared.");
+    }
+
+    const money=(n)=> n?("$"+n.toLocaleString()):"";
+    function scoreChips(r){ const R=r.ratings||{},x=[]; if(R.tmdbScore!=null)x.push("TMDb "+R.tmdbScore.toFixed(1)); if(R.imdbRating!=null)x.push("IMDb "+R.imdbRating.toFixed(1)); if(R.rottenTomatoes!=null)x.push("RT "+R.rottenTomatoes+"%"); if(R.metacritic!=null)x.push("MC "+R.metacritic); return x; }
+    function provNames(p){ const c=(p.countries&&p.countries.IN)||null; if(!c)return []; return [...(c.flatrate||[]),...(c.free||[]),...(c.ads||[])].map(x=>x.name); }
+
+    async function compareFilms(a,b){
+      $("#result").innerHTML=`<div class="seclabel">Film vs Film</div><div class="cmp">${skel()}${skel()}</div><div class="seclabel">Shared cast &amp; crew</div><div class="overlap loading"><span class="spinner"></span>Computing overlap…</div>`;
+      try{
+        const [da,ca,pa,db,cb,pb]=await Promise.all([
+          getJson("/api/movie/"+a.id), getJson("/api/movie/"+a.id+"/credits"), getJson("/api/movie/"+a.id+"/providers?country=IN").catch(()=>({countries:{}})),
+          getJson("/api/movie/"+b.id), getJson("/api/movie/"+b.id+"/credits"), getJson("/api/movie/"+b.id+"/providers?country=IN").catch(()=>({countries:{}})),
+        ]);
+        const card=(d,p)=>`<div class="side">
+          ${d.posterUrl?`<span class="poster" style="background-image:url('${esc(d.posterUrl)}')"></span>`:`<span class="poster"></span>`}
+          <div class="body"><h2>${esc(d.title)}</h2><div class="sub">${[d.year,d.language,(d.runtime?d.runtime+" min":"")].filter(Boolean).map(esc).join(" · ")}</div>
+            <div class="kv">
+              <span class="k">Scores</span><span class="v"><span class="chips">${scoreChips(d).map(s=>`<span class="chip score">${esc(s)}</span>`).join("")||"—"}</span></span>
+              <span class="k">Genres</span><span class="v"><span class="chips">${(d.genre||[]).map(g=>`<span class="chip">${esc(g)}</span>`).join("")||"—"}</span></span>
+              <span class="k">Director</span><span class="v">${esc(d.director||"—")}</span>
+              <span class="k">Streaming</span><span class="v"><span class="chips">${provNames(p).map(n=>`<span class="chip plat">${esc(n)}</span>`).join("")||"<span style='color:var(--ink-soft)'>none in IN</span>"}</span></span>
+            </div>
+            <div class="kv"><span class="k">Open</span><span class="v"><a class="namelink" href="/movie.html?id=${d.id}">detail ↗</a></span></div>
+          </div></div>`;
+        const ov=castOverlap(ca,cb);
+        const ovHtml = ov.length ? `<div class="overlap">${ov.map(o=>`<div class="ovitem"><span class="on"><a class="namelink" href="/person.html?id=${o.id}">${esc(o.name)}</a></span><span class="ors">${esc(o.roleA)} ⟷ ${esc(o.roleB)}</span></div>`).join("")}</div>`
+          : `<div class="empty">No shared cast or crew between these two films.</div>`;
+        $("#result").innerHTML=`<div class="seclabel">Film vs Film</div><div class="cmp">${card(da,pa)}${card(db,pb)}</div>
+          <div class="seclabel">Shared cast &amp; crew <span style="color:var(--ink-soft);font-weight:500">· ${ov.length}</span></div>${ovHtml}`;
+      }catch(e){ $("#result").innerHTML=`<div class="note">Compare failed: ${esc(e.message)}</div>`; }
+    }
+
+    async function comparePeople(a,b){
+      $("#result").innerHTML=`<div class="seclabel">Person vs Person</div><div class="cmp">${skel(true)}${skel(true)}</div><div class="seclabel">Shared films &amp; collaborations</div><div class="loading"><span class="spinner"></span>Finding shared films…</div>`;
+      try{
+        const [pa,pb]=await Promise.all([ getJson("/api/person/"+a.id), getJson("/api/person/"+b.id) ]);
+        const card=(p)=>`<div class="side person">
+          ${p.profileUrl?`<span class="poster" style="background-image:url('${esc(p.profileUrl)}')"></span>`:`<span class="poster"></span>`}
+          <div class="body"><h2>${esc(p.name)}</h2><div class="sub">${[p.knownForDepartment,(p.age!=null?(p.ageAtDeath?("aged "+p.age+" at death"):(p.age+" yrs")):"")].filter(Boolean).map(esc).join(" · ")}</div>
+            <div class="kv">
+              <span class="k">Born</span><span class="v">${esc(p.birthday||"—")}${p.placeOfBirth?" · "+esc(p.placeOfBirth):""}</span>
+              <span class="k">Credits</span><span class="v">${(p.filmography||[]).length} titles · ${p.imageStats?p.imageStats.portraits+" portraits":""}</span>
+            </div>
+            <div class="kv"><span class="k">Open</span><span class="v"><a class="namelink" href="/person.html?id=${p.id}">detail ↗</a></span></div>
+          </div></div>`;
+        const shared=sharedFilms(pa.filmography||[], pb.filmography||[]);
+        const sHtml = shared.length ? `<div class="ovgrid">${shared.map(f=>`<a class="ovfilm" href="/movie.html?id=${f.id}"><span class="fp"${f.posterUrl?` style="background-image:url('${esc(f.posterUrl)}')"`:""}></span><span class="fm"><span class="ft">${esc(f.title)}</span><br><span class="fy">${esc(f.year||"—")} · ${esc(f.mediaType||"")}</span></span></a>`).join("")}</div>`
+          : `<div class="empty">No shared films found between ${esc(pa.name)} and ${esc(pb.name)}.</div>`;
+        $("#result").innerHTML=`<div class="seclabel">Person vs Person</div><div class="cmp">${card(pa)}${card(pb)}</div>
+          <div class="seclabel">Shared films &amp; collaborations <span style="color:var(--ink-soft);font-weight:500">· ${shared.length}</span></div>${sHtml}`;
+      }catch(e){ $("#result").innerHTML=`<div class="note">Compare failed: ${esc(e.message)}</div>`; }
+    }
+
+    function skel(person){ return `<div class="side"><span class="poster"></span><div class="body"><div class="loading"><span class="spinner"></span>Loading…</div></div></div>`; }
+  </script>
+  <script>
+    if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+  </script>
+</body>
+</html>

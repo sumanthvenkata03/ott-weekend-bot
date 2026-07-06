@@ -19,6 +19,9 @@
 #   YOUTUBE_API_KEY     (optional — trailer search)
 #   MOVIE_LOOKUP_USER   (required for login — Basic Auth username)
 #   MOVIE_LOOKUP_PASS   (required for login — Basic Auth password)
+#   DATABASE_URL        (optional — Render PostgreSQL Internal Connection String;
+#                        enables the persistent, cross-device watchlist. Unset →
+#                        in-memory fallback.)
 # (Render sets PORT automatically; the server binds it on 0.0.0.0.)
 
 services:
@@ -45,4 +48,8 @@ services:
       - key: MOVIE_LOOKUP_USER
         sync: false
       - key: MOVIE_LOOKUP_PASS
+        sync: false
+      # Persistent watchlist store (Render PostgreSQL Internal Connection String).
+      # Unset → the watchlist degrades to in-memory (works, but not persisted).
+      - key: DATABASE_URL
         sync: false

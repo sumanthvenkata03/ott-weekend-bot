@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>TBSI · Watchlist</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#1A1614" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink:#1A1614; --cream:#F4ECDC; --vermillion:#A33223; --brass:#C49A3F;
+      --green:#2E5742; --oxblood:#682D25; --maroon:#581F16; --paper:#F4ECDC;
+      --line:rgba(26,22,20,0.28); --ink-soft:rgba(26,22,20,0.66);
+      --serif:"Playfair Display",Georgia,serif; --sans:"Inter",system-ui,sans-serif;
+      --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+    }
+    *{box-sizing:border-box;} html,body{margin:0;padding:0;}
+    body{background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.5;
+      background-image:radial-gradient(rgba(104,45,37,0.04) 1px,transparent 1px);background-size:4px 4px;}
+    .wrap{max-width:1120px;margin:0 auto;padding:22px 22px 90px;}
+    a{color:var(--vermillion);}
+    .topbar{display:flex;justify-content:space-between;align-items:center;border-bottom:3px double var(--ink);padding-bottom:10px;gap:10px;flex-wrap:wrap;}
+    .back{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;color:var(--oxblood);}
+    .back:hover{color:var(--vermillion);}
+    .brand{font-family:var(--mono);font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:var(--ink-soft);}
+    h1{font-family:var(--serif);font-weight:900;font-size:clamp(26px,5vw,40px);margin:16px 0 2px;}
+    .lede{font-family:var(--mono);font-size:11px;color:var(--ink-soft);letter-spacing:.04em;margin-bottom:8px;}
+    .banner{font-family:var(--mono);font-size:11px;color:var(--oxblood);background:rgba(196,154,63,.15);border:1px solid var(--brass);border-radius:2px;padding:8px 12px;margin:10px 0 4px;display:none;}
+    .banner.on{display:block;}
+    .seclabel{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.24em;text-transform:uppercase;color:var(--oxblood);margin:26px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px;display:flex;justify-content:space-between;align-items:baseline;}
+    .seclabel .count{color:var(--ink-soft);font-weight:500;}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;}
+    .card{border:1px solid var(--line);background:#fbf6ea;border-radius:2px;overflow:hidden;position:relative;}
+    .card a.open{text-decoration:none;color:inherit;display:block;}
+    .card .p{aspect-ratio:2/3;background:#e6dcc6 center/cover no-repeat;display:flex;align-items:center;justify-content:center;}
+    .card .p.empty{font-family:var(--mono);font-size:10px;color:var(--ink-soft);}
+    .card .m{padding:8px 9px 10px;}
+    .card .t{font-family:var(--serif);font-weight:700;font-size:14px;line-height:1.15;}
+    .card .d{font-family:var(--mono);font-size:10px;color:var(--ink-soft);margin-top:3px;}
+    .card .rm{position:absolute;top:6px;right:6px;font-family:var(--mono);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--cream);background:var(--vermillion);border:none;border-radius:2px;padding:3px 7px;cursor:pointer;opacity:.92;}
+    .card .rm:hover{background:var(--oxblood);}
+    .spinner{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--vermillion);border-radius:50%;animation:spin .7s linear infinite;box-sizing:border-box;}
+    @keyframes spin{to{transform:rotate(360deg);}}
+    .loading{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;color:var(--ink-soft);padding:14px 2px;}
+    .msg{font-family:var(--mono);font-size:12px;color:var(--ink-soft);padding:10px 2px;}
+    .msg.err{color:var(--vermillion);}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <a class="back" href="/">← Search</a>
+      <span class="brand">TBSI · Watchlist · Localhost</span>
+    </div>
+    <h1>Watchlist</h1>
+    <div class="lede">A single shared list — films &amp; people you saved.</div>
+    <div class="banner" id="banner">In-memory mode: this list is <b>not persisted</b> (no DATABASE_URL). Set a Render PostgreSQL to sync across devices &amp; survive redeploys.</div>
+    <div id="content"><div class="loading"><span class="spinner"></span>Loading your watchlist…</div></div>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+    async function getJson(url, opts){ const r = await fetch(url, opts); const d = await r.json().catch(()=>({error:"bad JSON"})); if(!r.ok) throw new Error(d.error||("HTTP "+r.status)); return d; }
+    const poster = (m) => m.posterUrl ? `<span class="p" style="background-image:url('${esc(m.posterUrl)}')"></span>` : `<span class="p empty">no image</span>`;
+
+    async function load(){
+      try{
+        const d = await getJson("/api/watchlist");
+        if(d.store !== "postgres") $("#banner").classList.add("on");
+        render(d.items || []);
+      }catch(e){ $("#content").innerHTML = `<div class="msg err">Couldn’t load watchlist: ${esc(e.message)}</div>`; }
+    }
+
+    function render(items){
+      const films = items.filter(i=>i.type==="film");
+      const people = items.filter(i=>i.type==="person");
+      if(!items.length){ $("#content").innerHTML = `<div class="msg">Nothing saved yet. Open a film or person and tap <b>☆ Save</b>.</div>`; return; }
+      const grid = (arr, href) => `<div class="grid">${arr.map(i=>`
+        <div class="card" data-type="${i.type}" data-id="${i.tmdbId}">
+          <a class="open" href="${href}${i.tmdbId}">${poster(i)}<div class="m"><div class="t">${esc(i.title)}</div><div class="d">${esc((i.addedAt||"").slice(0,10))}</div></div></a>
+          <button class="rm" title="Remove">remove</button>
+        </div>`).join("")}</div>`;
+      $("#content").innerHTML =
+        `<div class="seclabel"><span>Films</span><span class="count">${films.length}</span></div>${films.length?grid(films,"/movie.html?id="):`<div class="msg">No films saved.</div>`}
+         <div class="seclabel"><span>People</span><span class="count">${people.length}</span></div>${people.length?grid(people,"/person.html?id="):`<div class="msg">No people saved.</div>`}`;
+      $("#content").querySelectorAll(".rm").forEach(btn=>btn.addEventListener("click", async (e)=>{
+        const card = e.target.closest(".card"); const type = card.dataset.type, id = card.dataset.id;
+        btn.textContent = "…"; btn.disabled = true;
+        try{ await getJson(`/api/watchlist/${type}/${id}`, { method:"DELETE" }); card.remove(); }
+        catch(err){ btn.textContent = "remove"; btn.disabled = false; }
+      }));
+    }
+    load();
+  </script>
+  <script>
+    if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+  </script>
+</body>
+</html>

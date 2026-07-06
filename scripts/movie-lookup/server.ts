@@ -34,12 +34,37 @@ import {
 import { rankedSearch, DEFAULT_SEARCH_LIMIT } from "./search.js";
 import { authConfigFromEnv, authEnabled, checkBasicAuth, wwwAuthenticateHeader } from "./auth.js";
 import { TtlCache } from "./cache.js";
+import { movieReleases } from "./releases.js";
+import { createWatchlistBackend, isWatchType, MemoryWatchlist, type WatchlistBackend, type Queryable } from "./watchlist.js";
+import pg from "pg";
 
 // In-memory TTL+LRU cache for API responses (tool-only; NOT cache.sqlite). Makes
 // repeat lookups of the same query/id instant within the TTL window. Live calls
 // still happen on a miss. TTL configurable via MOVIE_LOOKUP_CACHE_TTL_MS.
 const CACHE_TTL_MS = Number.parseInt(process.env.MOVIE_LOOKUP_CACHE_TTL_MS ?? "", 10);
 const apiCache = new TtlCache({ ttlMs: Number.isFinite(CACHE_TTL_MS) && CACHE_TTL_MS > 0 ? CACHE_TTL_MS : undefined });
+
+// Persistent watchlist store. Postgres when DATABASE_URL is set (survives
+// redeploys, syncs across devices); in-memory fallback otherwise. `pg` is only
+// touched here (kept out of watchlist.ts so its tests need no real driver).
+function makePgClient(url: string): Queryable {
+  // Render's INTERNAL connection string needs no SSL; external URLs (or a forced
+  // PGSSL=1) do. Enable SSL only when asked so internal connections just work.
+  const needsSsl = /sslmode=require/i.test(url) || process.env.PGSSL === "1";
+  const pool = new pg.Pool({ connectionString: url, max: 3, ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {}) });
+  return { query: (text, params) => pool.query(text, params) };
+}
+let watchlist: WatchlistBackend = createWatchlistBackend(process.env, makePgClient);
+
+/** Read a request body (bounded) — used by the watchlist POST route. */
+function readBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (c) => { data += c; if (data.length > 1_000_000) req.destroy(); });
+    req.on("end", () => resolve(data));
+    req.on("error", reject);
+  });
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Render assigns the port via process.env.PORT and expects a bind on 0.0.0.0.
@@ -66,6 +91,9 @@ const STATIC: Record<string, Asset> = {
   "/index.html": { file: "index.html", type: "text/html; charset=utf-8", cache: HTML_CACHE },
   "/movie.html": { file: "movie.html", type: "text/html; charset=utf-8", cache: HTML_CACHE },
   "/person.html": { file: "person.html", type: "text/html; charset=utf-8", cache: HTML_CACHE },
+  "/compare.html": { file: "compare.html", type: "text/html; charset=utf-8", cache: HTML_CACHE },
+  "/watchlist.html": { file: "watchlist.html", type: "text/html; charset=utf-8", cache: HTML_CACHE },
+  "/releases.html": { file: "releases.html", type: "text/html; charset=utf-8", cache: HTML_CACHE },
   "/manifest.webmanifest": { file: "manifest.webmanifest", type: "application/manifest+json; charset=utf-8", cache: "no-cache" },
   "/sw.js": { file: "sw.js", type: "text/javascript; charset=utf-8", cache: "no-cache" },
   "/icon-192.png": { file: "icon-192.png", type: "image/png", cache: "public, max-age=86400" },
@@ -144,6 +172,37 @@ const server = createServer(async (req, res) => {
     // ── Auth gate (all other routes) ──
     if (!passesAuth(req, res)) return;
 
+    // ── Watchlist API (GET list · POST add · DELETE remove) — handled before the
+    // GET-only guard since it accepts writes. Single shared list, no users. ──
+    const wseg = path.split("/").filter(Boolean); // ["api","watchlist",type,id]
+    if (wseg[0] === "api" && wseg[1] === "watchlist") {
+      if (!wseg[2]) {
+        if (req.method === "GET") return sendJson(res, 200, { items: await watchlist.list(), store: watchlist.kind });
+        if (req.method === "POST") {
+          let body: Record<string, unknown>;
+          try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "invalid JSON body" }); }
+          const type = body.type;
+          const tmdbId = intId(String(body.id ?? body.tmdbId ?? ""));
+          const title = String(body.title ?? "").trim();
+          if (!isWatchType(type) || tmdbId === undefined || !title) return sendJson(res, 400, { error: "type (film|person), id, title are required" });
+          const note = body.note ? String(body.note) : undefined;
+          const item = await watchlist.add({ type, tmdbId, title, note });
+          return sendJson(res, 200, { item, store: watchlist.kind });
+        }
+        return sendJson(res, 405, { error: "GET or POST only" });
+      }
+      if (wseg[2] && wseg[3]) { // /api/watchlist/:type/:id
+        if (req.method === "DELETE") {
+          const type = wseg[2];
+          const tmdbId = intId(wseg[3]);
+          if (!isWatchType(type) || tmdbId === undefined) return sendJson(res, 400, { error: "bad type/id" });
+          await watchlist.remove(type, tmdbId);
+          return sendJson(res, 200, { ok: true, store: watchlist.kind });
+        }
+        return sendJson(res, 405, { error: "DELETE only" });
+      }
+    }
+
     if (req.method !== "GET") return sendJson(res, 405, { error: "GET only" });
 
     // ── Static pages + PWA assets (manifest, service worker, icons) ──
@@ -212,6 +271,12 @@ const server = createServer(async (req, res) => {
     if (path === "/api/download") {
       return void (await proxyDownload(url.searchParams.get("url") ?? "", res));
     }
+    // ── Upcoming / Now-playing feeds (default region India) ──
+    if (path === "/api/releases/now-playing" || path === "/api/releases/upcoming") {
+      const region = (url.searchParams.get("region") ?? "IN").toUpperCase();
+      const kind = path.endsWith("upcoming") ? "upcoming" : "now_playing";
+      return sendJson(res, 200, await apiCache.wrap(`releases:${kind}:${region}`, () => movieReleases(kind, region)));
+    }
 
     // ── App-shell fallback ──
     // A browser navigation (Accept: text/html) that matched no static asset and
@@ -241,6 +306,19 @@ server.listen(PORT, HOST, () => {
   const ttlMs = Number.isFinite(CACHE_TTL_MS) && CACHE_TTL_MS > 0 ? CACHE_TTL_MS : 20 * 60 * 1000;
   const ttlHuman = ttlMs >= 60000 ? `${Math.round(ttlMs / 60000)}m` : `${Math.round(ttlMs / 1000)}s`;
   console.log(`   Cache: in-memory TTL ${ttlHuman} (MOVIE_LOOKUP_CACHE_TTL_MS)`);
+  // Bring up the watchlist store; if the DB init fails, fall back to memory so
+  // the server never crashes over a bad/absent DATABASE_URL.
+  void (async () => {
+    try {
+      await watchlist.init();
+      if (watchlist.kind === "postgres") console.log(`   Watchlist: PostgreSQL ✓ (persistent, cross-device — DATABASE_URL)`);
+      else console.warn(`   ⚠️  Watchlist: in-memory (NOT persisted) — set DATABASE_URL to a Render PostgreSQL to sync across devices & survive redeploys`);
+    } catch (e) {
+      console.warn(`   ⚠️  Watchlist DB init failed — using in-memory fallback: ${(e as Error).message}`);
+      watchlist = new MemoryWatchlist();
+      await watchlist.init();
+    }
+  })();
   if (authOn) {
     console.log(`   Auth: ENABLED ✓ (HTTP Basic — MOVIE_LOOKUP_USER/PASS)`);
   } else {
