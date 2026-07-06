@@ -59,6 +59,13 @@
     .sitem .sbadge.person{background:var(--vermillion);}
     .sitem .sbadge.company{background:var(--oxblood);}
     .sfoot{font-family:var(--mono);font-size:9px;color:var(--ink-soft);text-align:center;padding:5px;letter-spacing:.06em;text-transform:uppercase;background:#fbf6ea;}
+    /* loading spinner (suggest dropdown + reused elsewhere) */
+    .spinner{width:15px;height:15px;border:2px solid var(--line);border-top-color:var(--vermillion);border-radius:50%;animation:spin .7s linear infinite;flex:0 0 auto;box-sizing:border-box;}
+    @keyframes spin{to{transform:rotate(360deg);}}
+    .sitem.sload{cursor:default;align-items:center;}
+    .sitem.sload:hover{background:transparent;}
+    .sitem.sload .stitle{color:var(--ink-soft);font-family:var(--mono);font-size:13px;}
+    .sitem.sload .smeta{color:var(--ink-soft);}
 
     .status{text-align:center;font-family:var(--mono);font-size:12px;color:var(--ink-soft);min-height:18px;margin:4px 0 0;}
     .status.err{color:var(--vermillion);font-weight:700;}
@@ -127,22 +134,38 @@
     const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
     function setStatus(m, err){ statusEl.textContent = m||""; statusEl.classList.toggle("err", !!err); }
 
-    // ── In-memory cache + stale-request guard (newest query wins) ──
-    const cache = new Map();          // query -> candidates[]
+    // ── Client cache (in-memory + sessionStorage) + stale-request guard ──
+    // Re-typing a recent query renders instantly from cache while the network
+    // refreshes in the background (stale-while-revalidate). sessionStorage lets
+    // the cache survive navigating to a detail page and back within the tab.
+    const cache = new Map();          // "q|limit" -> response
+    const SS_KEY = "tbsi_suggest_cache_v1";
     let seq = 0;                      // request sequence
     let inflight = null;              // AbortController for the live suggest fetch
     const SUGGEST_LIMIT = 8;
+    const WAKE_MS = 3000;             // Render cold-start friendliness threshold
 
-    async function fetchRanked(q, limit){
-      const key = q + "|" + limit;
-      if (cache.has(key)) return cache.get(key);
+    try {                             // hydrate from sessionStorage
+      const saved = JSON.parse(sessionStorage.getItem(SS_KEY) || "{}");
+      for (const k in saved) cache.set(k, saved[k]);
+    } catch (e) { /* ignore */ }
+    function persistCache(){
+      try {
+        const o = {}; for (const [k, v] of cache) o[k] = v;
+        sessionStorage.setItem(SS_KEY, JSON.stringify(o));
+      } catch (e) { /* quota/parse — non-fatal */ }
+    }
+
+    // Network fetch (+ store). Always hits the server; the caller decides when.
+    async function fetchNetwork(q, limit){
       if (inflight) inflight.abort();
       inflight = new AbortController();
       const r = await fetch("/api/search?q=" + encodeURIComponent(q) + "&limit=" + limit, { signal: inflight.signal });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "HTTP " + r.status);
-      cache.set(key, data);
+      cache.set(q + "|" + limit, data);
       if (cache.size > 60) cache.delete(cache.keys().next().value); // bound cache
+      persistCache();
       return data;
     }
 
@@ -155,15 +178,33 @@
       debounceT = setTimeout(() => runSuggest(q), 280);
     });
 
+    function suggestMessage(title, meta){
+      sug.innerHTML = `<div class="sitem sload"><span class="spinner"></span><span class="sinfo"><span class="stitle">${title}</span>${meta ? `<span class="smeta">${meta}</span>` : ""}</span></div>`;
+      sug.classList.add("open");
+    }
+
     async function runSuggest(q){
       const mySeq = ++seq;
+      const cached = cache.get(q + "|" + SUGGEST_LIMIT);
+      if (cached) {
+        renderSuggest(cached.candidates || []);   // instant from cache
+        try { const fresh = await fetchNetwork(q, SUGGEST_LIMIT); if (mySeq === seq) renderSuggest(fresh.candidates || []); }
+        catch (e) { /* keep the cached view on refresh failure */ }
+        return;
+      }
+      // Cache miss → show a loading state; escalate to a "waking up" message if
+      // the server is cold (Render free-tier can take ~30s on first hit).
+      suggestMessage("Searching…");
+      const wakeT = setTimeout(() => { if (mySeq === seq) suggestMessage("Waking up the server…", "first search after idle can take ~30s"); }, WAKE_MS);
       try {
-        const data = await fetchRanked(q, SUGGEST_LIMIT);
+        const data = await fetchNetwork(q, SUGGEST_LIMIT);
         if (mySeq !== seq) return;                 // a newer keystroke already fired — ignore stale
         renderSuggest(data.candidates || []);
       } catch (e) {
         if (e.name === "AbortError") return;        // superseded
         if (mySeq === seq) closeSuggest();
+      } finally {
+        clearTimeout(wakeT);
       }
     }
 
@@ -236,11 +277,20 @@
       doSearch(q);
     });
 
+    // Full-search fetch: cache-first (Enter submits the full ranked list).
+    async function fetchRanked(q, limit){
+      const cached = cache.get(q + "|" + limit);
+      if (cached) return cached;
+      return fetchNetwork(q, limit);
+    }
+
     async function doSearch(q) {
       $("#candsWrap").classList.add("hidden");
+      const cold = cache.get(q + "|" + 30) ? null : setTimeout(() => setStatus("Waking up the server… first search after idle can take ~30s"), WAKE_MS);
       setStatus("Searching for “" + q + "” …");
       try {
         const data = await fetchRanked(q, 30);
+        if (cold) clearTimeout(cold);
         if (!data.candidates.length) { setStatus("No matches found.", true); return; }
         const p = data.parsed || {};
         const bits = [];
@@ -251,7 +301,7 @@
         if (p.year) bits.push("year: " + p.year);
         setStatus(data.count + " result" + (data.count === 1 ? "" : "s") + " (ranked)" + (bits.length ? "  ·  " + bits.join("  ·  ") : ""));
         render(data.candidates);
-      } catch (err) { if (err.name !== "AbortError") setStatus("Search failed: " + err.message, true); }
+      } catch (err) { if (cold) clearTimeout(cold); if (err.name !== "AbortError") setStatus("Search failed: " + err.message, true); }
     }
 
     function render(cands) {

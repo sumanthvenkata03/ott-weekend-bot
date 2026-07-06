@@ -33,6 +33,13 @@ import {
 } from "./lookup.js";
 import { rankedSearch, DEFAULT_SEARCH_LIMIT } from "./search.js";
 import { authConfigFromEnv, authEnabled, checkBasicAuth, wwwAuthenticateHeader } from "./auth.js";
+import { TtlCache } from "./cache.js";
+
+// In-memory TTL+LRU cache for API responses (tool-only; NOT cache.sqlite). Makes
+// repeat lookups of the same query/id instant within the TTL window. Live calls
+// still happen on a miss. TTL configurable via MOVIE_LOOKUP_CACHE_TTL_MS.
+const CACHE_TTL_MS = Number.parseInt(process.env.MOVIE_LOOKUP_CACHE_TTL_MS ?? "", 10);
+const apiCache = new TtlCache({ ttlMs: Number.isFinite(CACHE_TTL_MS) && CACHE_TTL_MS > 0 ? CACHE_TTL_MS : undefined });
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Render assigns the port via process.env.PORT and expects a bind on 0.0.0.0.
@@ -152,32 +159,35 @@ const server = createServer(async (req, res) => {
     if (seg[0] === "api" && seg[1] === "movie" && seg[2]) {
       const id = intId(seg[2]);
       if (id === undefined) return sendJson(res, 400, { error: "movie id must be an integer" });
-      if (!seg[3]) return sendJson(res, 200, await movieDetail(id));
+      if (!seg[3]) return sendJson(res, 200, await apiCache.wrap(`movie:${id}`, () => movieDetail(id)));
       if (seg[3] === "images") {
         const imdbId = url.searchParams.get("imdbId") ?? undefined;
-        return sendJson(res, 200, await allMovieImages(id, imdbId));
+        return sendJson(res, 200, await apiCache.wrap(`images:${id}:${imdbId ?? ""}`, () => allMovieImages(id, imdbId)));
       }
-      if (seg[3] === "credits") return sendJson(res, 200, await fullCredits(id));
+      if (seg[3] === "credits") return sendJson(res, 200, await apiCache.wrap(`credits:${id}`, () => fullCredits(id)));
       if (seg[3] === "videos") {
         const title = url.searchParams.get("title") ?? undefined;
         const yr = Number.parseInt(url.searchParams.get("year") ?? "", 10);
-        return sendJson(res, 200, await movieVideos(id, title, Number.isFinite(yr) ? yr : undefined));
+        const year = Number.isFinite(yr) ? yr : undefined;
+        return sendJson(res, 200, await apiCache.wrap(`videos:${id}:${title ?? ""}:${year ?? ""}`, () => movieVideos(id, title, year)));
       }
       if (seg[3] === "providers") {
-        return sendJson(res, 200, await movieProviders(id, url.searchParams.get("country") ?? "IN"));
+        const country = url.searchParams.get("country") ?? "IN";
+        return sendJson(res, 200, await apiCache.wrap(`providers:${id}:${country}`, () => movieProviders(id, country)));
       }
       if (seg[3] === "wiki") {
         const title = (url.searchParams.get("title") ?? "").trim();
         if (!title) return sendJson(res, 400, { error: "title is required for wiki lookup" });
         const yr = Number.parseInt(url.searchParams.get("year") ?? "", 10);
-        return sendJson(res, 200, await movieBackground(id, title, Number.isFinite(yr) ? yr : undefined));
+        const year = Number.isFinite(yr) ? yr : undefined;
+        return sendJson(res, 200, await apiCache.wrap(`wiki:${id}:${title}:${year ?? ""}`, () => movieBackground(id, title, year)));
       }
       return sendJson(res, 404, { error: `no route ${path}` });
     }
     if (seg[0] === "api" && seg[1] === "person" && seg[2]) {
       const id = intId(seg[2]);
       if (id === undefined) return sendJson(res, 400, { error: "person id must be an integer" });
-      return sendJson(res, 200, await personDetail(id));
+      return sendJson(res, 200, await apiCache.wrap(`person:${id}`, () => personDetail(id)));
     }
 
     // ── Query-style API (kept for the search page + compatibility) ──
@@ -186,18 +196,18 @@ const server = createServer(async (req, res) => {
       if (!q) return sendJson(res, 400, { error: "q (movie name) is required" });
       const lr = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
       const limit = Number.isFinite(lr) && lr > 0 ? Math.min(lr, 60) : DEFAULT_SEARCH_LIMIT;
-      return sendJson(res, 200, await rankedSearch(q, limit));
+      return sendJson(res, 200, await apiCache.wrap(`search:${limit}:${q}`, () => rankedSearch(q, limit)));
     }
     if (path === "/api/movie") {
       const id = intId(url.searchParams.get("id") ?? undefined);
       if (id === undefined) return sendJson(res, 400, { error: "id (TMDb movie id) is required" });
-      return sendJson(res, 200, await movieDetail(id));
+      return sendJson(res, 200, await apiCache.wrap(`movie:${id}`, () => movieDetail(id)));
     }
     if (path === "/api/images") {
       const id = intId(url.searchParams.get("id") ?? undefined);
       if (id === undefined) return sendJson(res, 400, { error: "id (TMDb movie id) is required" });
       const imdbId = url.searchParams.get("imdbId") ?? undefined;
-      return sendJson(res, 200, await allMovieImages(id, imdbId));
+      return sendJson(res, 200, await apiCache.wrap(`images:${id}:${imdbId ?? ""}`, () => allMovieImages(id, imdbId)));
     }
     if (path === "/api/download") {
       return void (await proxyDownload(url.searchParams.get("url") ?? "", res));
@@ -228,6 +238,9 @@ server.listen(PORT, HOST, () => {
   console.log(`   ▶ http://${shownHost}:${PORT}`);
   console.log(`   TMDB_API_KEY: ${tmdb ? "set ✓" : "MISSING ✗  (lookups will 500 until set)"}`);
   console.log(`   OMDB_API_KEY: ${omdb ? "set ✓ (OMDb poster + IMDb/RT/Metacritic)" : "unset (OMDb source skipped — TMDb only)"}`);
+  const ttlMs = Number.isFinite(CACHE_TTL_MS) && CACHE_TTL_MS > 0 ? CACHE_TTL_MS : 20 * 60 * 1000;
+  const ttlHuman = ttlMs >= 60000 ? `${Math.round(ttlMs / 60000)}m` : `${Math.round(ttlMs / 1000)}s`;
+  console.log(`   Cache: in-memory TTL ${ttlHuman} (MOVIE_LOOKUP_CACHE_TTL_MS)`);
   if (authOn) {
     console.log(`   Auth: ENABLED ✓ (HTTP Basic — MOVIE_LOOKUP_USER/PASS)`);
   } else {
