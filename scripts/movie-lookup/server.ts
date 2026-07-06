@@ -1,5 +1,5 @@
 // scripts/movie-lookup/server.ts
-// Standalone internal "movie lookup" server. Localhost only. Part of the tool.
+// Standalone internal "movie lookup" server. Runs locally AND on Render.
 // Run it with:
 //
 //   npx tsx scripts/movie-lookup/server.ts
@@ -7,12 +7,17 @@
 // then open http://127.0.0.1:5178 . Searches + detail lookups make live (free)
 // TMDb/OMDb reads; nothing is posted, no job runs, no billed LLM call is made.
 //
+// Deployment (Render): binds process.env.PORT on 0.0.0.0 automatically, and is
+// gated by HTTP Basic Auth when MOVIE_LOOKUP_USER + MOVIE_LOOKUP_PASS are set.
+// A PWA (manifest + service worker) makes it installable to a phone home screen.
+//
 // Uses node:http (repo has no HTTP-server dependency, so per the brief we add
 // none). dotenv/config (an existing repo dep) loads the SAME .env the pipeline
-// uses so TMDB_API_KEY / OMDB_API_KEY are read by name, never hardcoded.
+// uses locally so TMDB_API_KEY / OMDB_API_KEY are read by name, never hardcoded;
+// on Render there is no .env and the keys come straight from process.env.
 
 import "dotenv/config";
-import { createServer, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -27,10 +32,14 @@ import {
   isAllowedImageUrl,
 } from "./lookup.js";
 import { rankedSearch, DEFAULT_SEARCH_LIMIT } from "./search.js";
+import { authConfigFromEnv, authEnabled, checkBasicAuth, wwwAuthenticateHeader } from "./auth.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const HOST = "127.0.0.1";
-const PORT = Number.parseInt(process.env.MOVIE_LOOKUP_PORT ?? "5178", 10);
+// Render assigns the port via process.env.PORT and expects a bind on 0.0.0.0.
+// Locally there is no PORT, so we stay on 127.0.0.1:5178 (MOVIE_LOOKUP_PORT can
+// override the local port).
+const PORT = Number.parseInt(process.env.PORT ?? process.env.MOVIE_LOOKUP_PORT ?? "5178", 10);
+const HOST = process.env.PORT ? "0.0.0.0" : "127.0.0.1";
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -40,21 +49,47 @@ function errBody(e: unknown): { error: string } {
   return { error: e instanceof Error ? e.message : String(e) };
 }
 
-const STATIC: Record<string, string> = {
-  "/": "index.html",
-  "/index.html": "index.html",
-  "/movie.html": "movie.html",
-  "/person.html": "person.html",
+// Static app-shell assets served from ./public. Each maps a URL path to a file
+// plus its content type and cache policy (the service-worker script + manifest
+// must not be long-cached so new deploys propagate — see sw.js).
+interface Asset { file: string; type: string; cache: string; }
+const HTML_CACHE = "no-cache";
+const STATIC: Record<string, Asset> = {
+  "/": { file: "index.html", type: "text/html; charset=utf-8", cache: HTML_CACHE },
+  "/index.html": { file: "index.html", type: "text/html; charset=utf-8", cache: HTML_CACHE },
+  "/movie.html": { file: "movie.html", type: "text/html; charset=utf-8", cache: HTML_CACHE },
+  "/person.html": { file: "person.html", type: "text/html; charset=utf-8", cache: HTML_CACHE },
+  "/manifest.webmanifest": { file: "manifest.webmanifest", type: "application/manifest+json; charset=utf-8", cache: "no-cache" },
+  "/sw.js": { file: "sw.js", type: "text/javascript; charset=utf-8", cache: "no-cache" },
+  "/icon-192.png": { file: "icon-192.png", type: "image/png", cache: "public, max-age=86400" },
+  "/icon-512.png": { file: "icon-512.png", type: "image/png", cache: "public, max-age=86400" },
 };
 
-async function serveStatic(file: string, res: ServerResponse): Promise<void> {
+async function serveStatic(asset: Asset, res: ServerResponse): Promise<void> {
   try {
-    const html = await readFile(join(HERE, "public", file));
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(html);
+    const body = await readFile(join(HERE, "public", asset.file));
+    res.writeHead(200, { "Content-Type": asset.type, "Cache-Control": asset.cache });
+    res.end(body);
   } catch (e) {
     sendJson(res, 500, errBody(e));
   }
+}
+
+// ── HTTP Basic Auth gate ──────────────────────────────────────────────────────
+// Returns true when the request may proceed. When auth is enabled and the creds
+// are missing/wrong it writes a 401 (with WWW-Authenticate so the browser shows
+// a native login prompt) and returns false. Open (returns true) when unconfigured.
+function passesAuth(req: IncomingMessage, res: ServerResponse): boolean {
+  const cfg = authConfigFromEnv();
+  if (!authEnabled(cfg)) return true;
+  if (checkBasicAuth(req.headers.authorization, cfg)) return true;
+  res.writeHead(401, {
+    "WWW-Authenticate": wwwAuthenticateHeader(),
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  res.end("401 Unauthorized — TBSI Movie Lookup");
+  return false;
 }
 
 // Stream a whitelisted image host through our origin with an attachment header so
@@ -93,9 +128,18 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${HOST}:${PORT}`);
     const path = url.pathname;
 
+    // Unauthenticated health check (Render pings this; must stay open + 200).
+    if (path === "/healthz") {
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+      return void res.end("ok");
+    }
+
+    // ── Auth gate (all other routes) ──
+    if (!passesAuth(req, res)) return;
+
     if (req.method !== "GET") return sendJson(res, 405, { error: "GET only" });
 
-    // ── Static pages ──
+    // ── Static pages + PWA assets (manifest, service worker, icons) ──
     if (STATIC[path]) return void (await serveStatic(STATIC[path]!, res));
 
     // ── Path-style detail API: /api/movie/:id[/images|/credits], /api/person/:id ──
@@ -163,9 +207,16 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   const tmdb = !!process.env.TMDB_API_KEY;
   const omdb = !!process.env.OMDB_API_KEY;
-  console.log(`\n🎬 TBSI Movie Lookup — internal, localhost only`);
-  console.log(`   ▶ http://${HOST}:${PORT}`);
-  console.log(`   TMDB_API_KEY: ${tmdb ? "set ✓" : "MISSING ✗  (lookups will 500 until set in .env)"}`);
+  const authOn = authEnabled(authConfigFromEnv());
+  const shownHost = HOST === "0.0.0.0" ? "0.0.0.0" : "127.0.0.1";
+  console.log(`\n🎬 TBSI Movie Lookup`);
+  console.log(`   ▶ http://${shownHost}:${PORT}`);
+  console.log(`   TMDB_API_KEY: ${tmdb ? "set ✓" : "MISSING ✗  (lookups will 500 until set)"}`);
   console.log(`   OMDB_API_KEY: ${omdb ? "set ✓ (OMDb poster + IMDb/RT/Metacritic)" : "unset (OMDb source skipped — TMDb only)"}`);
+  if (authOn) {
+    console.log(`   Auth: ENABLED ✓ (HTTP Basic — MOVIE_LOOKUP_USER/PASS)`);
+  } else {
+    console.warn(`   ⚠️  AUTH DISABLED — set MOVIE_LOOKUP_USER/MOVIE_LOOKUP_PASS to require a login (anyone who can reach this port can use it)`);
+  }
   console.log(`   Stop with Ctrl+C\n`);
 });

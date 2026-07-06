@@ -1,0 +1,48 @@
+# render.yaml — Render Infrastructure-as-Code for the internal TBSI Movie Lookup.
+#
+# ONE Node web service that runs scripts/movie-lookup/server.ts. This is the only
+# thing deployed — the pipeline/jobs are NOT run here.
+#
+# GitHub auto-deploy: in the Render dashboard, create a Blueprint from this repo
+# (or connect the repo to the service). With `autoDeploy: true`, every push to
+# the `branch` below triggers a redeploy.
+#
+# SECRETS: every value below is `sync: false`, meaning Render does NOT read it
+# from this file — you set each one in the Render dashboard (Environment tab).
+# NO secret values are stored in this file or anywhere in git.
+#
+# Env vars you MUST set in the Render dashboard:
+#   TMDB_API_KEY        (required — core lookups)
+#   OMDB_API_KEY        (optional — OMDb poster + IMDb/RT/Metacritic scores)
+#   FANART_API_KEY      (optional — extra art)
+#   TVDB_API_KEY        (optional — extra art)
+#   YOUTUBE_API_KEY     (optional — trailer search)
+#   MOVIE_LOOKUP_USER   (required for login — Basic Auth username)
+#   MOVIE_LOOKUP_PASS   (required for login — Basic Auth password)
+# (Render sets PORT automatically; the server binds it on 0.0.0.0.)
+
+services:
+  - type: web
+    name: tbsi-movie-lookup
+    runtime: node
+    plan: free
+    branch: main
+    autoDeploy: true
+    buildCommand: npm install
+    startCommand: npx tsx scripts/movie-lookup/server.ts
+    healthCheckPath: /healthz
+    envVars:
+      - key: TMDB_API_KEY
+        sync: false
+      - key: OMDB_API_KEY
+        sync: false
+      - key: FANART_API_KEY
+        sync: false
+      - key: TVDB_API_KEY
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: MOVIE_LOOKUP_USER
+        sync: false
+      - key: MOVIE_LOOKUP_PASS
+        sync: false
