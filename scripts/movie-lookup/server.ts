@@ -140,7 +140,12 @@ const server = createServer(async (req, res) => {
     if (req.method !== "GET") return sendJson(res, 405, { error: "GET only" });
 
     // ── Static pages + PWA assets (manifest, service worker, icons) ──
-    if (STATIC[path]) return void (await serveStatic(STATIC[path]!, res));
+    // Normalise the site root and any trailing slash so "", "/" and e.g.
+    // "/movie.html/" all resolve to their asset. (A host/proxy can present the
+    // root differently than a local run; the served file is read via an ABSOLUTE
+    // path anchored to this file — see HERE — so cwd never matters.)
+    const staticKey = path === "" ? "/" : path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+    if (STATIC[staticKey]) return void (await serveStatic(STATIC[staticKey]!, res));
 
     // ── Path-style detail API: /api/movie/:id[/images|/credits], /api/person/:id ──
     const seg = path.split("/").filter(Boolean); // e.g. ["api","movie","801688","images"]
@@ -196,6 +201,16 @@ const server = createServer(async (req, res) => {
     }
     if (path === "/api/download") {
       return void (await proxyDownload(url.searchParams.get("url") ?? "", res));
+    }
+
+    // ── App-shell fallback ──
+    // A browser navigation (Accept: text/html) that matched no static asset and
+    // no API route serves the search page instead of a bare "Not Found" — so the
+    // site root, the installed home-screen launch, and any deep link always land
+    // on the app regardless of how the host presents the path. API routes keep
+    // their JSON 404 (this only catches HTML navigations, never /api/*).
+    if (!path.startsWith("/api/") && (req.headers.accept ?? "").includes("text/html")) {
+      return void (await serveStatic(STATIC["/index.html"]!, res));
     }
 
     sendJson(res, 404, { error: `no route ${path}` });
