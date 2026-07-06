@@ -125,6 +125,11 @@
     .lb .dl{background:var(--brass);color:var(--ink);border-color:var(--brass);}
     .lb .open2{background:transparent;color:var(--cream);}
     .lb .close{background:var(--vermillion);color:var(--cream);border-color:var(--vermillion);}
+    .lb .counter{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.1em;color:var(--cream);opacity:.85;padding:9px 6px;}
+    .lb .nav{position:absolute;top:50%;transform:translateY(-50%);z-index:2;width:52px;height:74px;display:flex;align-items:center;justify-content:center;padding:0;font-family:var(--serif);font-size:36px;line-height:1;font-weight:700;background:rgba(20,16,14,.5);color:var(--cream);border:1.5px solid var(--cream);border-radius:2px;cursor:pointer;transition:background .1s,border-color .1s;}
+    .lb .nav:hover{background:var(--vermillion);border-color:var(--vermillion);}
+    .lb .nav.prev{left:18px;} .lb .nav.next{right:18px;}
+    @media (max-width:640px){.lb .nav{width:42px;height:60px;font-size:28px;left:6px;} .lb .nav.next{right:6px;}}
     .lb .cap{font-family:var(--mono);font-size:11px;color:var(--cream);opacity:.85;margin-top:8px;}
 
     /* person modal */
@@ -156,8 +161,11 @@
 
   <!-- shared lightbox -->
   <div class="lb" id="lb">
+    <button class="nav prev" id="lbPrev" aria-label="Previous image">‹</button>
     <img id="lbImg" alt="" />
+    <button class="nav next" id="lbNext" aria-label="Next image">›</button>
     <div class="bar">
+      <span class="counter" id="lbCounter"></span>
       <a class="dl" id="lbDownload" href="#">Download full-res</a>
       <a class="open2" id="lbOpen" href="#" target="_blank" rel="noopener">Open original ↗</a>
       <button class="close" id="lbClose">Close ✕</button>
@@ -400,26 +408,67 @@
         ${im.language?`<span class="tag">${esc(im.language)}</span>`:""}
         ${im.width?`<span class="dim">${im.width}×${im.height}</span>`:""}
       </div>`).join("");
-      grid.querySelectorAll(".gimg").forEach(el=> el.addEventListener("click", ()=> openLb(list[Number(el.dataset.i)])));
+      grid.querySelectorAll(".gimg").forEach(el=> el.addEventListener("click", ()=> openLbAt(GAL[curTab]||[], Number(el.dataset.i))));
     }
 
-    // ── Shared lightbox ──
-    function openLb(im){
+    // ── Shared lightbox slideshow ──
+    // Prev/Next cycle within the CURRENTLY ACTIVE tab's list (posters or
+    // backdrops), in grid order, with wrap-around. Download/Open/caption
+    // always target the image currently shown.
+    let LB_LIST = [], LB_INDEX = 0;
+    function openLbAt(list, i){
+      if (!list || !list.length) return;
+      LB_LIST = list;
+      LB_INDEX = ((i % list.length) + list.length) % list.length;
+      showLb();
+      $("#lb").classList.add("open");
+    }
+    function showLb(){
+      const im = LB_LIST[LB_INDEX]; if (!im) return;
       $("#lbImg").src = im.fullUrl; $("#lbOpen").href = im.fullUrl;
       $("#lbDownload").href = "/api/download?url="+encodeURIComponent(im.fullUrl);
       $("#lbCap").textContent = (im.width?im.width+"×"+im.height+" · ":"")+"full resolution"+(im.source?" · "+im.source:"")+(im.language?" · "+im.language:"");
-      $("#lb").classList.add("open");
+      const multi = LB_LIST.length > 1;
+      $("#lbCounter").textContent = multi ? (LB_INDEX + 1) + " / " + LB_LIST.length : "";
+      $("#lbPrev").classList.toggle("hidden", !multi);
+      $("#lbNext").classList.toggle("hidden", !multi);
+      preloadNext();
+    }
+    function navLb(dir){
+      if (LB_LIST.length < 2) return;
+      LB_INDEX = (LB_INDEX + dir + LB_LIST.length) % LB_LIST.length;
+      showLb();
+    }
+    function preloadNext(){
+      if (LB_LIST.length < 2) return;
+      const n = LB_LIST[(LB_INDEX + 1) % LB_LIST.length];
+      if (n && n.fullUrl){ const img = new Image(); img.src = n.fullUrl; }
     }
     function closeLb(){ $("#lb").classList.remove("open"); $("#lbImg").src=""; }
     $("#lbClose").addEventListener("click", closeLb);
+    $("#lbPrev").addEventListener("click", e=>{ e.stopPropagation(); navLb(-1); });
+    $("#lbNext").addEventListener("click", e=>{ e.stopPropagation(); navLb(1); });
     $("#lb").addEventListener("click", e=>{ if(e.target===$("#lb")) closeLb(); });
+    // Touch swipe: left-swipe = Next, right-swipe = Prev.
+    let lbTsX = 0, lbTsY = 0;
+    $("#lb").addEventListener("touchstart", e=>{ if(e.touches.length===1){ lbTsX=e.touches[0].clientX; lbTsY=e.touches[0].clientY; } }, {passive:true});
+    $("#lb").addEventListener("touchend", e=>{
+      const t = e.changedTouches[0]; if(!t) return;
+      const dx = t.clientX - lbTsX, dy = t.clientY - lbTsY;
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) navLb(dx < 0 ? 1 : -1);
+    }, {passive:true});
 
     // ── Person modal ──
     // Clicking a cast/crew person opens the rich person page (bio + age +
     // filmography poster grid + full image gallery).
     function openPerson(pid){ location.href = "/person.html?id=" + pid; }
 
-    document.addEventListener("keydown", e=>{ if(e.key==="Escape" && $("#lb").classList.contains("open")) closeLb(); });
+    document.addEventListener("keydown", e=>{
+      if (!$("#lb").classList.contains("open")) return;
+      if (e.key === "Escape") closeLb();
+      else if (e.key === "ArrowLeft"){ e.preventDefault(); navLb(-1); }
+      else if (e.key === "ArrowRight"){ e.preventDefault(); navLb(1); }
+    });
   </script>
 </body>
 </html>
