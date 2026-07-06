@@ -30,9 +30,9 @@
 
     .searchzone{max-width:640px;margin:26px auto 8px;position:relative;}
     .search{display:flex;gap:10px;}
-    .search input{flex:1;font-family:var(--serif);font-size:20px;color:var(--ink);background:#fbf6ea;border:1.5px solid var(--ink);border-radius:2px;padding:12px 16px;outline:none;}
+    .search input{flex:1;min-width:0;font-family:var(--serif);font-size:20px;color:var(--ink);background:#fbf6ea;border:1.5px solid var(--ink);border-radius:2px;padding:12px 16px;outline:none;}
     .search input:focus{border-color:var(--vermillion);box-shadow:0 0 0 3px rgba(163,50,35,.14);}
-    .search button{font-family:var(--mono);font-weight:700;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--cream);background:var(--vermillion);border:1.5px solid var(--maroon);border-radius:2px;padding:0 22px;cursor:pointer;}
+    .search button{flex:0 0 auto;min-height:48px;font-family:var(--mono);font-weight:700;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--cream);background:var(--vermillion);border:1.5px solid var(--maroon);border-radius:2px;padding:0 22px;cursor:pointer;}
     .search button:hover{background:var(--oxblood);}
     .hint{font-family:var(--mono);font-size:10px;color:var(--ink-soft);text-align:center;margin-top:6px;letter-spacing:.02em;}
 
@@ -71,6 +71,20 @@
     .cand .badge.company{background:var(--oxblood);}
     .hidden{display:none!important;}
     footer{text-align:center;font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-soft);margin-top:50px;border-top:1px solid var(--line);padding-top:14px;}
+
+    /* ── Mobile (phones) ── */
+    @media (max-width:520px){
+      .wrap{padding:20px 14px 60px;}
+      .searchzone{margin-top:20px;}
+      /* Stack the button full-width under the input for a comfortable tap target */
+      .search{flex-direction:column;gap:8px;}
+      .search input{font-size:17px;padding:12px 14px;}
+      .search button{width:100%;padding:13px 22px;}
+      .hint{font-size:9px;}
+      /* Two readable, tappable columns for result cards */
+      .cands{grid-template-columns:repeat(2,1fr);gap:10px;}
+      .sitem .stitle{font-size:14px;}
+    }
   </style>
 </head>
 <body>
