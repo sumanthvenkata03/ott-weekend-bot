@@ -17,14 +17,14 @@ vi.mock("../../src/shared/cache.js", () => ({
 vi.mock("ofetch", () => ({ ofetch: vi.fn() }));
 
 import { ofetch } from "ofetch";
-import { parseQuery, rankHits, type MultiHit } from "./search.js";
+import { parseQuery, rankHits, rankCandidates, type MultiHit, type CompanyHit } from "./search.js";
 import {
   tmdbSource, fanartSource, tvdbSource, youtubeSource,
-  wikidataSource, wikipediaPersonSource,
+  wikidataSource, wikipediaPersonSource, wikipediaLangSource,
   extractWikidataImages, extractCommonsCategory,
   dedupeImages, dedupeVideos, type ImageItem, type VideoItem,
 } from "./sources.js";
-import { computeAge, buildFilmography, movieProviders } from "./lookup.js";
+import { computeAge, buildFilmography, movieProviders, selectStillFilms, filmImagesToStills } from "./lookup.js";
 import { overlapRatio, titleTokens } from "./wiki.js";
 import { runCheck, describeError } from "./keycheck.js";
 
@@ -277,6 +277,114 @@ describe("person-image sources (Wikidata/Commons/Wikipedia/TVDB)", () => {
     const out = dedupeImages(items);
     expect(out.map((i) => i.fullUrl)).toEqual(["u1", "u2", "u3"]);
     expect(out.map((i) => i.source)).toEqual(["tmdb", "wikipedia", "tvdb"]); // first-seen wins for u1
+  });
+});
+
+describe("cinema-wide search — people + movies + series + companies", () => {
+  const personSneha: MultiHit = { id: 100, media_type: "person", name: "Sneha", known_for_department: "Acting", popularity: 1, known_for: [{ title: "Pattas", media_type: "movie" }] };
+  const movieSneha: MultiHit = { id: 200, media_type: "movie", title: "Sneha", popularity: 6, vote_count: 300 };
+  // Same name, differing department — isolates the ROLE-keyword boost.
+  const rajDirector: MultiHit = { id: 300, media_type: "person", name: "Rajamouli", known_for_department: "Directing", popularity: 12 };
+  const rajActor: MultiHit = { id: 301, media_type: "person", name: "Rajamouli", known_for_department: "Acting", popularity: 3 };
+  const thaman: MultiHit = { id: 400, media_type: "person", name: "Thaman S", known_for_department: "Sound", popularity: 8 };
+  const companyMythri: CompanyHit = { id: 500, name: "Mythri Movie Makers", origin_country: "IN" };
+
+  it("tokenizer extracts TYPE/ROLE keywords, strips them from the name, order-independent", () => {
+    const a = parseQuery("actor sneha"), b = parseQuery("sneha actor");
+    expect(a.titleTokens).toEqual(["sneha"]);
+    expect(a.typeBoosts).toEqual(["person"]);
+    expect(a.roleDept).toBe("Acting");
+    expect(a.titleTokens).toEqual(b.titleTokens);
+    expect(a.typeBoosts).toEqual(b.typeBoosts);
+    expect(a.roleDept).toBe(b.roleDept);
+    expect(parseQuery("sneha movie").typeBoosts).toEqual(["movie"]);
+    expect(parseQuery("director rajamouli").roleDept).toBe("Directing");
+    expect(parseQuery("music director thaman").roleDept).toBe("Sound");   // music beats director
+  });
+
+  it("DEFAULT priority is people-first (person outranks same-name movie)", () => {
+    const r = rankCandidates(parseQuery("sneha"), [movieSneha, personSneha], []);
+    expect(r[0]!.type).toBe("person");
+  });
+
+  it("'actor sneha' boosts the PERSON above the same-name MOVIE (and order-independent)", () => {
+    expect(rankCandidates(parseQuery("actor sneha"), [movieSneha, personSneha], [])[0]!.type).toBe("person");
+    const a = rankCandidates(parseQuery("actor sneha"), [movieSneha, personSneha], []).map((x) => `${x.type}:${x.id}`);
+    const b = rankCandidates(parseQuery("sneha actor"), [movieSneha, personSneha], []).map((x) => `${x.type}:${x.id}`);
+    expect(a).toEqual(b);
+  });
+
+  it("'sneha movie' boosts the MOVIE to the top", () => {
+    expect(rankCandidates(parseQuery("sneha movie"), [personSneha, movieSneha], [])[0]!.type).toBe("movie");
+  });
+
+  it("'director rajamouli' ranks the Directing person first (order-independent)", () => {
+    const top = rankCandidates(parseQuery("director rajamouli"), [rajActor, rajDirector], [])[0]!;
+    expect(top.id).toBe(300);
+    expect(top.knownForDepartment).toBe("Directing");
+    const a = rankCandidates(parseQuery("director rajamouli"), [rajActor, rajDirector], []).map((x) => x.id);
+    const b = rankCandidates(parseQuery("rajamouli director"), [rajActor, rajDirector], []).map((x) => x.id);
+    expect(a).toEqual(b);
+  });
+
+  it("'composer/music' boosts a Sound-department person", () => {
+    const top = rankCandidates(parseQuery("music thaman"), [thaman], [])[0]!;
+    expect(top.type).toBe("person");
+    expect(top.knownForDepartment).toBe("Sound");
+  });
+
+  it("companies are included and are label-only (non-clickable)", () => {
+    const r = rankCandidates(parseQuery("mythri"), [], [companyMythri]);
+    const co = r.find((x) => x.type === "company");
+    expect(co).toBeTruthy();
+    expect(co!.title).toContain("Mythri");
+    expect(co!.clickable).toBe(false);
+  });
+
+  it("back-compat: rankHits still returns mediaType for movie/tv (existing movie search)", () => {
+    const r = rankHits(parseQuery("sneha"), [movieSneha]);
+    expect(r[0]!.mediaType).toBe("movie");
+  });
+});
+
+describe("film-still harvesting + other-language Wikipedia (branch: more images)", () => {
+  const fg = [
+    { id: 1, title: "A", mediaType: "movie", role: "Actor", department: "cast", popularity: 5 },
+    { id: 2, title: "B (series)", mediaType: "tv", role: "Actor", department: "cast", popularity: 100 },
+    { id: 3, title: "C", mediaType: "movie", role: "Actor", department: "cast", popularity: 20 },
+    { id: 4, title: "D", mediaType: "movie", role: "Actor", department: "cast", popularity: 50 },
+  ] as unknown as Parameters<typeof selectStillFilms>[0];
+
+  it("selectStillFilms takes MOVIES only, most-popular first, capped", () => {
+    expect(selectStillFilms(fg, 2).map((f) => f.id)).toEqual([4, 3]);   // tv (id 2) excluded
+    expect(selectStillFilms(fg, 10).map((f) => f.id)).toEqual([4, 3, 1]);
+  });
+
+  it("filmImagesToStills keeps BACKDROPS only, tags kind=still + film context, preserves source", () => {
+    const imgs: ImageItem[] = [
+      { source: "tmdb", kind: "poster", fullUrl: "p", thumbUrl: "p" },      // poster dropped
+      { source: "tmdb", kind: "backdrop", fullUrl: "b1", thumbUrl: "b1" },
+      { source: "fanart", kind: "backdrop", fullUrl: "b2", thumbUrl: "b2" },
+    ];
+    const stills = filmImagesToStills(imgs, "Film X");
+    expect(stills.map((s) => s.fullUrl)).toEqual(["b1", "b2"]);
+    expect(stills.every((s) => s.kind === "still" && s.context === "Film X")).toBe(true);
+    expect(stills[0]!.source).toBe("tmdb");                                 // source label preserved
+  });
+
+  it("portraits win over stills on a shared URL (portraits merged first)", () => {
+    const portraits: ImageItem[] = [{ source: "tmdb", kind: "profile", fullUrl: "u1", thumbUrl: "t" }];
+    const stills: ImageItem[] = [
+      { source: "fanart", kind: "still", fullUrl: "u1", thumbUrl: "t", context: "F" }, // same URL as portrait
+      { source: "tmdb", kind: "still", fullUrl: "u2", thumbUrl: "t", context: "F" },
+    ];
+    const out = dedupeImages([...portraits, ...stills]);
+    expect(out.map((i) => i.fullUrl)).toEqual(["u1", "u2"]);
+    expect(out[0]!.kind).toBe("profile");                                   // u1 stays a portrait
+  });
+
+  it("other-language Wikipedia adapter is graceful-empty when the person can't be resolved", async () => {
+    expect(await wikipediaLangSource.getPersonImages({ tmdbId: 1 })).toEqual({ items: [] });
   });
 });
 

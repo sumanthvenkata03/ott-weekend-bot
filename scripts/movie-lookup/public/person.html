@@ -51,10 +51,15 @@
     .film .fr{font-family:var(--mono);font-size:10px;color:var(--ink-soft);margin-top:3px;}
     .film .fbadge{display:inline-block;font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--cream);background:var(--brass);padding:1px 4px;border-radius:2px;margin-top:4px;}
 
+    .tabs{display:flex;gap:8px;margin:0 0 14px;flex-wrap:wrap;}
+    .tab{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:6px 14px;border:1px solid var(--ink);background:#fbf6ea;cursor:pointer;border-radius:2px;}
+    .tab.active{background:var(--ink);color:var(--cream);}
     .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;}
     .gimg{position:relative;border:1px solid var(--line);border-radius:2px;overflow:hidden;background:#e6dcc6;cursor:pointer;}
     .gimg img{width:100%;display:block;}
     .gimg .src{position:absolute;top:6px;right:6px;font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;background:var(--green);color:var(--cream);padding:2px 6px;border-radius:2px;}
+    .gimg .src.still{background:var(--oxblood);}
+    .gimg .ctx{position:absolute;top:6px;left:6px;right:34px;font-family:var(--mono);font-size:9px;font-weight:700;background:rgba(26,22,20,.82);color:var(--cream);padding:2px 6px;border-radius:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .gimg .dim{position:absolute;bottom:6px;right:6px;font-family:var(--mono);font-size:9px;background:rgba(26,22,20,.72);color:var(--cream);padding:2px 6px;border-radius:2px;}
 
     .lb{position:fixed;inset:0;background:rgba(20,16,14,.93);display:none;align-items:center;justify-content:center;flex-direction:column;z-index:120;padding:24px;}
@@ -134,10 +139,6 @@
           : `<div class="film">${inner}</div>`;
       }).join("") : `<div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft)">No filmography available.</div>`;
 
-      const gallery = IMAGES.length
-        ? IMAGES.map((im,i)=>`<div class="gimg" data-i="${i}"><img loading="lazy" src="${esc(im.thumbUrl)}" alt=""/><span class="src">${esc(im.source)}</span>${im.width?`<span class="dim">${im.width}×${im.height}</span>`:""}</div>`).join("")
-        : `<div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft)">No images available.</div>`;
-
       $("#body").innerHTML = `
         <div class="phead">
           <div>${pic}</div>
@@ -152,10 +153,48 @@
         <div class="seclabel"><span>Filmography</span><span class="count">${filmo.length} title${filmo.length===1?"":"s"}</span></div>
         <div class="filmo">${filmoHtml}</div>
 
-        <div class="seclabel"><span>Image Gallery</span><span class="count">${IMAGES.length} image${IMAGES.length===1?"":"s"}${(p.imageSources||[]).length?"  ·  "+p.imageSources.join(", "):""}</span></div>
-        <div class="grid">${gallery}</div>`;
+        <div class="seclabel"><span>Image Gallery</span><span class="count" id="galCount"></span></div>
+        <div class="tabs" id="galTabs">
+          <div class="tab active" data-f="all">All</div>
+          <div class="tab" data-f="portrait">Portraits</div>
+          <div class="tab" data-f="still">Film stills</div>
+        </div>
+        <div class="grid" id="galGrid"></div>`;
       $("#body").classList.remove("hidden");
-      $("#body").querySelectorAll(".gimg").forEach(el=> el.addEventListener("click", ()=> openLb(IMAGES[Number(el.dataset.i)])));
+      setupGallery(p);
+    }
+
+    let GALFILTER = "all";
+    function setupGallery(p){
+      const st = p.imageStats || { portraits: 0, stills: 0, stillFilms: 0 };
+      // hide empty tabs
+      $("#galTabs").querySelector('[data-f="portrait"]').style.display = st.portraits ? "" : "none";
+      $("#galTabs").querySelector('[data-f="still"]').style.display = st.stills ? "" : "none";
+      $("#galTabs").querySelectorAll(".tab").forEach(t=> t.addEventListener("click", ()=>{
+        GALFILTER = t.dataset.f;
+        $("#galTabs").querySelectorAll(".tab").forEach(x=>x.classList.toggle("active", x===t));
+        renderGallery(p);
+      }));
+      renderGallery(p);
+    }
+    function renderGallery(p){
+      const st = p.imageStats || { portraits: 0, stills: 0, stillFilms: 0 };
+      const picks = IMAGES.map((im,i)=>({im,i})).filter(({im})=>
+        GALFILTER==="all" ? true : GALFILTER==="still" ? im.kind==="still" : im.kind!=="still");
+      $("#galCount").textContent =
+        `${IMAGES.length} total · ${st.portraits} portraits · ${st.stills} film stills` +
+        (st.stillFilms?` (from ${st.stillFilms} films)`:"") +
+        ((p.imageSources||[]).length?`  ·  ${p.imageSources.join(", ")}`:"");
+      const grid = $("#galGrid");
+      grid.innerHTML = picks.length
+        ? picks.map(({im,i})=>`<div class="gimg" data-i="${i}">
+            <img loading="lazy" src="${esc(im.thumbUrl)}" alt=""/>
+            <span class="src ${im.kind==='still'?'still':''}">${esc(im.source)}</span>
+            ${im.kind==='still'&&im.context?`<span class="ctx">still · ${esc(im.context)}</span>`:""}
+            ${im.width?`<span class="dim">${im.width}×${im.height}</span>`:""}
+          </div>`).join("")
+        : `<div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft)">No images in this view.</div>`;
+      grid.querySelectorAll(".gimg").forEach(el=> el.addEventListener("click", ()=> openLb(IMAGES[Number(el.dataset.i)])));
     }
 
     function openLb(im){

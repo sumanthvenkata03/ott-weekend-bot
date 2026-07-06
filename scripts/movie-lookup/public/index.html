@@ -49,6 +49,8 @@
     .sitem .smeta{font-family:var(--mono);font-size:10px;color:var(--ink-soft);margin-top:2px;}
     .sitem .sbadge{font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--cream);background:var(--green);padding:1px 5px;border-radius:2px;}
     .sitem .sbadge.tv{background:var(--brass);color:var(--ink);}
+    .sitem .sbadge.person{background:var(--vermillion);}
+    .sitem .sbadge.company{background:var(--oxblood);}
     .sfoot{font-family:var(--mono);font-size:9px;color:var(--ink-soft);text-align:center;padding:5px;letter-spacing:.06em;text-transform:uppercase;background:#fbf6ea;}
 
     .status{text-align:center;font-family:var(--mono);font-size:12px;color:var(--ink-soft);min-height:18px;margin:4px 0 0;}
@@ -65,6 +67,8 @@
     .cand .m{font-family:var(--mono);font-size:10px;color:var(--ink-soft);margin-top:3px;}
     .cand .badge{display:inline-block;font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--cream);background:var(--green);padding:1px 5px;border-radius:2px;margin-top:4px;}
     .cand .badge.tv{background:var(--brass);color:var(--ink);}
+    .cand .badge.person{background:var(--vermillion);}
+    .cand .badge.company{background:var(--oxblood);}
     .hidden{display:none!important;}
     footer{text-align:center;font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-soft);margin-top:50px;border-top:1px solid var(--line);padding-top:14px;}
   </style>
@@ -142,25 +146,40 @@
       }
     }
 
+    // ── Type-aware helpers (person / movie / series / company) ──
+    const TYPE_LABEL = { person:"person", movie:"film", series:"series", company:"company" };
+    const TYPE_CLS = { person:"person", movie:"", series:"tv", company:"company" };
+    function isClickable(c){ return c.clickable !== false && (c.type === "person" || c.type === "movie"); }
+    function typeHref(c){ return c.type==="person" ? `/person.html?id=${c.id}` : c.type==="movie" ? `/movie.html?id=${c.id}` : "javascript:void(0)"; }
+    function typeSub(c){
+      if (c.type==="person") return (c.knownForDepartment||"person") + (c.knownForTitle ? " · " + c.knownForTitle : "");
+      if (c.type==="company") return c.originCountry ? "production company · " + c.originCountry : "production company";
+      return (c.year||"—") + (c.language ? " · " + c.language : "");
+    }
+    function blockMsg(c){
+      return c.type==="series" ? "Series detail isn’t supported (movie-only)."
+           : c.type==="company" ? "Company rows are label-only for now." : "";
+    }
+
     function renderSuggest(cands){
       curSug = cands; activeIdx = -1;
       if (!cands.length){ closeSuggest(); return; }
       sug.innerHTML = cands.map((c, i) => {
-        const href = c.mediaType === "movie" ? `/movie.html?id=${c.id}` : "javascript:void(0)";
+        const href = isClickable(c) ? typeHref(c) : "javascript:void(0)";
         const thumb = c.thumb ? `<span class="st" style="background-image:url('${esc(c.thumb)}')"></span>` : `<span class="st empty">no img</span>`;
-        const badge = c.mediaType === "tv" ? `<span class="sbadge tv">series</span>` : `<span class="sbadge">film</span>`;
-        return `<a class="sitem" data-i="${i}" data-type="${c.mediaType}" data-id="${c.id}" href="${href}">
+        const badge = `<span class="sbadge ${TYPE_CLS[c.type]||""}">${TYPE_LABEL[c.type]||c.type}</span>`;
+        return `<a class="sitem" data-i="${i}" data-type="${c.type}" data-id="${c.id}" href="${href}">
           ${thumb}
           <span class="sinfo">
             <span class="stitle">${esc(c.title)}</span>
-            <span class="smeta">${esc(c.year||"—")}${c.language?" · "+esc(c.language):""} · score ${esc(c.score)}</span>
+            <span class="smeta">${esc(typeSub(c))} · score ${esc(c.score)}</span>
           </span>
           ${badge}
         </a>`;
       }).join("") + `<div class="sfoot">↵ open · ↑↓ navigate · Enter (empty) = full results</div>`;
       sug.classList.add("open");
-      sug.querySelectorAll(".sitem").forEach(el => el.addEventListener("click", (e) => {
-        if (el.dataset.type === "tv"){ e.preventDefault(); setStatus("Series detail isn’t supported (movie-only).", true); }
+      sug.querySelectorAll(".sitem").forEach((el,idx) => el.addEventListener("click", (e) => {
+        if (!isClickable(cands[idx])){ e.preventDefault(); setStatus(blockMsg(cands[idx]), true); }
       }));
     }
     function closeSuggest(){ sug.classList.remove("open"); sug.innerHTML=""; curSug=[]; activeIdx=-1; }
@@ -178,7 +197,7 @@
       else if (e.key === "ArrowUp"){ e.preventDefault(); highlight(Math.max(activeIdx-1, -1)); }
       else if (e.key === "Enter" && activeIdx >= 0){
         const c = curSug[activeIdx];
-        if (c && c.mediaType === "movie"){ e.preventDefault(); location.href = "/movie.html?id=" + c.id; }
+        if (c && isClickable(c)){ e.preventDefault(); location.href = typeHref(c); }
       } else if (e.key === "Escape"){ closeSuggest(); }
     });
     document.addEventListener("click", (e) => { if (!e.target.closest(".searchzone")) closeSuggest(); });
@@ -204,7 +223,9 @@
         if (!data.candidates.length) { setStatus("No matches found.", true); return; }
         const p = data.parsed || {};
         const bits = [];
-        if (p.titleTokens && p.titleTokens.length) bits.push("title: " + p.titleTokens.join(" "));
+        if (p.titleTokens && p.titleTokens.length) bits.push("query: " + p.titleTokens.join(" "));
+        if (p.typeBoosts && p.typeBoosts.length) bits.push("boost: " + p.typeBoosts.join(", "));
+        if (p.roleDept) bits.push("role: " + p.roleDept);
         if (p.languages && p.languages.length) bits.push("language: " + p.languages.join(", "));
         if (p.year) bits.push("year: " + p.year);
         setStatus(data.count + " result" + (data.count === 1 ? "" : "s") + " (ranked)" + (bits.length ? "  ·  " + bits.join("  ·  ") : ""));
@@ -214,23 +235,23 @@
 
     function render(cands) {
       $("#candCount").textContent = cands.length + " result" + (cands.length === 1 ? "" : "s");
-      $("#cands").innerHTML = cands.map((c) => {
+      $("#cands").innerHTML = cands.map((c, i) => {
         const thumb = c.thumb ? `<span class="thumb" style="background-image:url('${esc(c.thumb)}')"></span>` : `<span class="thumb empty">no image</span>`;
-        const badge = c.mediaType === "tv" ? `<span class="badge tv">series</span>` : `<span class="badge">film</span>`;
-        const href = c.mediaType === "movie" ? `/movie.html?id=${c.id}` : "javascript:void(0)";
-        return `<a class="cand" href="${href}" ${c.mediaType==="tv"?'data-tv="1"':''}>
+        const badge = `<span class="badge ${TYPE_CLS[c.type]||""}">${TYPE_LABEL[c.type]||c.type}</span>`;
+        const href = isClickable(c) ? typeHref(c) : "javascript:void(0)";
+        return `<a class="cand" href="${href}" data-i="${i}">
           ${thumb}
           <div class="meta">
             <div class="t">${esc(c.title)}</div>
-            <div class="m">${esc(c.year || "—")}${c.language ? " · " + esc(c.language) : ""}</div>
+            <div class="m">${esc(typeSub(c))}</div>
             <div class="m" style="color:var(--brass);font-weight:700">score ${esc(c.score)}${c.voteAverage ? " · ★" + c.voteAverage.toFixed(1) : ""}</div>
             ${badge}
           </div>
         </a>`;
       }).join("");
       $("#candsWrap").classList.remove("hidden");
-      $("#cands").querySelectorAll('.cand[data-tv="1"]').forEach((el) =>
-        el.addEventListener("click", (e) => { e.preventDefault(); setStatus("Series detail isn’t supported (movie-only enrichment).", true); }));
+      $("#cands").querySelectorAll(".cand").forEach((el) =>
+        el.addEventListener("click", (e) => { const c = cands[Number(el.dataset.i)]; if (!isClickable(c)){ e.preventDefault(); setStatus(blockMsg(c), true); } }));
     }
   </script>
 </body>

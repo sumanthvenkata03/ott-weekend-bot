@@ -76,25 +76,43 @@ nothing to `cache.sqlite` and runs no job. (The offline *status-mapping* logic i
 | `GET /movie.html?id={tmdbId}` | Full detail page: all fields, **merged image gallery** (TMDb + OMDb + Fanart.tv + TVDB), **Where to Watch** (providers), **Videos/Trailers** (TMDb + YouTube), **Wikipedia background**, full clickable cast + crew, and a combined **raw-JSON** view (movie · credits · omdb · images · videos · wiki · providers). |
 | `GET /person.html?id={personId}` | Rich person page: bio, **age** (or age-at-death), birthday/place, a.k.a., profile, **filmography poster grid** (click a film → its detail), and full image gallery (view + download). |
 
-## Search — Google-style (search.ts)
+## Search — cinema-wide & intelligent (search.ts)
 
-Type any words in any order. `/api/search`:
-1. **Tokenizes** the query; **language words** (telugu, tamil, hindi, …) and a
-   **4-digit year** are pulled out as SOFT signals — they BOOST matching results,
-   they never exclude anything. The remaining words are the title query.
-2. **Order-independent**: title tokens are sorted before querying and scoring is
-   fully set-based, so `telugu boss` and `boss telugu` return byte-identical sets.
-3. **Broadens recall**: TMDb `/search/multi` (movies + series), combined query +
-   per-token merge/dedupe. When a language/year signal is present it pages deeper
-   (TMDb `/search` has no content-language filter, so a low-popularity match like a
-   Telugu "Boss" sits on page ~10) so the boost has candidates to lift.
-4. **Ranks** best-first: token presence (whole-word > substring) + same-word-set
-   exact bonus + language/year boost + popularity/votes tiebreakers.
-5. **Caps** to top ~30 (`&limit=` up to 60). Recall depth tunable via
-   `MOVIE_LOOKUP_DEEP_PAGES` (default 10) / `MOVIE_LOOKUP_PLAIN_PAGES` (default 2).
+One box, one ranked dropdown of **PEOPLE** (actors/directors/composers/producers/
+writers), **MOVIES**, **SERIES**, and **PRODUCTION COMPANIES**. Type any words in
+any order. `/api/search`:
 
-All search calls are **uncached** (no `cache.sqlite` writes). Series are included
-and labelled; series have no detail page (detail is movie-only).
+1. **Tokenizes** the query. **Language** (telugu/…), **4-digit year**, and soft
+   **TYPE/ROLE keywords** are pulled out as RANK signals (they boost, never
+   exclude); the rest is the name/title query.
+   - `movie`/`film` → boost MOVIE · `actor`/`actress`/`cast` → PERSON (Acting) ·
+     `director` → PERSON (Directing) · `composer`/`music`/`musician` → PERSON
+     (Sound) · `producer` → PERSON (Production) · `writer` → PERSON (Writing) ·
+     `series`/`show`/`tv` → SERIES · `studio`/`company`/`production`/`banner` →
+     COMPANY. ("music director" → Sound; Sound outranks Directing.)
+2. **Default priority PEOPLE > MOVIES > SERIES > COMPANIES** — a person outranks a
+   same-name movie by default (even a more popular one). A matching TYPE/ROLE
+   keyword strongly steers that type to the top **without excluding** the others.
+3. **Order-independent**: `actor sneha` ≡ `sneha actor`, `director rajamouli` ≡
+   `rajamouli director` (tokens sorted for the API query; scoring is set-based).
+4. **Sources** (all via the existing `TMDB_API_KEY`): `/search/multi` (person +
+   movie + tv) + dedicated `/search/person` & `/search/movie` recall (so a type
+   buried in the popularity-mixed multi still enters the set) + `/search/company`.
+5. **Ranks**: name relevance (exact > all-tokens > partial) dominates; small type
+   base sets the default priority; explicit TYPE keyword +100 and ROLE match +35
+   steer; language/year soft boosts; popularity/votes tiebreak. Caps ~30
+   (`&limit=` up to 60).
+
+Live behavior: `sneha` → person Sneha first; `actor sneha` → person top; `sneha
+movie` → movie top; `director rajamouli` → S. S. Rajamouli (Directing) top;
+`thaman` → S. Thaman (Sound); `mythri company` → the studio top.
+
+Dropdown rows show a TYPE badge (PERSON/FILM/SERIES/COMPANY), thumbnail, and a
+secondary line (people: dept + top known-for; movies: year + language; companies:
+country). **Click-through**: person → person page, movie → movie page, series →
+"not supported" message, **company → label-only** (non-clickable) for now.
+
+All search calls are **uncached** (no `cache.sqlite` writes).
 
 ## Endpoints
 
@@ -129,19 +147,34 @@ art + **people images** — key), `youtubeSource` (YouTube trailers — key),
 
 ### Person image gallery — multi-source (no new keys)
 
-A person's gallery aggregates + dedupes across: **TMDb** person images, **Wikidata
-→ Wikimedia Commons** (P18 image + P373 category — the highest-yield keyless
-source), **Wikipedia** lead image (search-resolved, name-guarded), and **TheTVDB**
-people images (reuses `TVDB_API_KEY`). Each image is tagged with its source. The
-person is resolved once (TMDb `external_ids` → `wikidata_id` / `imdb_id`; SPARQL
-`P345` fallback) and that identity is passed to every adapter.
+A person's gallery aggregates + dedupes across, and the person page groups them as
+**Portraits** vs **Film stills**:
+
+**Portraits** (verified person images): **TMDb** person images · **Wikidata →
+Wikimedia Commons** (P18 + P373 category **with one level of subcategory
+traversal**) · **Wikipedia** lead image (search-resolved, name-guarded) ·
+**other-language Wikipedias** (ta/te/hi/ml/kn/bn/mr, resolved via Wikidata
+sitelinks so the exact per-language article is used) · **TheTVDB** people images
+(reuses `TVDB_API_KEY`). The person is resolved once (TMDb `external_ids` →
+`wikidata_id` / `imdb_id`; SPARQL `P345` fallback).
+
+**Film stills** (the person appears in these — film backdrops, not verified
+portraits): the backdrops of their **top-N films** (movies, by popularity) pulled
+from the existing movie-image aggregation (TMDb + Fanart.tv + TVDB), each tagged
+`still · <film title>`. Bounded-concurrency, cost-capped.
 
 - **No NEW key required** — Wikidata / Commons / Wikipedia are keyless; TVDB reuses
-  the existing `TVDB_API_KEY`. (Fanart.tv has **no** actor/person image API — only
-  movie/tv/music — so it contributes nothing for people, by design.)
-- Yield scales with how well-photographed the person is on open sources, e.g.
-  Samantha Ruth Prabhu → 32 images (Commons category has 24), Nayanthara → 12,
-  vs a sparsely-covered person → a handful. Duplicate URLs across sources are merged.
+  the existing `TVDB_API_KEY`. (Fanart.tv has **no** actor/person image API.)
+- Wikimedia rate-limits parallelism, so ALL Wikimedia calls go through a small
+  serial limiter with retry/backoff — reliable, polite, no self-inflicted 429s.
+- Live yield (branch): Sneha 3 → **89** · Nayanthara 12 → **123** · Samantha 32 →
+  **269**. Duplicate URLs across sources are merged (portraits win over stills).
+
+**Env knobs** (all optional):
+`MOVIE_LOOKUP_STILL_FILMS` (default 12) — films to harvest stills from ·
+`MOVIE_LOOKUP_WIKI_LANGS` (default `en,ta,te,hi,ml,kn,bn,mr`) — language wikis ·
+`MOVIE_LOOKUP_COMMONS_MAX` (default 60) — max Commons files per person ·
+`MOVIE_LOOKUP_WM_CONCURRENCY` (default 1) — concurrent Wikimedia requests.
 
 ## Tests + full regression
 

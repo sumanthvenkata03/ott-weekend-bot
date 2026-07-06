@@ -68,14 +68,15 @@ export async function omdbGet(params: Record<string, string>): Promise<Record<st
 
 // ── Common shapes ────────────────────────────────────────────────────────────
 export interface ImageItem {
-  source: string;                       // "tmdb" | "omdb" | future adapters
-  kind: "poster" | "backdrop" | "profile";
+  source: string;                       // "tmdb" | "omdb" | "wikidata" | "wikipedia:ta" | …
+  kind: "poster" | "backdrop" | "profile" | "still";
   fullUrl: string;                      // full / original resolution
   thumbUrl: string;                     // grid thumbnail
   width?: number;
   height?: number;
   language?: string;                    // display name, or undefined = language-neutral
   voteAverage?: number;
+  context?: string;                     // e.g. the film title for a harvested "still"
 }
 
 export interface VideoItem {
@@ -372,6 +373,32 @@ const WD_API = "https://www.wikidata.org/w/api.php";
 const WD_SPARQL = "https://query.wikidata.org/sparql";
 const COMMONS_API = "https://commons.wikimedia.org/w/api.php";
 const WIKI_UA = "TBSI-movie-lookup/1.0 (internal reference tool)";
+const COMMONS_MAX_FILES = Number.parseInt(process.env.MOVIE_LOOKUP_COMMONS_MAX ?? "60", 10) || 60;
+
+// Wikimedia (Wikidata/Commons/Wikipedia) rate-limits aggressive parallelism. The
+// person-image fan-out can fire ~15 Wikimedia calls at once (entity + sitelinks +
+// commons category/subcats/imageinfo + several language summaries), which triggers
+// 429s and silently drops images. Gate ALL Wikimedia requests through a small
+// concurrency limiter so they stay polite and reliable, regardless of caller.
+const WM_CONCURRENCY = Number.parseInt(process.env.MOVIE_LOOKUP_WM_CONCURRENCY ?? "1", 10) || 1;
+let wmActive = 0;
+const wmWaiters: (() => void)[] = [];
+async function wmFetch<T>(url: string, opts: Parameters<typeof ofetch>[1]): Promise<T> {
+  if (wmActive >= WM_CONCURRENCY) await new Promise<void>((res) => wmWaiters.push(res));
+  wmActive++;
+  try {
+    // Force strong retry/backoff on ALL Wikimedia calls (overrides any per-call
+    // retry) so a transient 429 under load recovers instead of dropping images.
+    return await ofetch<T>(url, { ...opts, retry: 3, retryDelay: 600 });
+  } finally {
+    wmActive--;
+    const w = wmWaiters.shift();
+    if (w) w();
+  }
+}
+// Language Wikipedias to try for a person's lead image (via Wikidata sitelinks).
+const WIKI_LANGS = (process.env.MOVIE_LOOKUP_WIKI_LANGS ?? "en,ta,te,hi,ml,kn,bn,mr")
+  .split(",").map((s) => s.trim()).filter(Boolean);
 
 interface WdClaimSnak { mainsnak?: { datavalue?: { value?: unknown } } }
 interface WdEntity { claims?: Record<string, WdClaimSnak[]> }
@@ -393,7 +420,7 @@ export function extractCommonsCategory(entity: WdEntity | null | undefined): str
 
 async function wikidataIdFromImdb(imdbId: string): Promise<string | undefined> {
   try {
-    const res = await ofetch<{ results?: { bindings?: { item?: { value?: string } }[] } }>(WD_SPARQL, {
+    const res = await wmFetch<{ results?: { bindings?: { item?: { value?: string } }[] } }>(WD_SPARQL, {
       query: { query: `SELECT ?item WHERE { ?item wdt:P345 "${imdbId}" } LIMIT 1`, format: "json" },
       headers: { "User-Agent": WIKI_UA, Accept: "application/sparql-results+json" }, retry: 1,
     });
@@ -403,7 +430,7 @@ async function wikidataIdFromImdb(imdbId: string): Promise<string | undefined> {
 }
 async function wdGetEntity(qid: string): Promise<WdEntity | null> {
   try {
-    const res = await ofetch<{ entities?: Record<string, WdEntity> }>(WD_API, {
+    const res = await wmFetch<{ entities?: Record<string, WdEntity> }>(WD_API, {
       query: { action: "wbgetentities", ids: qid, props: "claims", format: "json", origin: "*" },
       headers: { "User-Agent": WIKI_UA }, retry: 1,
     });
@@ -412,12 +439,34 @@ async function wdGetEntity(qid: string): Promise<WdEntity | null> {
 }
 async function commonsCategoryFiles(category: string, limit = 25): Promise<string[]> {
   try {
-    const res = await ofetch<{ query?: { categorymembers?: { title?: string }[] } }>(COMMONS_API, {
+    const res = await wmFetch<{ query?: { categorymembers?: { title?: string }[] } }>(COMMONS_API, {
       query: { action: "query", list: "categorymembers", cmtitle: `Category:${category}`, cmtype: "file", cmlimit: String(limit), format: "json", origin: "*" },
       headers: { "User-Agent": WIKI_UA }, retry: 1,
     });
     return (res.query?.categorymembers ?? []).map((m) => m.title).filter((t): t is string => !!t && /\.(jpe?g|png)$/i.test(t));
   } catch { return []; }
+}
+async function commonsSubcategories(category: string, limit = 12): Promise<string[]> {
+  try {
+    const res = await wmFetch<{ query?: { categorymembers?: { title?: string }[] } }>(COMMONS_API, {
+      query: { action: "query", list: "categorymembers", cmtitle: `Category:${category}`, cmtype: "subcat", cmlimit: String(limit), format: "json", origin: "*" },
+      headers: { "User-Agent": WIKI_UA }, retry: 1,
+    });
+    return (res.query?.categorymembers ?? []).map((m) => m.title?.replace(/^Category:/, "")).filter((t): t is string => !!t);
+  } catch { return []; }
+}
+/** Deeper Commons traversal: files in the category PLUS files from one level of
+ *  subcategories (e.g. "Samantha in 2019"), bounded to `maxFiles` total. */
+async function commonsCategoryDeep(category: string, maxFiles = 60): Promise<string[]> {
+  const seen = new Set<string>();
+  const push = (arr: string[]) => { for (const t of arr) { if (seen.size >= maxFiles) break; seen.add(t); } };
+  push(await commonsCategoryFiles(category, 40));
+  if (seen.size < maxFiles) {
+    const subs = await commonsSubcategories(category);
+    const subFiles = await Promise.all(subs.map((s) => commonsCategoryFiles(s, 20)));
+    for (const f of subFiles) { push(f); if (seen.size >= maxFiles) break; }
+  }
+  return [...seen];
 }
 interface CommonsInfo { url: string; thumb?: string; w?: number; h?: number; }
 async function commonsImageInfo(fileTitles: string[]): Promise<CommonsInfo[]> {
@@ -426,7 +475,7 @@ async function commonsImageInfo(fileTitles: string[]): Promise<CommonsInfo[]> {
     const batch = fileTitles.slice(i, i + 40);
     if (!batch.length) continue;
     try {
-      const res = await ofetch<{ query?: { pages?: Record<string, { imageinfo?: { url?: string; thumburl?: string; width?: number; height?: number }[] }> } }>(COMMONS_API, {
+      const res = await wmFetch<{ query?: { pages?: Record<string, { imageinfo?: { url?: string; thumburl?: string; width?: number; height?: number }[] }> } }>(COMMONS_API, {
         query: { action: "query", titles: batch.join("|"), prop: "imageinfo", iiprop: "url|size", iiurlwidth: "360", format: "json", origin: "*" },
         headers: { "User-Agent": WIKI_UA }, retry: 1,
       });
@@ -450,7 +499,8 @@ export const wikidataSource: SourceAdapter = {
     if (!entity) return { items: [], raw: { qid } };
     const p18 = extractWikidataImages(entity).map((f) => `File:${f.replace(/ /g, "_")}`);
     const category = extractCommonsCategory(entity);
-    const catFiles = category ? await commonsCategoryFiles(category) : [];
+    // Deeper traversal: category files + one level of subcategory files.
+    const catFiles = category ? await commonsCategoryDeep(category, COMMONS_MAX_FILES) : [];
     const titles = [...new Set([...p18, ...catFiles])];
     const infos = await commonsImageInfo(titles);
     const items = infos.map((inf): ImageItem => ({
@@ -472,7 +522,7 @@ interface WikiSummaryImg { type?: string; title?: string; originalimage?: { sour
 
 async function wikiSummaryByTitle(title: string): Promise<WikiSummaryImg | null> {
   try {
-    return await ofetch<WikiSummaryImg>(WIKI_REST_SUMMARY + encodeURIComponent(title.replace(/ /g, "_")), {
+    return await wmFetch<WikiSummaryImg>(WIKI_REST_SUMMARY + encodeURIComponent(title.replace(/ /g, "_")), {
       headers: { "User-Agent": WIKI_UA, Accept: "application/json" }, retry: 1,
     });
   } catch { return null; }
@@ -481,7 +531,7 @@ async function wikiSummaryByTitle(title: string): Promise<WikiSummaryImg | null>
  *  title (name overlap, with a bonus for an "(actress)"/"(actor)" article). */
 async function wikiResolvePersonTitle(name: string): Promise<string | undefined> {
   try {
-    const res = await ofetch<{ query?: { search?: { title?: string }[] } }>(WIKI_API_ACTION, {
+    const res = await wmFetch<{ query?: { search?: { title?: string }[] } }>(WIKI_API_ACTION, {
       query: { action: "query", list: "search", srsearch: `${name} actor actress film`, srlimit: "6", format: "json", origin: "*" },
       headers: { "User-Agent": WIKI_UA }, retry: 1,
     });
@@ -528,12 +578,61 @@ export const wikipediaPersonSource: SourceAdapter = {
   },
 };
 
+// ── Other-language Wikipedia lead images (NO KEY) ─────────────────────────────
+// A person's article on ta/te/hi/ml/kn/… Wikipedias often has a DIFFERENT lead
+// image than English (or exists where English doesn't). We resolve the exact
+// per-language article titles via Wikidata SITELINKS (same entity ⇒ no wrong-
+// person risk), then pull each lang article's lead image. Deduped by URL, so a
+// lang that reuses the same Commons photo adds nothing.
+async function wdSitelinks(qid: string): Promise<Record<string, string>> {
+  try {
+    const res = await wmFetch<{ entities?: Record<string, { sitelinks?: Record<string, { title?: string }> }> }>(WD_API, {
+      query: { action: "wbgetentities", ids: qid, props: "sitelinks", format: "json", origin: "*" },
+      headers: { "User-Agent": WIKI_UA }, retry: 1,
+    });
+    const sl = res.entities?.[qid]?.sitelinks ?? {};
+    const out: Record<string, string> = {};
+    for (const lang of WIKI_LANGS) { const t = sl[`${lang}wiki`]?.title; if (t) out[lang] = t; }
+    return out;
+  } catch { return {}; }
+}
+async function langWikiImage(lang: string, title: string): Promise<ImageItem | null> {
+  try {
+    const res = await wmFetch<WikiSummaryImg>(
+      `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, "_"))}`,
+      { headers: { "User-Agent": WIKI_UA, Accept: "application/json" }, retry: 1 }
+    );
+    const url = res.originalimage?.source ?? res.thumbnail?.source;
+    if (!url) return null;
+    return {
+      source: `wikipedia:${lang}`, kind: "profile", fullUrl: url, thumbUrl: res.thumbnail?.source ?? url,
+      ...(res.originalimage?.width ? { width: res.originalimage.width } : {}),
+      ...(res.originalimage?.height ? { height: res.originalimage.height } : {}),
+    };
+  } catch { return null; }
+}
+export const wikipediaLangSource: SourceAdapter = {
+  name: "wikipedia-langs",
+  async getMovieImages() { return { items: [] }; },
+  async getPersonImages(ctx) {
+    let qid = ctx.wikidataId;
+    if (!qid && ctx.imdbId) qid = await wikidataIdFromImdb(ctx.imdbId);
+    if (!qid) return { items: [] };
+    const sitelinks = await wdSitelinks(qid);
+    const langs = Object.keys(sitelinks);
+    if (!langs.length) return { items: [], raw: { qid, sitelinks } };
+    const imgs = await Promise.all(langs.map((l) => langWikiImage(l, sitelinks[l]!)));
+    const items = imgs.filter((x): x is ImageItem => !!x);
+    return { items, raw: { qid, sitelinks, count: items.length } };
+  },
+};
+
 // ── Registry — push a new adapter here to add a source (no endpoint changes) ──
 // (Fanart.tv has NO actor/person image endpoint — only movie/tv/music — so it
 // contributes nothing for people; its getPersonImages returns empty, by design.)
 export const SOURCES: SourceAdapter[] = [
   tmdbSource, omdbSource, fanartSource, tvdbSource, youtubeSource,
-  wikidataSource, wikipediaPersonSource,
+  wikidataSource, wikipediaPersonSource, wikipediaLangSource,
 ];
 
 /** Dedupe images by full URL (exported for tests). */

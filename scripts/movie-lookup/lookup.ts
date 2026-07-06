@@ -21,10 +21,12 @@ import {
   aggregateMovieImages,
   aggregatePersonImages,
   aggregateMovieVideos,
+  dedupeImages,
   img,
   langName,
   type ImageItem,
   type VideoItem,
+  type PersonImageContext,
 } from "./sources.js";
 import { aggregateBackground, type BackgroundResult } from "./wiki.js";
 
@@ -155,6 +157,7 @@ export interface PersonDetail {
   filmography: FilmographyItem[];
   images: ImageItem[];
   imageSources: string[];
+  imageStats: { portraits: number; stills: number; stillFilms: number };
   rawData: Record<string, unknown>;
 }
 
@@ -317,6 +320,48 @@ export async function movieDetail(id: number): Promise<MovieDetail> {
   return detail;
 }
 
+// ── Film-still harvesting for a person ───────────────────────────────────────
+// A person appears in the STILLS/backdrops of the films they're in. Those images
+// already live in the movie-image aggregation (TMDb + Fanart.tv + TVDB). We take
+// the person's top-N films (popularity, movies only, cost-bounded) and pull each
+// film's backdrops, tagged "still · <title>" so the UI can tell them apart from
+// verified portraits.
+const STILL_FILMS = Number.parseInt(process.env.MOVIE_LOOKUP_STILL_FILMS ?? "12", 10) || 12;
+const STILL_CONCURRENCY = 4;
+
+/** Top films to harvest stills from (movies only, most-popular first). Pure. */
+export function selectStillFilms(filmography: FilmographyItem[], limit = STILL_FILMS): FilmographyItem[] {
+  return filmography
+    .filter((f) => f.mediaType === "movie")
+    .slice()
+    .sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0))
+    .slice(0, limit);
+}
+/** Turn a film's images into person "stills" — backdrops only, tagged + context. Pure. */
+export function filmImagesToStills(images: ImageItem[], filmTitle: string): ImageItem[] {
+  return images.filter((i) => i.kind === "backdrop").map((i): ImageItem => ({ ...i, kind: "still", context: filmTitle }));
+}
+
+/** Bounded-concurrency map (no new dep). */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let idx = 0;
+  const worker = async () => { while (idx < items.length) { const cur = idx++; out[cur] = await fn(items[cur]!); } };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return out;
+}
+
+export async function harvestFilmStills(filmography: FilmographyItem[], limit = STILL_FILMS): Promise<ImageItem[]> {
+  const films = selectStillFilms(filmography, limit);
+  const batches = await mapLimit(films, STILL_CONCURRENCY, async (f) => {
+    try {
+      const agg = await aggregateMovieImages({ tmdbId: f.id, title: f.title });
+      return filmImagesToStills(agg.items, f.title);
+    } catch { return []; }
+  });
+  return batches.flat();
+}
+
 // ── 3. Full image gallery (aggregated across sources) ────────────────────────
 export async function allMovieImages(tmdbId: number, imdbId?: string): Promise<MovieImages> {
   const agg = await aggregateMovieImages({ tmdbId, ...(imdbId ? { imdbId } : {}) });
@@ -376,12 +421,22 @@ export async function personDetail(id: number): Promise<PersonDetail> {
   // Commons/Wikipedia) and keyed (TVDB) person-image adapters can resolve the
   // SAME human — TMDb's own /person/images is sparse for people.
   const person = await tmdbGet<TmdbPerson>(`/person/${id}`, { append_to_response: "combined_credits,external_ids" });
-  const imagesAgg = await aggregatePersonImages({
+  const filmography = buildFilmography(person.combined_credits);
+  const ctx: PersonImageContext = {
     tmdbId: id,
     ...(person.name ? { name: person.name } : {}),
     ...(person.external_ids?.imdb_id ? { imdbId: person.external_ids.imdb_id } : {}),
     ...(person.external_ids?.wikidata_id ? { wikidataId: person.external_ids.wikidata_id } : {}),
-  });
+  };
+  // Portraits (verified person images across sources) + film stills (backdrops of
+  // the person's films) fetched together. Portraits FIRST so a URL shared with a
+  // still stays a portrait after dedupe.
+  const [imagesAgg, stills] = await Promise.all([
+    aggregatePersonImages(ctx),
+    harvestFilmStills(filmography),
+  ]);
+  const combinedImages = dedupeImages([...imagesAgg.items, ...stills]);
+  const portraitCount = imagesAgg.items.length;
 
   const knownFor: PersonKnownFor[] = (person.combined_credits?.cast ?? [])
     .slice()
@@ -413,9 +468,14 @@ export async function personDetail(id: number): Promise<PersonDetail> {
     popularity: person.popularity,
     profileUrl: img(person.profile_path, "w300"),
     knownFor,
-    filmography: buildFilmography(person.combined_credits),
-    images: imagesAgg.items,
-    imageSources: imagesAgg.sources,
+    filmography,
+    images: combinedImages,
+    imageSources: [...new Set(combinedImages.map((i) => i.source))],
+    imageStats: {
+      portraits: portraitCount,
+      stills: combinedImages.length - portraitCount,
+      stillFilms: selectStillFilms(filmography).length,
+    },
     rawData: { tmdb: { person }, images: imagesAgg.raw },
   };
 }
