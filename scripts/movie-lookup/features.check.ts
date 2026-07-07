@@ -24,20 +24,34 @@ import {
 import { castOverlap, sharedFilms, sortFilmography, filterFilmography, type FilmoLike } from "./compute.js";
 import { mapReleases } from "./releases.js";
 
-// ── Watchlist: in-memory fallback ─────────────────────────────────────────────
+// ── Watchlist: in-memory fallback (device-scoped) ─────────────────────────────
 describe("Watchlist — in-memory backend add/list/remove", () => {
-  it("adds, lists newest-first, dedupes by (type,id), and removes", async () => {
+  it("adds, lists newest-first, dedupes by (device,type,id), and removes", async () => {
     const wl = new MemoryWatchlist();
     await wl.init();
-    await wl.add({ type: "film", tmdbId: 1, title: "RRR" });
-    await wl.add({ type: "person", tmdbId: 2, title: "Rajamouli" });
-    await wl.add({ type: "film", tmdbId: 1, title: "RRR (dup)" }); // same key → update, not duplicate
-    const list = await wl.list();
+    await wl.add({ type: "film", tmdbId: 1, title: "RRR" }, "devA");
+    await wl.add({ type: "person", tmdbId: 2, title: "Rajamouli" }, "devA");
+    await wl.add({ type: "film", tmdbId: 1, title: "RRR (dup)" }, "devA"); // same key → update, not duplicate
+    const list = await wl.list("devA");
     expect(list.length).toBe(2); // deduped
     expect(list.some((i) => i.type === "film" && i.tmdbId === 1 && i.title === "RRR (dup)")).toBe(true);
-    await wl.remove("film", 1);
-    const after = await wl.list();
+    await wl.remove("film", 1, "devA");
+    const after = await wl.list("devA");
     expect(after.map((i) => `${i.type}:${i.tmdbId}`)).toEqual(["person:2"]);
+  });
+
+  it("isolates lists across two devices — same (type,id) lives independently", async () => {
+    const wl = new MemoryWatchlist();
+    await wl.init();
+    await wl.add({ type: "film", tmdbId: 1, title: "RRR" }, "devA");
+    await wl.add({ type: "film", tmdbId: 1, title: "RRR" }, "devB"); // same key, different device
+    await wl.add({ type: "film", tmdbId: 9, title: "Eega" }, "devB");
+    expect((await wl.list("devA")).map((i) => i.tmdbId)).toEqual([1]);
+    expect((await wl.list("devB")).map((i) => i.tmdbId).sort((x, y) => x - y)).toEqual([1, 9]);
+    // removing from one device leaves the other untouched
+    await wl.remove("film", 1, "devA");
+    expect(await wl.list("devA")).toEqual([]);
+    expect((await wl.list("devB")).map((i) => i.tmdbId).sort((x, y) => x - y)).toEqual([1, 9]);
   });
 });
 
@@ -49,7 +63,8 @@ describe("Watchlist — Postgres backend issues correct SQL", () => {
       async query(text: string, params?: unknown[]) {
         calls.push({ text, params });
         if (/^\s*INSERT/i.test(text)) {
-          return { rows: [{ type: params![0], tmdb_id: params![1], title: params![2], note: params![3], added_at: "2026-07-06T00:00:00.000Z" }] };
+          // params are now [device_id, type, tmdb_id, title, note]
+          return { rows: [{ type: params![1], tmdb_id: params![2], title: params![3], note: params![4], added_at: "2026-07-06T00:00:00.000Z" }] };
         }
         if (/^\s*SELECT/i.test(text)) {
           return { rows: [{ type: "film", tmdb_id: 42, title: "Kalki", note: null, added_at: "2026-07-06T00:00:00.000Z" }] };
@@ -60,34 +75,42 @@ describe("Watchlist — Postgres backend issues correct SQL", () => {
     return { db, calls };
   }
 
-  it("init creates the table if absent", async () => {
+  it("init creates a device-scoped table + runs the defensive migration", async () => {
     const { db, calls } = mockDb();
     await new PostgresWatchlist(db).init();
+    // Fresh-install CREATE: carries device_id, and has NO table-level UNIQUE(type,tmdb_id).
     expect(calls[0]!.text).toMatch(/CREATE TABLE IF NOT EXISTS watchlist/i);
-    expect(calls[0]!.text).toMatch(/UNIQUE \(type, tmdb_id\)/i);
+    expect(calls[0]!.text).toMatch(/device_id TEXT NOT NULL DEFAULT 'legacy'/i);
+    expect(calls[0]!.text).not.toMatch(/UNIQUE \(type, tmdb_id\)/i);
+    // Defensive migration for a pre-existing table: add column, drop old constraint, add index.
+    const all = calls.map((c) => c.text).join("\n");
+    expect(all).toMatch(/ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS device_id/i);
+    expect(all).toMatch(/DROP CONSTRAINT IF EXISTS watchlist_type_tmdb_id_key/i);
+    expect(all).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS watchlist_device_type_tmdb_idx ON watchlist\(device_id, type, tmdb_id\)/i);
   });
 
-  it("add upserts (INSERT ... ON CONFLICT) with the right params and maps the row", async () => {
+  it("add upserts device-scoped (ON CONFLICT device_id,type,tmdb_id), device_id first param", async () => {
     const { db, calls } = mockDb();
-    const item = await new PostgresWatchlist(db).add({ type: "person", tmdbId: 7, title: "Sneha", note: "fav" });
-    expect(calls[0]!.text).toMatch(/INSERT INTO watchlist/i);
-    expect(calls[0]!.text).toMatch(/ON CONFLICT \(type, tmdb_id\) DO UPDATE/i);
-    expect(calls[0]!.params).toEqual(["person", 7, "Sneha", "fav"]);
+    const item = await new PostgresWatchlist(db).add({ type: "person", tmdbId: 7, title: "Sneha", note: "fav" }, "devX");
+    expect(calls[0]!.text).toMatch(/INSERT INTO watchlist \(device_id, type, tmdb_id, title, note\)/i);
+    expect(calls[0]!.text).toMatch(/ON CONFLICT \(device_id, type, tmdb_id\) DO UPDATE/i);
+    expect(calls[0]!.params).toEqual(["devX", "person", 7, "Sneha", "fav"]);
     expect(item).toEqual({ type: "person", tmdbId: 7, title: "Sneha", note: "fav", addedAt: "2026-07-06T00:00:00.000Z" });
   });
 
-  it("list selects ordered by added_at DESC and maps rows to items", async () => {
+  it("list selects THIS device's rows, ordered by added_at DESC", async () => {
     const { db, calls } = mockDb();
-    const items = await new PostgresWatchlist(db).list();
-    expect(calls[0]!.text).toMatch(/SELECT .* FROM watchlist ORDER BY added_at DESC/i);
+    const items = await new PostgresWatchlist(db).list("devX");
+    expect(calls[0]!.text).toMatch(/SELECT .* FROM watchlist WHERE device_id = \$1 ORDER BY added_at DESC/i);
+    expect(calls[0]!.params).toEqual(["devX"]);
     expect(items).toEqual([{ type: "film", tmdbId: 42, title: "Kalki", addedAt: "2026-07-06T00:00:00.000Z" }]);
   });
 
-  it("remove deletes by (type, tmdb_id)", async () => {
+  it("remove deletes by (device_id, type, tmdb_id)", async () => {
     const { db, calls } = mockDb();
-    await new PostgresWatchlist(db).remove("film", 99);
-    expect(calls[0]!.text).toMatch(/DELETE FROM watchlist WHERE type = \$1 AND tmdb_id = \$2/i);
-    expect(calls[0]!.params).toEqual(["film", 99]);
+    await new PostgresWatchlist(db).remove("film", 99, "devX");
+    expect(calls[0]!.text).toMatch(/DELETE FROM watchlist WHERE device_id = \$1 AND type = \$2 AND tmdb_id = \$3/i);
+    expect(calls[0]!.params).toEqual(["devX", "film", 99]);
   });
 });
 

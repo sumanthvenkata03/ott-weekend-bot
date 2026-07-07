@@ -8,6 +8,10 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#1A1614" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="TBSI Lookup" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -29,7 +33,7 @@
     @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto;} *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition:none!important;}}
     .wrap{max-width:1120px;margin:0 auto;padding:22px 22px 90px;}
     a{color:var(--brass);} a:hover{color:var(--gold-light);}
-    .topbar{position:sticky;top:0;z-index:60;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(26,22,20,.88);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid var(--cream-12);padding:12px 0;margin-bottom:4px;}
+    .topbar{position:sticky;top:0;z-index:60;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(26,22,20,.88);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid var(--cream-12);padding:12px 0;padding-top:calc(12px + env(safe-area-inset-top));margin-bottom:4px;}
     .back{font-family:var(--sans);font-size:13.5px;font-weight:500;letter-spacing:.01em;text-decoration:none;color:var(--cream-60);border:1px solid var(--cream-12);border-radius:100px;padding:7px 14px;cursor:pointer;transition:color .15s,border-color .15s;}
     .back:hover{color:var(--cream);border-color:var(--cream-30);}
     .brand{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--cream-60);display:inline-flex;align-items:center;gap:8px;}
@@ -60,7 +64,7 @@
     .sitem:hover{background:rgba(244,236,220,.05);}
     .sitem.dis{opacity:.5;cursor:not-allowed;}
     .sitem .st{flex:0 0 34px;height:50px;background:var(--thumb) center/cover no-repeat;border:1px solid var(--cream-12);border-radius:6px;}
-    .sitem .st.empty{display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:7px;color:var(--cream-60);}
+    .sitem .st.empty{display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-weight:600;font-size:16px;color:var(--cream-30);}
     .sitem .stitle{font-family:var(--serif);font-weight:600;letter-spacing:-.01em;font-size:14px;line-height:1.15;color:var(--cream);}
     .sitem .smeta{font-family:var(--mono);font-size:10px;color:var(--cream-60);}
     .sbadge{font-family:var(--mono);font-size:8px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:100px;margin-left:auto;border:1px solid rgba(46,87,66,.9);background:rgba(46,87,66,.35);color:#9CC7AF;}
@@ -99,6 +103,21 @@
     .ovfilm .fm{padding:8px 9px 10px;} .ovfilm .ft{font-family:var(--serif);font-weight:600;letter-spacing:-.01em;font-size:13px;line-height:1.1;color:var(--cream);} .ovfilm .fy{font-family:var(--mono);font-size:10px;color:var(--cream-60);}
     .empty{font-family:var(--mono);font-size:12px;color:var(--cream-60);padding:8px 0;}
     .hidden{display:none!important;}
+
+    /* Stack the two compare sides on narrow screens (the pickers already stack at 640). */
+    @media (max-width:640px){.cmp{grid-template-columns:1fr;}}
+    @media (max-width:520px){
+      .wrap{padding:16px 14px 60px;}
+      .brand{font-size:9px;letter-spacing:.14em;text-align:right;}
+      h1{font-size:clamp(24px,7vw,34px);}
+      .picker input{padding:12px 16px;}
+      .sitem{padding:8px 10px;}
+      .chosen{padding:8px 10px;}
+      .ovgrid{grid-template-columns:repeat(2,1fr);gap:10px;}
+    }
+    /* Touch devices: no sticky hover-lift left applied after a tap. */
+    @media (hover:none){ .ovfilm:hover{transform:none;} }
+
     /* Touch devices (phones/tablets): guarantee ~44px minimum tap targets.
        Scoped to pointer:coarse so the confirmed mouse/desktop layout is unchanged. */
     @media (pointer:coarse){
@@ -117,7 +136,7 @@
   <div class="wrap">
     <div class="topbar">
       <a class="back" href="/">← Search</a>
-      <span class="brand">TBSI · Compare · Localhost</span>
+      <span class="brand" id="brand">TBSI · Compare</span>
     </div>
     <h1>Compare</h1>
     <div class="lede">Two films, or two people — side by side. Pick one in each box.</div>
@@ -144,6 +163,11 @@
   <script>
     const $ = (s) => document.querySelector(s);
     const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+    // The "· Localhost" brand suffix shows only on a local dev host, never on the deployed site.
+    const IS_LOCAL = ["localhost","127.0.0.1"].includes(location.hostname);
+    // Neutral empty-thumb monogram: the title's first letter (consistent across pages).
+    const initial = (s) => { const t = String(s ?? "").trim(); return t ? esc(t[0].toUpperCase()) : "·"; };
+    if (IS_LOCAL) { const b = document.getElementById("brand"); if (b) b.append(" · Localhost"); }
     async function getJson(url){ const r = await fetch(url); const d = await r.json().catch(()=>({error:"bad JSON"})); if(!r.ok) throw new Error(d.error||("HTTP "+r.status)); return d; }
 
     // ── mirror of compute.ts (castOverlap / sharedFilms) ──
@@ -164,7 +188,7 @@
         catch(e){ if(e&&e.name==="AbortError")return; drop.classList.remove("open"); }
       }
       function render(cs){ cur=cs; if(!cs.length){drop.classList.remove("open");return;}
-        drop.innerHTML=cs.map((c,i)=>{ const ok=c.type==="movie"||c.type==="person"; const th=c.thumb?`<span class="st" style="background-image:url('${esc(c.thumb)}')"></span>`:`<span class="st empty">no img</span>`;
+        drop.innerHTML=cs.map((c,i)=>{ const ok=c.type==="movie"||c.type==="person"; const th=c.thumb?`<span class="st" style="background-image:url('${esc(c.thumb)}')"></span>`:`<span class="st empty">${initial(c.title)}</span>`;
           const sub=c.type==="person"?(c.knownForDepartment||"person"):((c.year||"—")+(c.language?" · "+c.language:""));
           return `<div class="sitem ${ok?"":"dis"}" data-i="${i}">${th}<span><span class="stitle">${esc(c.title)}</span><br><span class="smeta">${esc(sub)}</span></span><span class="sbadge ${TYPE_CLS[c.type]||""}">${TYPE_LABEL[c.type]||c.type}</span></div>`;
         }).join(""); drop.classList.add("open");

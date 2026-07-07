@@ -8,6 +8,10 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#1A1614" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="TBSI Lookup" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -29,7 +33,7 @@
     @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto;} *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition:none!important;}}
     .wrap{max-width:1120px;margin:0 auto;padding:22px 22px 90px;}
     a{color:var(--brass);} a:hover{color:var(--gold-light);}
-    .topbar{position:sticky;top:0;z-index:60;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(26,22,20,.88);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid var(--cream-12);padding:12px 0;margin-bottom:4px;}
+    .topbar{position:sticky;top:0;z-index:60;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(26,22,20,.88);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid var(--cream-12);padding:12px 0;padding-top:calc(12px + env(safe-area-inset-top));margin-bottom:4px;}
     .back{font-family:var(--sans);font-size:13.5px;font-weight:500;letter-spacing:.01em;text-decoration:none;color:var(--cream-60);border:1px solid var(--cream-12);border-radius:100px;padding:7px 14px;cursor:pointer;transition:color .15s,border-color .15s;}
     .back:hover{color:var(--cream);border-color:var(--cream-30);}
     .brand{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--cream-60);display:inline-flex;align-items:center;gap:8px;}
@@ -48,7 +52,7 @@
     .card:hover{transform:translateY(-6px);border-color:var(--cream-30);}
     .card a.open{text-decoration:none;color:inherit;display:block;}
     .card .p{aspect-ratio:2/3;background:var(--thumb) center/cover no-repeat;display:flex;align-items:center;justify-content:center;}
-    .card .p.empty{font-family:var(--mono);font-size:10px;color:var(--cream-60);}
+    .card .p.empty{font-family:var(--serif);font-weight:600;font-size:30px;color:var(--cream-30);}
     .card .m{padding:10px 11px 12px;}
     .card .t{font-family:var(--serif);font-weight:600;letter-spacing:-.01em;font-size:15px;line-height:1.15;color:var(--cream);}
     .card .d{font-family:var(--mono);font-size:10px;color:var(--cream-60);margin-top:4px;}
@@ -60,6 +64,17 @@
     .loading{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;color:var(--cream-60);padding:14px 2px;}
     .msg{font-family:var(--mono);font-size:12px;color:var(--cream-60);padding:10px 2px;}
     .msg.err{color:var(--down);}
+
+    @media (max-width:520px){
+      .wrap{padding:16px 14px 60px;}
+      .brand{font-size:9px;letter-spacing:.14em;text-align:right;}
+      h1{font-size:clamp(24px,7vw,34px);}
+      .grid{grid-template-columns:repeat(2,1fr);gap:12px;}
+      .banner{font-size:10.5px;}
+    }
+    /* Touch devices: no sticky hover-lift left applied after a tap. */
+    @media (hover:none){ .card:hover{transform:none;} }
+
     /* Touch devices (phones/tablets): guarantee ~44px minimum tap targets.
        Scoped to pointer:coarse so the confirmed mouse/desktop layout is unchanged. */
     @media (pointer:coarse){
@@ -78,23 +93,42 @@
   <div class="wrap">
     <div class="topbar">
       <a class="back" href="/">← Search</a>
-      <span class="brand">TBSI · Watchlist · Localhost</span>
+      <span class="brand" id="brand">TBSI · Watchlist</span>
     </div>
     <h1>Watchlist</h1>
-    <div class="lede">A single shared list — films &amp; people you saved.</div>
-    <div class="banner" id="banner">In-memory mode: this list is <b>not persisted</b> (no DATABASE_URL). Set a Render PostgreSQL to sync across devices &amp; survive redeploys.</div>
+    <div class="lede">Films &amp; people you saved — a per-device list (synced for this device).</div>
+    <div class="banner" id="banner">In-memory mode: this device's list is <b>not persisted</b> (no DATABASE_URL) — it resets on redeploy. Set a Render PostgreSQL to keep it across restarts.</div>
     <div id="content"><div class="loading"><span class="spinner"></span>Loading your watchlist…</div></div>
   </div>
 
   <script>
     const $ = (s) => document.querySelector(s);
     const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+    // The "· Localhost" brand suffix shows only on a local dev host, never on the deployed site.
+    const IS_LOCAL = ["localhost","127.0.0.1"].includes(location.hostname);
+    // Neutral empty-thumb monogram: the title's first letter (consistent across pages).
+    const initial = (s) => { const t = String(s ?? "").trim(); return t ? esc(t[0].toUpperCase()) : "·"; };
+    if (IS_LOCAL) { const b = document.getElementById("brand"); if (b) b.append(" · Localhost"); }
+    // Per-device watchlist id: a stable random id kept in localStorage and sent as the
+    // X-TBSI-Device header, so this page shows only what was saved on THIS device.
+    const DEVICE_ID = (() => {
+      try {
+        let id = localStorage.getItem("tbsi_device_id");
+        if (!id || !/^[A-Za-z0-9-]{8,64}$/.test(id)) {
+          id = (crypto && crypto.randomUUID) ? crypto.randomUUID()
+             : Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+          localStorage.setItem("tbsi_device_id", id);
+        }
+        return id;
+      } catch (e) { return "legacy"; } // private mode / storage blocked → shared bucket
+    })();
+    const deviceHeaders = () => ({ "X-TBSI-Device": DEVICE_ID });
     async function getJson(url, opts){ const r = await fetch(url, opts); const d = await r.json().catch(()=>({error:"bad JSON"})); if(!r.ok) throw new Error(d.error||("HTTP "+r.status)); return d; }
-    const poster = (m) => m.posterUrl ? `<span class="p" style="background-image:url('${esc(m.posterUrl)}')"></span>` : `<span class="p empty">no image</span>`;
+    const poster = (m) => m.posterUrl ? `<span class="p" style="background-image:url('${esc(m.posterUrl)}')"></span>` : `<span class="p empty">${initial(m.title)}</span>`;
 
     async function load(){
       try{
-        const d = await getJson("/api/watchlist");
+        const d = await getJson("/api/watchlist", { headers: deviceHeaders() });
         if(d.store !== "postgres") $("#banner").classList.add("on");
         render(d.items || []);
       }catch(e){ $("#content").innerHTML = `<div class="msg err">Couldn’t load watchlist: ${esc(e.message)}</div>`; }
@@ -115,7 +149,7 @@
       $("#content").querySelectorAll(".rm").forEach(btn=>btn.addEventListener("click", async (e)=>{
         const card = e.target.closest(".card"); const type = card.dataset.type, id = card.dataset.id;
         btn.textContent = "…"; btn.disabled = true;
-        try{ await getJson(`/api/watchlist/${type}/${id}`, { method:"DELETE" }); card.remove(); }
+        try{ await getJson(`/api/watchlist/${type}/${id}`, { method:"DELETE", headers: deviceHeaders() }); card.remove(); }
         catch(err){ btn.textContent = "remove"; btn.disabled = false; }
       }));
     }

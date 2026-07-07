@@ -33,7 +33,7 @@
     @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto;} *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition:none!important;}}
     .wrap{max-width:1120px;margin:0 auto;padding:22px 22px 90px;}
     a{color:var(--brass);} a:hover{color:var(--gold-light);}
-    .topbar{position:sticky;top:0;z-index:60;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(26,22,20,.88);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid var(--cream-12);padding:12px 0;margin-bottom:4px;}
+    .topbar{position:sticky;top:0;z-index:60;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(26,22,20,.88);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid var(--cream-12);padding:12px 0;padding-top:calc(12px + env(safe-area-inset-top));margin-bottom:4px;}
     .back{font-family:var(--sans);font-size:13.5px;font-weight:500;letter-spacing:.01em;text-decoration:none;color:var(--cream-60);border:1px solid var(--cream-12);border-radius:100px;padding:7px 14px;cursor:pointer;transition:color .15s,border-color .15s;}
     .back:hover{color:var(--cream);border-color:var(--cream-30);}
     .brand{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--cream-60);display:inline-flex;align-items:center;gap:8px;}
@@ -72,7 +72,7 @@
     .film{border:1px solid var(--cream-12);background:var(--panel);border-radius:16px;overflow:hidden;text-decoration:none;color:inherit;display:block;transition:transform .15s,border-color .15s;}
     .film.clickable{cursor:pointer;} .film.clickable:hover{transform:translateY(-6px);border-color:var(--cream-30);}
     .film .fp{aspect-ratio:2/3;background:var(--thumb) center/cover no-repeat;display:flex;align-items:center;justify-content:center;}
-    .film .fp.empty{font-family:var(--mono);font-size:9px;color:var(--cream-60);text-align:center;padding:6px;}
+    .film .fp.empty{font-family:var(--serif);font-weight:600;font-size:26px;color:var(--cream-30);text-align:center;padding:6px;}
     .film .fm{padding:9px 10px 11px;}
     .film .ft{font-family:var(--serif);font-weight:600;letter-spacing:-.01em;font-size:14px;line-height:1.15;color:var(--cream);}
     .film .fr{font-family:var(--mono);font-size:10px;color:var(--cream-60);margin-top:3px;}
@@ -97,10 +97,10 @@
     .loading.err{color:var(--down);}
     .skelcard{aspect-ratio:2/3;border-radius:16px;background:linear-gradient(100deg,#241d18 30%,#31281f 50%,#241d18 70%);background-size:200% 100%;animation:shimmer 1.2s ease-in-out infinite;}
     @keyframes shimmer{to{background-position:-200% 0;}}
-    .wakebanner{position:fixed;left:50%;bottom:18px;transform:translateX(-50%) translateY(20px);display:flex;align-items:center;gap:10px;background:var(--panel);color:var(--cream);font-family:var(--mono);font-size:12px;letter-spacing:.03em;padding:12px 18px;border-radius:100px;border:1px solid var(--brass);box-shadow:0 12px 40px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:200;}
+    .wakebanner{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);display:flex;align-items:center;gap:10px;background:var(--panel);color:var(--cream);font-family:var(--mono);font-size:12px;letter-spacing:.03em;padding:12px 18px;border-radius:100px;border:1px solid var(--brass);box-shadow:0 12px 40px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:200;}
     .wakebanner.show{opacity:1;transform:translateX(-50%) translateY(0);}
     .wakebanner::before{content:"";width:14px;height:14px;border:2px solid var(--cream-30);border-top-color:var(--brass);border-radius:50%;animation:spin .7s linear infinite;box-sizing:border-box;}
-    .lb{position:fixed;inset:0;background:rgba(16,12,10,.94);display:none;align-items:center;justify-content:center;flex-direction:column;z-index:120;padding:24px;}
+    .lb{position:fixed;inset:0;background:rgba(16,12,10,.94);display:none;align-items:center;justify-content:center;flex-direction:column;z-index:120;padding:24px;padding-bottom:calc(24px + env(safe-area-inset-bottom));}
     .lb.open{display:flex;}
     .lb img{max-width:92vw;max-height:76vh;border:1px solid var(--cream-30);border-radius:8px;box-shadow:0 24px 70px rgba(0,0,0,.7);}
     .lb .bar{display:flex;gap:12px;margin-top:16px;align-items:center;flex-wrap:wrap;justify-content:center;}
@@ -127,12 +127,14 @@
       .tab{padding:10px 16px;}
       .filmo{gap:10px;}
       .grid{gap:10px;}
-      .lb{padding:14px;}
+      .lb{padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom));}
       .lb img{max-width:94vw;max-height:64vh;}
       .lb .bar{gap:8px;margin-top:12px;}
       .lb a,.lb button{font-size:12px;padding:9px 14px;letter-spacing:.01em;}
     }
     .hidden{display:none!important;}
+    /* Touch devices: no sticky hover-lift left applied after a tap. */
+    @media (hover:none){ .film.clickable:hover,.gimg:hover{transform:none;} }
     /* Touch devices (phones/tablets): guarantee ~44px minimum tap targets.
        Scoped to pointer:coarse so the confirmed mouse/desktop layout is unchanged. */
     @media (pointer:coarse){
@@ -151,7 +153,7 @@
   <div class="wrap">
     <div class="topbar">
       <a class="back" id="back">← Back</a>
-      <span class="brand">TBSI · Person · Localhost</span>
+      <span class="brand" id="brand">TBSI · Person</span>
     </div>
     <div class="status" id="status">Loading…</div>
     <div id="body" class="hidden"></div>
@@ -172,12 +174,31 @@
   <script>
     const $ = (s) => document.querySelector(s);
     const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+    // The "· Localhost" brand suffix shows only on a local dev host, never on the deployed site.
+    const IS_LOCAL = ["localhost","127.0.0.1"].includes(location.hostname);
+    // Neutral empty-thumb monogram: the title/name's first letter (consistent across pages).
+    const initial = (s) => { const t = String(s ?? "").trim(); return t ? esc(t[0].toUpperCase()) : "·"; };
+    // Per-device watchlist id: a stable random id kept in localStorage and sent as the
+    // X-TBSI-Device header, so each device (phone, laptop) keeps its own saved list.
+    const DEVICE_ID = (() => {
+      try {
+        let id = localStorage.getItem("tbsi_device_id");
+        if (!id || !/^[A-Za-z0-9-]{8,64}$/.test(id)) {
+          id = (crypto && crypto.randomUUID) ? crypto.randomUUID()
+             : Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+          localStorage.setItem("tbsi_device_id", id);
+        }
+        return id;
+      } catch (e) { return "legacy"; } // private mode / storage blocked → shared bucket
+    })();
+    const deviceHeaders = () => ({ "X-TBSI-Device": DEVICE_ID });
     const statusEl = $("#status");
     function setStatus(m, err){ statusEl.textContent = m||""; statusEl.classList.toggle("err", !!err); statusEl.classList.toggle("hidden", !m); }
     const id = new URLSearchParams(location.search).get("id");
+    if (IS_LOCAL) { const b = document.getElementById("brand"); if (b) b.append(" · Localhost"); }
     $("#back").addEventListener("click", () => history.length > 1 ? history.back() : (location.href = "/"));
 
-    async function getJson(url){ const r = await fetch(url); const d = await r.json().catch(()=>({error:"bad JSON"})); if(!r.ok) throw new Error(d.error||("HTTP "+r.status)); return d; }
+    async function getJson(url, opts){ const r = await fetch(url, opts); const d = await r.json().catch(()=>({error:"bad JSON"})); if(!r.ok) throw new Error(d.error||("HTTP "+r.status)); return d; }
 
     // ── Cold-start "waking up" banner: shown while a tracked fetch runs >3s. ──
     let _pending = 0, _wakeTimer = null, _wakeEl = null;
@@ -295,7 +316,7 @@
       $("#filmoCount").textContent = list.length + " of " + FILMO.length + " title" + (FILMO.length===1?"":"s");
       $("#filmoGrid").innerHTML = list.length ? list.map(f=>{
         const clickable = f.mediaType === "movie";
-        const poster = f.posterUrl ? `<span class="fp" style="background-image:url('${esc(f.posterUrl)}')"></span>` : `<span class="fp empty">no poster</span>`;
+        const poster = f.posterUrl ? `<span class="fp" style="background-image:url('${esc(f.posterUrl)}')"></span>` : `<span class="fp empty">${initial(f.title)}</span>`;
         const inner = `${poster}<div class="fm"><div class="ft">${esc(f.title)}</div><div class="fr">${esc(f.year||"—")} · ${esc(f.role)}</div><span class="fbadge">${esc(f.mediaType)}</span></div>`;
         return clickable ? `<a class="film clickable" href="/movie.html?id=${f.id}">${inner}</a>` : `<div class="film">${inner}</div>`;
       }).join("") : `<div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft)">No titles in this view.</div>`;
@@ -314,14 +335,14 @@
     async function initSave(p){
       const btn = $("#saveBtn"); if(!btn) return;
       let saved = false;
-      try { const w = await getJson("/api/watchlist"); saved = (w.items||[]).some(i=>i.type==="person" && String(i.tmdbId)===String(p.id)); } catch(e){ /* best-effort */ }
+      try { const w = await getJson("/api/watchlist", { headers: deviceHeaders() }); saved = (w.items||[]).some(i=>i.type==="person" && String(i.tmdbId)===String(p.id)); } catch(e){ /* best-effort */ }
       const paint = ()=>{ btn.textContent = saved ? "★ Saved" : "☆ Save"; btn.classList.toggle("on", saved); };
       paint();
       btn.addEventListener("click", async ()=>{
         btn.disabled = true;
         try {
-          if (saved){ await fetch(`/api/watchlist/person/${p.id}`, { method:"DELETE" }); saved = false; }
-          else { await fetch("/api/watchlist", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ type:"person", id:p.id, title:p.name }) }); saved = true; }
+          if (saved){ await fetch(`/api/watchlist/person/${p.id}`, { method:"DELETE", headers: deviceHeaders() }); saved = false; }
+          else { await fetch("/api/watchlist", { method:"POST", headers:{"Content-Type":"application/json", ...deviceHeaders()}, body: JSON.stringify({ type:"person", id:p.id, title:p.name }) }); saved = true; }
           paint();
         } catch(e){ } finally { btn.disabled = false; }
       });

@@ -33,7 +33,7 @@
     @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto;} *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition:none!important;}}
     .wrap{max-width:1120px;margin:0 auto;padding:22px 22px 90px;}
     a{color:var(--brass);} a:hover{color:var(--gold-light);}
-    .topbar{position:sticky;top:0;z-index:60;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(26,22,20,.88);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid var(--cream-12);padding:12px 0;margin-bottom:4px;}
+    .topbar{position:sticky;top:0;z-index:60;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(26,22,20,.88);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid var(--cream-12);padding:12px 0;padding-top:calc(12px + env(safe-area-inset-top));margin-bottom:4px;}
     .back{font-family:var(--sans);font-size:13.5px;font-weight:500;letter-spacing:.01em;text-decoration:none;color:var(--cream-60);border:1px solid var(--cream-12);border-radius:100px;padding:7px 14px;cursor:pointer;transition:color .15s,border-color .15s;}
     .back:hover{color:var(--cream);border-color:var(--cream-30);}
     .brand{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--cream-60);display:inline-flex;align-items:center;gap:8px;}
@@ -76,7 +76,7 @@
     .person{cursor:pointer;border:1px solid var(--cream-12);background:var(--panel);border-radius:16px;overflow:hidden;transition:transform .15s,border-color .15s;}
     .person:hover{transform:translateY(-6px);border-color:var(--cream-30);}
     .person .ph{aspect-ratio:2/3;background:var(--thumb) center/cover no-repeat;display:flex;align-items:center;justify-content:center;}
-    .person .ph.empty{font-family:var(--mono);font-size:10px;color:var(--cream-60);text-align:center;padding:8px;}
+    .person .ph.empty{font-family:var(--serif);font-weight:600;font-size:26px;color:var(--cream-30);text-align:center;padding:8px;}
     .person .pm{padding:9px 10px 11px;}
     .person .pn{font-family:var(--serif);font-weight:600;letter-spacing:-.01em;font-size:14px;line-height:1.15;color:var(--cream);}
     .person .pr{font-family:var(--mono);font-size:10px;color:var(--cream-60);margin-top:3px;}
@@ -118,6 +118,9 @@
     .vtype{font-family:var(--mono);font-size:10px;color:var(--cream-60);text-transform:uppercase;letter-spacing:.04em;margin-top:4px;}
 
     .bgcard{display:grid;grid-template-columns:120px 1fr;gap:18px;border:1px solid var(--cream-12);border-radius:16px;background:var(--panel);padding:18px;}
+    /* No Wikipedia thumbnail → single full-width column so the article isn't crushed
+       into the 120px thumbnail track (one-word-per-line bug). */
+    .bgcard.nothumb{grid-template-columns:1fr;}
     @media (max-width:560px){.bgcard{grid-template-columns:1fr;}}
     .bgthumb{width:100%;border:1px solid var(--cream-12);border-radius:10px;}
     .bgtitle{font-family:var(--serif);font-weight:700;letter-spacing:-.01em;font-size:19px;color:var(--warm-cream);}
@@ -130,7 +133,7 @@
     .loading.err{color:var(--down);}
     .skelcard{aspect-ratio:2/3;border-radius:16px;background:linear-gradient(100deg,#241d18 30%,#31281f 50%,#241d18 70%);background-size:200% 100%;animation:shimmer 1.2s ease-in-out infinite;}
     @keyframes shimmer{to{background-position:-200% 0;}}
-    .wakebanner{position:fixed;left:50%;bottom:18px;transform:translateX(-50%) translateY(20px);display:flex;align-items:center;gap:10px;background:var(--panel);color:var(--cream);font-family:var(--mono);font-size:12px;letter-spacing:.03em;padding:12px 18px;border-radius:100px;border:1px solid var(--brass);box-shadow:0 12px 40px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:200;}
+    .wakebanner{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);display:flex;align-items:center;gap:10px;background:var(--panel);color:var(--cream);font-family:var(--mono);font-size:12px;letter-spacing:.03em;padding:12px 18px;border-radius:100px;border:1px solid var(--brass);box-shadow:0 12px 40px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:200;}
     .wakebanner.show{opacity:1;transform:translateX(-50%) translateY(0);}
     .wakebanner::before{content:"";width:14px;height:14px;border:2px solid var(--cream-30);border-top-color:var(--brass);border-radius:50%;animation:spin .7s linear infinite;box-sizing:border-box;}
 
@@ -142,7 +145,7 @@
     .rawbar button{font-family:var(--mono);font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.08em;padding:6px 14px;border:1px solid var(--cream-12);background:transparent;color:var(--cream);border-radius:100px;cursor:pointer;transition:border-color .15s;}
     .rawbar button:hover{border-color:var(--cream-30);}
 
-    .lb{position:fixed;inset:0;background:rgba(16,12,10,.94);display:none;align-items:center;justify-content:center;flex-direction:column;z-index:120;padding:24px;}
+    .lb{position:fixed;inset:0;background:rgba(16,12,10,.94);display:none;align-items:center;justify-content:center;flex-direction:column;z-index:120;padding:24px;padding-bottom:calc(24px + env(safe-area-inset-bottom));}
     .lb.open{display:flex;}
     .lb img{max-width:92vw;max-height:76vh;border:1px solid var(--cream-30);border-radius:8px;box-shadow:0 24px 70px rgba(0,0,0,.7);}
     .lb .bar{display:flex;gap:12px;margin-top:16px;align-items:center;flex-wrap:wrap;justify-content:center;}
@@ -182,13 +185,15 @@
       .tab{padding:10px 16px;}
       .grid{gap:10px;}
       .crewgrid{grid-template-columns:1fr;}
-      .lb{padding:14px;}
+      .lb{padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom));}
       .lb img{max-width:94vw;max-height:64vh;}
       .lb .bar{gap:8px;margin-top:12px;}
       .lb a,.lb button{font-size:12px;padding:9px 14px;letter-spacing:.01em;}
       .lb .cap{font-size:10px;}
     }
     .hidden{display:none!important;}
+    /* Touch devices: no sticky hover-lift left applied after a tap. */
+    @media (hover:none){ .person:hover,.gimg:hover,.vid:hover{transform:none;} }
     /* Touch devices (phones/tablets): guarantee ~44px minimum tap targets.
        Scoped to pointer:coarse so the confirmed mouse/desktop layout is unchanged. */
     @media (pointer:coarse){
@@ -207,7 +212,7 @@
   <div class="wrap">
     <div class="topbar">
       <a class="back" id="back" href="/">← Search</a>
-      <span class="brand">TBSI · Film Record · Localhost</span>
+      <span class="brand" id="brand">TBSI · Film Record</span>
     </div>
     <div class="status" id="status">Loading…</div>
     <div id="body" class="hidden"></div>
@@ -232,13 +237,37 @@
   <script>
     const $ = (s) => document.querySelector(s);
     const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+    // Debug info (scores, popularity, raw JSON, the "· Localhost" brand suffix) shows only on a
+    // local dev host, never on the deployed site.
+    const IS_LOCAL = ["localhost","127.0.0.1"].includes(location.hostname);
+    // Mirrors the pipeline's TMDB_FALLBACK_MIN_VOTES (src/rendering/_shared.ts) — deliberately a
+    // tool-local const, NOT imported from src/. TMDb's own score only surfaces once it clears this
+    // vote floor, so a thin 1-vote "10/10" never masquerades as a real rating.
+    const TMDB_MIN_VOTES = 50;
+    // Neutral empty-thumb monogram: the title/name's first letter (consistent across pages).
+    const initial = (s) => { const t = String(s ?? "").trim(); return t ? esc(t[0].toUpperCase()) : "·"; };
+    // Per-device watchlist id: a stable random id kept in localStorage and sent as the
+    // X-TBSI-Device header, so each device (phone, laptop) keeps its own saved list.
+    const DEVICE_ID = (() => {
+      try {
+        let id = localStorage.getItem("tbsi_device_id");
+        if (!id || !/^[A-Za-z0-9-]{8,64}$/.test(id)) {
+          id = (crypto && crypto.randomUUID) ? crypto.randomUUID()
+             : Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+          localStorage.setItem("tbsi_device_id", id);
+        }
+        return id;
+      } catch (e) { return "legacy"; } // private mode / storage blocked → shared bucket
+    })();
+    const deviceHeaders = () => ({ "X-TBSI-Device": DEVICE_ID });
     const statusEl = $("#status");
     function setStatus(m, err){ statusEl.textContent = m||""; statusEl.classList.toggle("err", !!err); statusEl.classList.toggle("hidden", !m); }
     const id = new URLSearchParams(location.search).get("id");
+    if (IS_LOCAL) { const b = document.getElementById("brand"); if (b) b.append(" · Localhost"); }
     // Return to the search page with the prior query if we have it.
     $("#back").href = document.referrer && document.referrer.includes("/?q=") ? document.referrer : "/";
 
-    async function getJson(url){ const r = await fetch(url); const d = await r.json().catch(()=>({error:"bad JSON"})); if(!r.ok) throw new Error(d.error||("HTTP "+r.status)); return d; }
+    async function getJson(url, opts){ const r = await fetch(url, opts); const d = await r.json().catch(()=>({error:"bad JSON"})); if(!r.ok) throw new Error(d.error||("HTTP "+r.status)); return d; }
 
     // ── Cold-start "waking up" banner: shown while any tracked fetch is in
     // flight longer than 3s (Render free-tier wakes in ~30-60s), hidden once all
@@ -289,11 +318,13 @@
       if(!rel.length&&d.releaseDate) rel.push(esc(d.releaseDate));
 
       const rc=[]; const R=d.ratings||{};
-      if(R.tmdbScore!=null) rc.push(`TMDb ${R.tmdbScore.toFixed(1)}/10${R.tmdbVotes?" · "+R.tmdbVotes.toLocaleString()+" votes":""}`);
+      // TMDb's own score is shown only once it clears the vote floor (mirrors the pipeline).
+      if(R.tmdbScore!=null && (R.tmdbVotes||0) >= TMDB_MIN_VOTES) rc.push(`TMDb ${R.tmdbScore.toFixed(1)}/10${R.tmdbVotes?" · "+R.tmdbVotes.toLocaleString()+" votes":""}`);
       if(R.imdbRating!=null) rc.push(`IMDb ${R.imdbRating.toFixed(1)}/10`);
       if(R.rottenTomatoes!=null) rc.push(`RT ${R.rottenTomatoes}%`);
       if(R.metacritic!=null) rc.push(`Metacritic ${R.metacritic}`);
-      if(R.tmdbPopularity!=null) rc.push(`Popularity ${Math.round(R.tmdbPopularity)}`);
+      // Popularity is a debug signal — local only.
+      if(IS_LOCAL && R.tmdbPopularity!=null) rc.push(`Popularity ${Math.round(R.tmdbPopularity)}`);
 
       const ids=[`<a class="link" href="https://www.themoviedb.org/movie/${d.id}" target="_blank" rel="noopener">TMDb ${d.id} ↗</a>`];
       if(d.imdbId) ids.push(`<a class="link" href="https://www.imdb.com/title/${esc(d.imdbId)}" target="_blank" rel="noopener">${esc(d.imdbId)} ↗</a>`);
@@ -301,7 +332,7 @@
       const money = (n)=> n ? "$"+n.toLocaleString() : "";
 
       $("#body").innerHTML = `
-        <div class="seclabel"><span>Film Record</span><span class="count">TMDb ${d.id}</span></div>
+        <div class="seclabel"><span>Film Record</span></div>
         <div class="hero">
           <div>${poster}</div>
           <div>
@@ -313,7 +344,7 @@
             <div class="fields">
               ${fieldFull("Synopsis", d.synopsis?esc(d.synopsis):"", "syn")}
               ${field("Genre", fieldChips(d.genre))}
-              ${field("Streaming (India)", d.platforms&&d.platforms.length?fieldChips(d.platforms,"plat"):`<span style="color:var(--ink-soft)">none found</span>`)}
+              ${field("Streaming (India)", d.platforms&&d.platforms.length?fieldChips(d.platforms,"plat"):`<span style="color:var(--ink-soft)">Not streaming in India yet</span>`)}
               ${field("Director", d.director?esc(d.director):"")}
               ${field("Music", d.musicDirector?esc(d.musicDirector):"")}
               ${field("Audio Languages", audio)}
@@ -361,24 +392,25 @@
           <div id="bg"><div class="loading"><span class="spinner"></span>Loading background…</div></div>
         </div>
 
-        <div class="seclabel"><span>Raw Data</span><span class="count">complete source payloads (movie · credits · omdb · images · videos · wiki)</span></div>
+        ${IS_LOCAL ? `<div class="seclabel"><span>Raw Data</span><span class="count">complete source payloads (movie · credits · omdb · images · videos · wiki)</span></div>
         <details class="raw">
           <summary>▸ Show raw JSON (rawData)</summary>
           <pre id="rawPre"></pre>
           <div class="rawbar"><button id="rawCopy">Copy JSON</button></div>
-        </details>`;
+        </details>` : ""}`;
       $("#body").classList.remove("hidden");
 
       renderCast(d.cast||[]);
       renderCrew(d.crew||[]);
       initSave(d);
       RAW.detail = d.rawData; renderRaw();
-      $("#rawCopy").addEventListener("click", ()=>{ navigator.clipboard.writeText($("#rawPre").textContent).then(()=>{ $("#rawCopy").textContent="Copied ✓"; setTimeout(()=>$("#rawCopy").textContent="Copy JSON",1200); }); });
+      const rawCopyBtn = $("#rawCopy"); // only present on local hosts (Raw Data is IS_LOCAL-gated)
+      if (rawCopyBtn) rawCopyBtn.addEventListener("click", ()=>{ navigator.clipboard.writeText($("#rawPre").textContent).then(()=>{ rawCopyBtn.textContent="Copied ✓"; setTimeout(()=>rawCopyBtn.textContent="Copy JSON",1200); }); });
     }
 
     function renderCast(cast){
       $("#castGrid").innerHTML = cast.map(c=>{
-        const ph = c.profileUrl ? `<span class="ph" style="background-image:url('${esc(c.profileUrl)}')"></span>` : `<span class="ph empty">no image</span>`;
+        const ph = c.profileUrl ? `<span class="ph" style="background-image:url('${esc(c.profileUrl)}')"></span>` : `<span class="ph empty">${initial(c.name)}</span>`;
         return `<div class="person" data-pid="${c.id}">
           ${ph}<div class="pm"><div class="pn">${esc(c.name)}</div>${c.character?`<div class="pr">${esc(c.character)}</div>`:""}</div>
         </div>`;
@@ -416,7 +448,7 @@
         const order = [p.prefer||"IN", "US", "GB"].filter((c,i,a)=>a.indexOf(c)===i);
         const rest = Object.keys(countries).filter(c=>!order.includes(c)).sort();
         const codes = [...order.filter(c=>countries[c]), ...rest];
-        if (!codes.length){ $("#provCount").textContent="none listed"; $("#providers").innerHTML=`<div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft)">No streaming providers listed (JustWatch via TMDb).</div>`; return; }
+        if (!codes.length){ $("#provCount").textContent="none listed"; $("#providers").innerHTML=`<div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft)">Not streaming in India yet</div>`; return; }
         $("#provCount").textContent = codes.length+" region"+(codes.length===1?"":"s");
         const kinds = [["flatrate","Stream"],["free","Free"],["ads","With ads"],["rent","Rent"],["buy","Buy"]];
         $("#providers").innerHTML = codes.map(code=>{
@@ -425,7 +457,7 @@
             <div class="prow"><span class="pk">${label}</span><span class="pv">${c[k].map(pr=>`<span class="pchip">${pr.logoUrl?`<img src="${esc(pr.logoUrl)}" alt=""/>`:""}${esc(pr.name)}</span>`).join("")}</span></div>`).join("");
           if (!rows) return "";
           return `<div class="pcountry"><div class="pcode">${esc(code)}${c.link?` · <a class="link" href="${esc(c.link)}" target="_blank" rel="noopener">JustWatch ↗</a>`:""}</div>${rows}</div>`;
-        }).join("") || `<div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft)">No streaming providers listed.</div>`;
+        }).join("") || `<div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft)">Not streaming in India yet</div>`;
       } catch(e){ $("#provCount").textContent="unavailable"; $("#providers").innerHTML=`<div class="loading err">Couldn’t load providers.</div>`; }
     }
 
@@ -456,7 +488,7 @@
         if (!found.length){ $("#bgCount").textContent="no article found"; $("#bg").innerHTML = `<div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft)">No Wikipedia article found for this title.</div>`; return; }
         $("#bgCount").textContent = found.map(r=>r.source).join(", ");
         $("#bg").innerHTML = found.map(r=>`
-          <div class="bgcard">
+          <div class="bgcard${r.thumbnail?"":" nothumb"}">
             ${r.thumbnail?`<img class="bgthumb" src="${esc(r.thumbnail)}" alt="" />`:""}
             <div class="bgbody">
               <div class="bgtitle">${esc(r.title)}${r.description?` <span class="bgdesc">— ${esc(r.description)}</span>`:""}</div>
@@ -531,14 +563,14 @@
     async function initSave(d){
       const btn = $("#saveBtn"); if(!btn) return;
       let saved = false;
-      try { const w = await getJson("/api/watchlist"); saved = (w.items||[]).some(i=>i.type==="film" && String(i.tmdbId)===String(d.id)); } catch(e){ /* watchlist best-effort */ }
+      try { const w = await getJson("/api/watchlist", { headers: deviceHeaders() }); saved = (w.items||[]).some(i=>i.type==="film" && String(i.tmdbId)===String(d.id)); } catch(e){ /* watchlist best-effort */ }
       const paint = ()=>{ btn.textContent = saved ? "★ Saved" : "☆ Save"; btn.classList.toggle("on", saved); };
       paint();
       btn.addEventListener("click", async ()=>{
         btn.disabled = true;
         try {
-          if (saved){ await fetch(`/api/watchlist/film/${d.id}`, { method:"DELETE" }); saved = false; }
-          else { await fetch("/api/watchlist", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ type:"film", id:d.id, title:d.title }) }); saved = true; }
+          if (saved){ await fetch(`/api/watchlist/film/${d.id}`, { method:"DELETE", headers: deviceHeaders() }); saved = false; }
+          else { await fetch("/api/watchlist", { method:"POST", headers:{"Content-Type":"application/json", ...deviceHeaders()}, body: JSON.stringify({ type:"film", id:d.id, title:d.title }) }); saved = true; }
           paint();
         } catch(e){ /* leave state */ } finally { btn.disabled = false; }
       });

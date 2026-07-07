@@ -1,10 +1,14 @@
-# TBSI Movie Lookup (internal, localhost only)
+# TBSI Movie Lookup
 
-A small standalone tool: type a movie name, get its full details + a gallery of
-every official poster & backdrop TMDb offers (click to view full-size / download).
+A standalone film / person / poster lookup, deployed publicly at
+**thebigscreenindex.com** (Render auto-deploys `main`; it's an installable PWA).
+Type a movie name, get its full details + a gallery of every official poster &
+backdrop TMDb offers (click to view full-size / download).
 
-For internal reference only. Nothing is posted, no job runs, no billed LLM call
-is made. It reuses the pipeline's existing TMDb resolution code read-only.
+Nothing is posted, no job runs, no billed LLM call is made — it reuses the
+pipeline's existing TMDb resolution code read-only. Debug views (raw JSON,
+relevance scores, TMDb popularity, the "· Localhost" brand tag) render **only on a
+localhost dev host**, never on the deployed site.
 
 ## Why it lives in `scripts/` (not `tools/`)
 

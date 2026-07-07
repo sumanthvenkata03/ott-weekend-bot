@@ -8,6 +8,10 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#1A1614" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="TBSI Lookup" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -29,7 +33,7 @@
     @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto;} *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition:none!important;}}
     .wrap{max-width:1120px;margin:0 auto;padding:22px 22px 90px;}
     a{color:var(--brass);} a:hover{color:var(--gold-light);}
-    .topbar{position:sticky;top:0;z-index:60;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(26,22,20,.88);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid var(--cream-12);padding:12px 0;margin-bottom:4px;}
+    .topbar{position:sticky;top:0;z-index:60;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(26,22,20,.88);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid var(--cream-12);padding:12px 0;padding-top:calc(12px + env(safe-area-inset-top));margin-bottom:4px;}
     .back{font-family:var(--sans);font-size:13.5px;font-weight:500;letter-spacing:.01em;text-decoration:none;color:var(--cream-60);border:1px solid var(--cream-12);border-radius:100px;padding:7px 14px;cursor:pointer;transition:color .15s,border-color .15s;}
     .back:hover{color:var(--cream);border-color:var(--cream-30);}
     .brand{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--cream-60);display:inline-flex;align-items:center;gap:8px;}
@@ -48,7 +52,7 @@
     .card{cursor:pointer;border:1px solid var(--cream-12);background:var(--panel);border-radius:16px;overflow:hidden;text-decoration:none;color:inherit;display:block;transition:transform .15s,border-color .15s;}
     .card:hover{transform:translateY(-6px);border-color:var(--cream-30);}
     .card .p{aspect-ratio:2/3;background:var(--thumb) center/cover no-repeat;display:flex;align-items:center;justify-content:center;}
-    .card .p.empty{font-family:var(--mono);font-size:10px;color:var(--cream-60);}
+    .card .p.empty{font-family:var(--serif);font-weight:600;font-size:30px;color:var(--cream-30);}
     .card .m{padding:10px 11px 12px;}
     .card .t{font-family:var(--serif);font-weight:600;letter-spacing:-.01em;font-size:14px;line-height:1.15;color:var(--cream);}
     .card .d{font-family:var(--mono);font-size:10px;color:var(--cream-60);margin-top:4px;}
@@ -59,6 +63,17 @@
     @keyframes spin{to{transform:rotate(360deg);}}
     .msg{font-family:var(--mono);font-size:12px;color:var(--cream-60);padding:10px 2px;}
     .msg.err{color:var(--down);}
+
+    @media (max-width:520px){
+      .wrap{padding:16px 14px 60px;}
+      .brand{font-size:9px;letter-spacing:.14em;text-align:right;}
+      h1{font-size:clamp(24px,7vw,34px);}
+      .grid{grid-template-columns:repeat(2,1fr);gap:12px;}
+      .tab{padding:10px 14px;}
+    }
+    /* Touch devices: no sticky hover-lift left applied after a tap. */
+    @media (hover:none){ .card:hover{transform:none;} }
+
     /* Touch devices (phones/tablets): guarantee ~44px minimum tap targets.
        Scoped to pointer:coarse so the confirmed mouse/desktop layout is unchanged. */
     @media (pointer:coarse){
@@ -77,7 +92,7 @@
   <div class="wrap">
     <div class="topbar">
       <a class="back" href="/">← Search</a>
-      <span class="brand">TBSI · Releases · Localhost</span>
+      <span class="brand" id="brand">TBSI · Releases</span>
     </div>
     <h1>In Cinemas &amp; Upcoming</h1>
     <div class="lede">Region: India (IN) · via TMDb</div>
@@ -92,6 +107,11 @@
   <script>
     const $ = (s) => document.querySelector(s);
     const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+    // The "· Localhost" brand suffix shows only on a local dev host, never on the deployed site.
+    const IS_LOCAL = ["localhost","127.0.0.1"].includes(location.hostname);
+    // Neutral empty-thumb monogram: the title's first letter (consistent across pages).
+    const initial = (s) => { const t = String(s ?? "").trim(); return t ? esc(t[0].toUpperCase()) : "·"; };
+    if (IS_LOCAL) { const b = document.getElementById("brand"); if (b) b.append(" · Localhost"); }
     async function getJson(url){ const r = await fetch(url); const d = await r.json().catch(()=>({error:"bad JSON"})); if(!r.ok) throw new Error(d.error||("HTTP "+r.status)); return d; }
     const cache = {};
     let cur = "now";
@@ -101,7 +121,7 @@
       $("#count").textContent = list.length + " title" + (list.length===1?"":"s");
       if(!list.length){ $("#grid").innerHTML = `<div class="msg">Nothing listed right now.</div>`; return; }
       $("#grid").innerHTML = list.map(m=>{
-        const p = m.posterUrl ? `<span class="p" style="background-image:url('${esc(m.posterUrl)}')"></span>` : `<span class="p empty">no poster</span>`;
+        const p = m.posterUrl ? `<span class="p" style="background-image:url('${esc(m.posterUrl)}')"></span>` : `<span class="p empty">${initial(m.title)}</span>`;
         const rel = m.releaseDate ? m.releaseDate : (m.year||"");
         return `<a class="card" href="/movie.html?id=${m.id}">${p}<div class="m"><div class="t">${esc(m.title)}</div><div class="d">${esc(rel)}${m.language?" · "+esc(m.language):""}</div>${m.voteAverage?`<div class="r">★ ${m.voteAverage.toFixed(1)}</div>`:""}</div></a>`;
       }).join("");

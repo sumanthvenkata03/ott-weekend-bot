@@ -27,7 +27,7 @@
       --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
     }
     *{box-sizing:border-box;} html,body{margin:0;padding:0;}
-    body{background:var(--ink);color:var(--cream);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+    body{background:var(--ink);color:var(--cream);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;padding-top:env(safe-area-inset-top);}
     ::selection{background:rgba(242,212,138,.28);color:var(--ink);}
     :focus-visible{outline:2px solid var(--gold-light);outline-offset:3px;}
     @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto;} *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition:none!important;}}
@@ -58,7 +58,7 @@
     .sitem:last-child{border-bottom:none;}
     .sitem.active,.sitem:hover{background:rgba(244,236,220,.05);}
     .sitem .st{flex:0 0 38px;height:57px;background:var(--thumb) center/cover no-repeat;border:1px solid var(--cream-12);border-radius:6px;}
-    .sitem .st.empty{display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:7px;color:var(--cream-60);text-align:center;}
+    .sitem .st.empty{display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-weight:600;font-size:18px;color:var(--cream-30);text-align:center;}
     .sitem .sinfo{min-width:0;flex:1;}
     .sitem .stitle{font-family:var(--serif);font-weight:600;letter-spacing:-.01em;font-size:15px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--cream);}
     .sitem .smeta{font-family:var(--mono);font-size:10px;color:var(--cream-60);margin-top:2px;}
@@ -84,7 +84,7 @@
     .cand{cursor:pointer;border:1px solid var(--cream-12);background:var(--panel);border-radius:16px;overflow:hidden;transition:transform .15s,border-color .15s;text-decoration:none;color:inherit;display:block;}
     .cand:hover{transform:translateY(-6px);border-color:var(--cream-30);}
     .cand .thumb{aspect-ratio:2/3;background:var(--thumb) center/cover no-repeat;display:block;}
-    .cand .thumb.empty{display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;color:var(--cream-60);text-align:center;padding:8px;}
+    .cand .thumb.empty{display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-weight:600;font-size:30px;color:var(--cream-30);text-align:center;padding:8px;}
     .cand .meta{padding:10px 11px 12px;}
     .cand .t{font-family:var(--serif);font-weight:600;letter-spacing:-.01em;font-size:15px;line-height:1.15;color:var(--cream);}
     .cand .m{font-family:var(--mono);font-size:10px;color:var(--cream-60);margin-top:4px;}
@@ -103,7 +103,7 @@
     .pcard{cursor:pointer;border:1px solid var(--cream-12);background:var(--panel);border-radius:16px;overflow:hidden;text-decoration:none;color:inherit;display:block;transition:transform .15s,border-color .15s;}
     .pcard:hover{transform:translateY(-6px);border-color:var(--cream-30);}
     .pcard .p{aspect-ratio:2/3;background:var(--thumb) center/cover no-repeat;display:flex;align-items:center;justify-content:center;}
-    .pcard .p.empty{font-family:var(--mono);font-size:10px;color:var(--cream-60);text-align:center;padding:8px;}
+    .pcard .p.empty{font-family:var(--serif);font-weight:600;font-size:30px;color:var(--cream-30);text-align:center;padding:8px;}
     .pcard .m{padding:10px 11px 12px;}
     .pcard .t{font-family:var(--serif);font-weight:600;letter-spacing:-.01em;font-size:14px;line-height:1.15;color:var(--cream);}
     .pcard .d{font-family:var(--mono);font-size:10px;color:var(--cream-60);margin-top:4px;}
@@ -112,7 +112,7 @@
     @keyframes shimmer{to{background-position:-200% 0;}}
     .feedmsg{font-family:var(--mono);font-size:12px;color:var(--cream-60);padding:10px 2px;}
     .feedmsg.err{color:var(--down);cursor:pointer;}
-    .wakebanner{position:fixed;left:50%;bottom:18px;transform:translateX(-50%) translateY(20px);display:flex;align-items:center;gap:10px;background:var(--panel);color:var(--cream);font-family:var(--mono);font-size:12px;letter-spacing:.03em;padding:12px 18px;border-radius:100px;border:1px solid var(--brass);box-shadow:0 12px 40px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:200;}
+    .wakebanner{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);display:flex;align-items:center;gap:10px;background:var(--panel);color:var(--cream);font-family:var(--mono);font-size:12px;letter-spacing:.03em;padding:12px 18px;border-radius:100px;border:1px solid var(--brass);box-shadow:0 12px 40px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:200;}
     .wakebanner.show{opacity:1;transform:translateX(-50%) translateY(0);}
     .wakebanner::before{content:"";width:14px;height:14px;border:2px solid var(--cream-30);border-top-color:var(--brass);border-radius:50%;animation:spin .7s linear infinite;box-sizing:border-box;}
     .hidden{display:none!important;}
@@ -127,6 +127,11 @@
       .hint{font-size:9.5px;}
       .cands{grid-template-columns:repeat(2,1fr);gap:12px;}
       .sitem .stitle{font-size:14px;}
+    }
+    /* Touch devices: no sticky hover-lift after a tap; keyboard-only hints are moot. */
+    @media (hover:none){
+      .cand:hover,.pcard:hover{transform:none;}
+      .sfoot{display:none;}
     }
     /* Touch devices (phones/tablets): guarantee ~44px minimum tap targets.
        Scoped to pointer:coarse so the confirmed mouse/desktop layout is unchanged. */
@@ -161,7 +166,7 @@
         <input id="q" type="text" placeholder="Type a film name…  e.g.  telugu boss" autocomplete="off" autofocus />
         <button type="submit">Search</button>
       </form>
-      <div class="hint">Type any words, any order · language/year help ranking · ↑↓ to navigate · Enter for full results</div>
+      <div class="hint">Search films, people, series &amp; studios — any words, any order</div>
       <div class="suggest" id="suggest"></div>
     </div>
     <div class="status" id="status"></div>
@@ -189,6 +194,10 @@
     const $ = (s) => document.querySelector(s);
     const statusEl = $("#status"), qEl = $("#q"), sug = $("#suggest");
     const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+    // Debug-only signals (scores) show only on a local dev host, never on the deployed site.
+    const IS_LOCAL = ["localhost","127.0.0.1"].includes(location.hostname);
+    // Neutral empty-thumb monogram: the title's first letter (consistent across pages).
+    const initial = (s) => { const t = String(s ?? "").trim(); return t ? esc(t[0].toUpperCase()) : "·"; };
     function setStatus(m, err){ statusEl.textContent = m||""; statusEl.classList.toggle("err", !!err); }
 
     // ── Client cache (in-memory + sessionStorage) + stale-request guard ──
@@ -293,13 +302,13 @@
       if (!cands.length){ closeSuggest(); return; }
       sug.innerHTML = cands.map((c, i) => {
         const href = isClickable(c) ? typeHref(c) : "javascript:void(0)";
-        const thumb = c.thumb ? `<span class="st" style="background-image:url('${esc(c.thumb)}')"></span>` : `<span class="st empty">no img</span>`;
+        const thumb = c.thumb ? `<span class="st" style="background-image:url('${esc(c.thumb)}')"></span>` : `<span class="st empty">${initial(c.title)}</span>`;
         const badge = `<span class="sbadge ${TYPE_CLS[c.type]||""}">${TYPE_LABEL[c.type]||c.type}</span>`;
         return `<a class="sitem" data-i="${i}" data-type="${c.type}" data-id="${c.id}" href="${href}">
           ${thumb}
           <span class="sinfo">
             <span class="stitle">${esc(c.title)}</span>
-            <span class="smeta">${esc(typeSub(c))} · score ${esc(c.score)}</span>
+            <span class="smeta">${esc(typeSub(c))}${IS_LOCAL ? " · score " + esc(c.score) : ""}</span>
           </span>
           ${badge}
         </a>`;
@@ -372,15 +381,17 @@
     function render(cands) {
       $("#candCount").textContent = cands.length + " result" + (cands.length === 1 ? "" : "s");
       $("#cands").innerHTML = cands.map((c, i) => {
-        const thumb = c.thumb ? `<span class="thumb" style="background-image:url('${esc(c.thumb)}')"></span>` : `<span class="thumb empty">no image</span>`;
+        const thumb = c.thumb ? `<span class="thumb" style="background-image:url('${esc(c.thumb)}')"></span>` : `<span class="thumb empty">${initial(c.title)}</span>`;
         const badge = `<span class="badge ${TYPE_CLS[c.type]||""}">${TYPE_LABEL[c.type]||c.type}</span>`;
         const href = isClickable(c) ? typeHref(c) : "javascript:void(0)";
+        // "score N" is a debug signal (local only); the ★ rating is public.
+        const line3 = [IS_LOCAL ? "score " + esc(c.score) : "", c.voteAverage ? "★" + c.voteAverage.toFixed(1) : ""].filter(Boolean).join(" · ");
         return `<a class="cand" href="${href}" data-i="${i}">
           ${thumb}
           <div class="meta">
             <div class="t">${esc(c.title)}</div>
             <div class="m">${esc(typeSub(c))}</div>
-            <div class="m" style="color:var(--brass);font-weight:700">score ${esc(c.score)}${c.voteAverage ? " · ★" + c.voteAverage.toFixed(1) : ""}</div>
+            ${line3 ? `<div class="m" style="color:var(--brass);font-weight:700">${line3}</div>` : ""}
             ${badge}
           </div>
         </a>`;
@@ -406,7 +417,7 @@
     const FEED_N = 12;
     function posterCards(list){
       return list.slice(0, FEED_N).map(m=>{
-        const poster = m.posterUrl ? `<span class="p" style="background-image:url('${esc(m.posterUrl)}')"></span>` : `<span class="p empty">no poster</span>`;
+        const poster = m.posterUrl ? `<span class="p" style="background-image:url('${esc(m.posterUrl)}')"></span>` : `<span class="p empty">${initial(m.title)}</span>`;
         const when = m.releaseDate || (m.year||"");
         return `<a class="pcard" href="/movie.html?id=${m.id}">${poster}<div class="m"><div class="t">${esc(m.title)}</div><div class="d">${esc(when)}${m.language?" · "+esc(m.language):""}</div>${m.voteAverage?`<div class="r">★ ${m.voteAverage.toFixed(1)}</div>`:""}</div></a>`;
       }).join("");

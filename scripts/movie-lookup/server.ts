@@ -36,6 +36,7 @@ import { authConfigFromEnv, authEnabled, checkBasicAuth, wwwAuthenticateHeader }
 import { TtlCache } from "./cache.js";
 import { movieReleases } from "./releases.js";
 import { createWatchlistBackend, isWatchType, MemoryWatchlist, type WatchlistBackend, type Queryable } from "./watchlist.js";
+import { createLimiter } from "./ratelimit.js";
 import pg from "pg";
 
 // In-memory TTL+LRU cache for API responses (tool-only; NOT cache.sqlite). Makes
@@ -43,6 +44,24 @@ import pg from "pg";
 // still happen on a miss. TTL configurable via MOVIE_LOOKUP_CACHE_TTL_MS.
 const CACHE_TTL_MS = Number.parseInt(process.env.MOVIE_LOOKUP_CACHE_TTL_MS ?? "", 10);
 const apiCache = new TtlCache({ ttlMs: Number.isFinite(CACHE_TTL_MS) && CACHE_TTL_MS > 0 ? CACHE_TTL_MS : undefined });
+
+// ── Per-IP rate limiting for /api/* (token bucket; see ratelimit.ts). Protects the
+// live TMDb/OMDb-backed endpoints from a hot loop or a scraper without ever touching
+// /healthz (UptimeRobot pings it) or static assets. Knobs via env, sane defaults. ──
+const RL_PER_MIN = Number.parseInt(process.env.MOVIE_LOOKUP_RATE_PER_MIN ?? "", 10);
+const RL_BURST = Number.parseInt(process.env.MOVIE_LOOKUP_RATE_BURST ?? "", 10);
+const RL_MAX_IPS = Number.parseInt(process.env.MOVIE_LOOKUP_RATE_MAX_IPS ?? "", 10);
+const RATE_PER_MIN = Number.isFinite(RL_PER_MIN) && RL_PER_MIN > 0 ? RL_PER_MIN : 120;
+const RATE_BURST = Number.isFinite(RL_BURST) && RL_BURST > 0 ? RL_BURST : 40;
+const RATE_MAX_IPS = Number.isFinite(RL_MAX_IPS) && RL_MAX_IPS > 0 ? RL_MAX_IPS : 5000;
+const RETRY_AFTER_S = String(Math.max(1, Math.ceil(60 / RATE_PER_MIN)));
+const rateLimiter = createLimiter({ perMin: RATE_PER_MIN, burst: RATE_BURST, maxIps: RATE_MAX_IPS });
+// Client IP: first hop of X-Forwarded-For (Render sets it) else the socket peer.
+function clientIp(req: IncomingMessage): string {
+  const xff = req.headers["x-forwarded-for"];
+  const first = (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0]?.trim();
+  return first || req.socket.remoteAddress || "unknown";
+}
 
 // Persistent watchlist store. Postgres when DATABASE_URL is set (survives
 // redeploys, syncs across devices); in-memory fallback otherwise. `pg` is only
@@ -158,6 +177,16 @@ function intId(seg: string | undefined): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+// Per-device watchlist scoping. The client sends a stable id (localStorage) in the
+// `X-TBSI-Device` header; we accept only a conservative charset/length and otherwise
+// fall back to the shared "legacy" bucket (also where all pre-device rows live).
+const DEVICE_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
+function deviceIdFromReq(req: IncomingMessage): string {
+  const raw = req.headers["x-tbsi-device"];
+  const val = Array.isArray(raw) ? raw[0] : raw;
+  return val && DEVICE_ID_RE.test(val) ? val : "legacy";
+}
+
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", `http://${HOST}:${PORT}`);
@@ -169,6 +198,17 @@ const server = createServer(async (req, res) => {
       return void res.end("ok");
     }
 
+    // ── Rate limit /api/* only (never /healthz above; never static assets / HTML
+    // navigations below — those don't start with "/api/"). Over the limit → 429. ──
+    if (path.startsWith("/api/") && !rateLimiter.take(clientIp(req))) {
+      res.writeHead(429, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Retry-After": RETRY_AFTER_S,
+      });
+      return void res.end(JSON.stringify({ error: "rate limit exceeded — slow down and retry shortly" }));
+    }
+
     // ── Auth gate (all other routes) ──
     if (!passesAuth(req, res)) return;
 
@@ -176,8 +216,9 @@ const server = createServer(async (req, res) => {
     // GET-only guard since it accepts writes. Single shared list, no users. ──
     const wseg = path.split("/").filter(Boolean); // ["api","watchlist",type,id]
     if (wseg[0] === "api" && wseg[1] === "watchlist") {
+      const deviceId = deviceIdFromReq(req); // scopes every op to this device (else "legacy")
       if (!wseg[2]) {
-        if (req.method === "GET") return sendJson(res, 200, { items: await watchlist.list(), store: watchlist.kind });
+        if (req.method === "GET") return sendJson(res, 200, { items: await watchlist.list(deviceId), store: watchlist.kind });
         if (req.method === "POST") {
           let body: Record<string, unknown>;
           try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "invalid JSON body" }); }
@@ -186,7 +227,7 @@ const server = createServer(async (req, res) => {
           const title = String(body.title ?? "").trim();
           if (!isWatchType(type) || tmdbId === undefined || !title) return sendJson(res, 400, { error: "type (film|person), id, title are required" });
           const note = body.note ? String(body.note) : undefined;
-          const item = await watchlist.add({ type, tmdbId, title, note });
+          const item = await watchlist.add({ type, tmdbId, title, note }, deviceId);
           return sendJson(res, 200, { item, store: watchlist.kind });
         }
         return sendJson(res, 405, { error: "GET or POST only" });
@@ -196,7 +237,7 @@ const server = createServer(async (req, res) => {
           const type = wseg[2];
           const tmdbId = intId(wseg[3]);
           if (!isWatchType(type) || tmdbId === undefined) return sendJson(res, 400, { error: "bad type/id" });
-          await watchlist.remove(type, tmdbId);
+          await watchlist.remove(type, tmdbId, deviceId);
           return sendJson(res, 200, { ok: true, store: watchlist.kind });
         }
         return sendJson(res, 405, { error: "DELETE only" });
@@ -306,6 +347,7 @@ server.listen(PORT, HOST, () => {
   const ttlMs = Number.isFinite(CACHE_TTL_MS) && CACHE_TTL_MS > 0 ? CACHE_TTL_MS : 20 * 60 * 1000;
   const ttlHuman = ttlMs >= 60000 ? `${Math.round(ttlMs / 60000)}m` : `${Math.round(ttlMs / 1000)}s`;
   console.log(`   Cache: in-memory TTL ${ttlHuman} (MOVIE_LOOKUP_CACHE_TTL_MS)`);
+  console.log(`   Rate limit: ${RATE_PER_MIN}/min per IP · burst ${RATE_BURST} · ≤${RATE_MAX_IPS} IPs (/api/* only)`);
   // Bring up the watchlist store; if the DB init fails, fall back to memory so
   // the server never crashes over a bad/absent DATABASE_URL.
   void (async () => {

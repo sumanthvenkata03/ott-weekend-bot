@@ -66,9 +66,9 @@ describe("PWA manifest — well-formed + installable", () => {
     expect(m.start_url).toBe("/");
     expect(m.display).toBe("standalone");
   });
-  it("uses TBSI Ink/Cream theme + background colors", () => {
+  it("uses the TBSI dark (Ink) theme + background colors", () => {
     expect(m.theme_color).toBe("#1A1614");
-    expect(m.background_color).toBe("#F4ECDC");
+    expect(m.background_color).toBe("#1A1614");
   });
   it("declares 192 + 512 png icons (incl. a maskable)", () => {
     const icons = (m.icons ?? []) as Array<{ sizes?: string; type?: string; purpose?: string }>;

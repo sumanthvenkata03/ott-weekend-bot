@@ -29,12 +29,16 @@ export interface AddInput {
   note?: string;
 }
 
+// Every operation is scoped to a `deviceId` — the watchlist is per-device (a phone,
+// a laptop) rather than one global shared list. The server derives the id from the
+// `X-TBSI-Device` header, falling back to the sentinel "legacy" when it's missing or
+// malformed (which is also where all pre-device rows live).
 export interface WatchlistBackend {
   readonly kind: "postgres" | "memory";
   init(): Promise<void>;
-  list(): Promise<WatchlistItem[]>;
-  add(input: AddInput): Promise<WatchlistItem>;
-  remove(type: WatchType, tmdbId: number): Promise<void>;
+  list(deviceId: string): Promise<WatchlistItem[]>;
+  add(input: AddInput, deviceId: string): Promise<WatchlistItem>;
+  remove(type: WatchType, tmdbId: number, deviceId: string): Promise<void>;
 }
 
 export function isWatchType(t: unknown): t is WatchType {
@@ -44,17 +48,23 @@ export function isWatchType(t: unknown): t is WatchType {
 // ── In-memory fallback ────────────────────────────────────────────────────────
 export class MemoryWatchlist implements WatchlistBackend {
   readonly kind = "memory" as const;
+  // Keyed by `${device}|${type}|${id}` so two devices keep isolated lists in the one
+  // Map. Device ids are validated to `[A-Za-z0-9-]` upstream, so "|" never collides.
   private items = new Map<string, WatchlistItem>();
-  private key(type: WatchType, tmdbId: number): string {
-    return `${type}:${tmdbId}`;
+  private key(device: string, type: WatchType, tmdbId: number): string {
+    return `${device}|${type}|${tmdbId}`;
   }
   async init(): Promise<void> {}
-  async list(): Promise<WatchlistItem[]> {
-    // newest first
-    return [...this.items.values()].sort((a, b) => (a.addedAt < b.addedAt ? 1 : -1));
+  async list(deviceId: string): Promise<WatchlistItem[]> {
+    const prefix = `${deviceId}|`;
+    // newest first, this device only
+    return [...this.items.entries()]
+      .filter(([k]) => k.startsWith(prefix))
+      .map(([, v]) => v)
+      .sort((a, b) => (a.addedAt < b.addedAt ? 1 : -1));
   }
-  async add(input: AddInput): Promise<WatchlistItem> {
-    const k = this.key(input.type, input.tmdbId);
+  async add(input: AddInput, deviceId: string): Promise<WatchlistItem> {
+    const k = this.key(deviceId, input.type, input.tmdbId);
     const existing = this.items.get(k);
     const item: WatchlistItem = {
       type: input.type,
@@ -66,8 +76,8 @@ export class MemoryWatchlist implements WatchlistBackend {
     this.items.set(k, item);
     return item;
   }
-  async remove(type: WatchType, tmdbId: number): Promise<void> {
-    this.items.delete(this.key(type, tmdbId));
+  async remove(type: WatchType, tmdbId: number, deviceId: string): Promise<void> {
+    this.items.delete(this.key(deviceId, type, tmdbId));
   }
 }
 
@@ -101,39 +111,48 @@ export class PostgresWatchlist implements WatchlistBackend {
   constructor(private readonly db: Queryable) {}
 
   async init(): Promise<void> {
+    // Fresh install: device-scoped from the start. There is deliberately NO table-level
+    // UNIQUE(type,tmdb_id) — uniqueness is per-device, enforced by the index below.
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS watchlist (
         id BIGSERIAL PRIMARY KEY,
+        device_id TEXT NOT NULL DEFAULT 'legacy',
         type TEXT NOT NULL CHECK (type IN ('film','person')),
         tmdb_id BIGINT NOT NULL,
         title TEXT NOT NULL,
         note TEXT,
-        added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        UNIQUE (type, tmdb_id)
+        added_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
+    // Defensive migration for a PRE-EXISTING (pre-device) table: add the column, drop the
+    // old global UNIQUE(type,tmdb_id) constraint, and add the per-device unique index.
+    // Every step is idempotent (IF EXISTS / IF NOT EXISTS) so re-running init() is safe.
+    await this.db.query(`ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS device_id TEXT NOT NULL DEFAULT 'legacy'`);
+    await this.db.query(`ALTER TABLE watchlist DROP CONSTRAINT IF EXISTS watchlist_type_tmdb_id_key`);
+    await this.db.query(`CREATE UNIQUE INDEX IF NOT EXISTS watchlist_device_type_tmdb_idx ON watchlist(device_id, type, tmdb_id)`);
   }
 
-  async list(): Promise<WatchlistItem[]> {
+  async list(deviceId: string): Promise<WatchlistItem[]> {
     const { rows } = await this.db.query(
-      `SELECT type, tmdb_id, title, note, added_at FROM watchlist ORDER BY added_at DESC`
+      `SELECT type, tmdb_id, title, note, added_at FROM watchlist WHERE device_id = $1 ORDER BY added_at DESC`,
+      [deviceId]
     );
     return rows.map(rowToItem);
   }
 
-  async add(input: AddInput): Promise<WatchlistItem> {
+  async add(input: AddInput, deviceId: string): Promise<WatchlistItem> {
     const { rows } = await this.db.query(
-      `INSERT INTO watchlist (type, tmdb_id, title, note)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (type, tmdb_id) DO UPDATE SET title = EXCLUDED.title, note = EXCLUDED.note
+      `INSERT INTO watchlist (device_id, type, tmdb_id, title, note)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (device_id, type, tmdb_id) DO UPDATE SET title = EXCLUDED.title, note = EXCLUDED.note
        RETURNING type, tmdb_id, title, note, added_at`,
-      [input.type, input.tmdbId, input.title, input.note ?? null]
+      [deviceId, input.type, input.tmdbId, input.title, input.note ?? null]
     );
     return rowToItem(rows[0]!);
   }
 
-  async remove(type: WatchType, tmdbId: number): Promise<void> {
-    await this.db.query(`DELETE FROM watchlist WHERE type = $1 AND tmdb_id = $2`, [type, tmdbId]);
+  async remove(type: WatchType, tmdbId: number, deviceId: string): Promise<void> {
+    await this.db.query(`DELETE FROM watchlist WHERE device_id = $1 AND type = $2 AND tmdb_id = $3`, [deviceId, type, tmdbId]);
   }
 }
 
