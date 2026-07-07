@@ -156,7 +156,7 @@
     .lb .nav{position:absolute;top:50%;transform:translateY(-50%);z-index:2;width:52px;height:74px;display:flex;align-items:center;justify-content:center;padding:0;font-family:var(--serif);font-size:34px;line-height:1;font-weight:600;background:rgba(26,22,20,.6);color:var(--cream);border:1px solid var(--cream-30);border-radius:100px;cursor:pointer;transition:background .15s,border-color .15s;}
     .lb .nav:hover{background:var(--panel);border-color:var(--gold-light);}
     .lb .nav.prev{left:18px;} .lb .nav.next{right:18px;}
-    @media (max-width:640px){.lb .nav{width:42px;height:60px;font-size:28px;left:6px;} .lb .nav.next{right:6px;}}
+    @media (max-width:640px){.lb .nav{width:44px;height:60px;font-size:28px;} .lb .nav.prev{left:6px;} .lb .nav.next{right:6px;}}
     .lb .cap{font-family:var(--mono);font-size:11px;color:var(--cream-60);margin-top:8px;}
 
     .modal{position:fixed;inset:0;background:rgba(16,12,10,.8);display:none;align-items:flex-start;justify-content:center;z-index:80;padding:34px 18px;overflow:auto;}
@@ -189,6 +189,18 @@
       .lb .cap{font-size:10px;}
     }
     .hidden{display:none!important;}
+    /* Touch devices (phones/tablets): guarantee ~44px minimum tap targets.
+       Scoped to pointer:coarse so the confirmed mouse/desktop layout is unchanged. */
+    @media (pointer:coarse){
+      .back,.savebtn,.tab,.fbtn,.nav a,.rawbar button,.chosen .cx,.seeall{display:inline-flex;align-items:center;justify-content:center;min-height:44px;}
+      .fsort{min-height:44px;}
+      .crewrow{min-height:44px;}
+      .rm{min-height:40px;display:inline-flex;align-items:center;}
+      a.link{display:inline-block;padding:5px 0;}
+      .feed .seclabel{align-items:center;}
+      .lb a,.lb button{min-height:44px;}
+      .lb .nav{min-width:44px;}
+    }
   </style>
 </head>
 <body>
