@@ -14,7 +14,7 @@
  *   network-first, so even without a version bump a fresh deploy's HTML shows as
  *   soon as the device is online (cache is the offline fallback only).
  */
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 const CACHE = "tbsi-lookup-" + CACHE_VERSION;
 const SHELL = [
   "/",
