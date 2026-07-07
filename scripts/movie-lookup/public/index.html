@@ -38,9 +38,9 @@
     .rule-row::before,.rule-row::after{content:"";flex:1;height:1px;background:var(--line);}
     .rule-row span{font-family:var(--mono);font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:var(--vermillion);}
 
-    .searchzone{max-width:640px;margin:26px auto 8px;position:relative;}
+    .searchzone{max-width:600px;margin:16px auto 4px;position:relative;}
     .search{display:flex;gap:10px;}
-    .search input{flex:1;min-width:0;font-family:var(--serif);font-size:20px;color:var(--ink);background:#fbf6ea;border:1.5px solid var(--ink);border-radius:2px;padding:12px 16px;outline:none;}
+    .search input{flex:1;min-width:0;font-family:var(--serif);font-size:18px;color:var(--ink);background:#fbf6ea;border:1.5px solid var(--ink);border-radius:2px;padding:10px 14px;outline:none;}
     .search input:focus{border-color:var(--vermillion);box-shadow:0 0 0 3px rgba(163,50,35,.14);}
     .search button{flex:0 0 auto;min-height:48px;font-family:var(--mono);font-weight:700;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--cream);background:var(--vermillion);border:1.5px solid var(--maroon);border-radius:2px;padding:0 22px;cursor:pointer;}
     .search button:hover{background:var(--oxblood);}
@@ -86,6 +86,30 @@
     .cand .badge.tv{background:var(--brass);color:var(--ink);}
     .cand .badge.person{background:var(--vermillion);}
     .cand .badge.company{background:var(--oxblood);}
+    /* ── Home feeds (In Cinemas + Upcoming) ── */
+    .feeds{margin-top:22px;}
+    .feed{margin-top:26px;}
+    .feed .seclabel{display:flex;justify-content:space-between;align-items:baseline;}
+    .feed .seeall{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;text-decoration:none;color:var(--vermillion);}
+    .feed .seeall:hover{color:var(--oxblood);}
+    .prow{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:14px;}
+    @media (max-width:520px){.prow{grid-template-columns:repeat(2,1fr);gap:10px;}}
+    .pcard{cursor:pointer;border:1px solid var(--line);background:#fbf6ea;border-radius:2px;overflow:hidden;text-decoration:none;color:inherit;display:block;transition:transform .08s,border-color .08s;}
+    .pcard:hover{transform:translateY(-2px);border-color:var(--vermillion);}
+    .pcard .p{aspect-ratio:2/3;background:#e6dcc6 center/cover no-repeat;display:flex;align-items:center;justify-content:center;}
+    .pcard .p.empty{font-family:var(--mono);font-size:10px;color:var(--ink-soft);text-align:center;padding:8px;}
+    .pcard .m{padding:8px 9px 10px;}
+    .pcard .t{font-family:var(--serif);font-weight:700;font-size:13px;line-height:1.15;}
+    .pcard .d{font-family:var(--mono);font-size:10px;color:var(--ink-soft);margin-top:3px;}
+    .pcard .r{font-family:var(--mono);font-size:10px;color:var(--brass);font-weight:700;margin-top:2px;}
+    .skelcard{aspect-ratio:2/3;border-radius:2px;background:linear-gradient(100deg,#e6dcc6 30%,#f1e9d8 50%,#e6dcc6 70%);background-size:200% 100%;animation:shimmer 1.2s ease-in-out infinite;}
+    @keyframes shimmer{to{background-position:-200% 0;}}
+    .feedmsg{font-family:var(--mono);font-size:12px;color:var(--ink-soft);padding:10px 2px;}
+    .feedmsg.err{color:var(--vermillion);cursor:pointer;}
+    .wakebanner{position:fixed;left:50%;bottom:18px;transform:translateX(-50%) translateY(20px);display:flex;align-items:center;gap:10px;background:var(--ink);color:var(--cream);font-family:var(--mono);font-size:12px;letter-spacing:.03em;padding:11px 16px;border-radius:2px;border:1px solid var(--brass);box-shadow:0 10px 30px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:200;}
+    .wakebanner.show{opacity:1;transform:translateX(-50%) translateY(0);}
+    .wakebanner::before{content:"";width:14px;height:14px;border:2px solid rgba(244,236,220,.35);border-top-color:var(--brass);border-radius:50%;animation:spin .7s linear infinite;box-sizing:border-box;}
+    @keyframes spin{to{transform:rotate(360deg);}}
     .hidden{display:none!important;}
     footer{text-align:center;font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-soft);margin-top:50px;border-top:1px solid var(--line);padding-top:14px;}
 
@@ -107,7 +131,7 @@
 <body>
   <div class="wrap">
     <div class="masthead">
-      <div class="kicker">Internal Reference · Localhost Only</div>
+      <div class="kicker">Films · People · Posters</div>
       <h1>The Big Screen Index</h1>
       <div class="sub">Movie Lookup &amp; Poster Gallery</div>
       <div class="rule-row"><span>Est. MMXXVI</span></div>
@@ -133,7 +157,18 @@
       <div class="cands" id="cands"></div>
     </div>
 
-    <footer>TBSI · The Big Screen Index — not for publication</footer>
+    <div id="feeds" class="feeds">
+      <section class="feed">
+        <div class="seclabel"><span>★ In Cinemas <span class="count" id="nowCount"></span></span><a class="seeall" href="/releases.html">see all →</a></div>
+        <div class="prow" id="feedNow"></div>
+      </section>
+      <section class="feed">
+        <div class="seclabel"><span>★ Upcoming <span class="count" id="upCount"></span></span><a class="seeall" href="/releases.html">see all →</a></div>
+        <div class="prow" id="feedUp"></div>
+      </section>
+    </div>
+
+    <footer>TBSI · The Big Screen Index</footer>
   </div>
 
   <script>
@@ -182,9 +217,17 @@
     qEl.addEventListener("input", () => {
       const q = qEl.value.trim();
       clearTimeout(debounceT);
-      if (q.length < 2) { closeSuggest(); return; }
+      if (q.length < 2) { closeSuggest(); restoreHome(); return; }
       debounceT = setTimeout(() => runSuggest(q), 280);
     });
+    // Clearing the box returns to the default home feeds (hides any full-search results).
+    function restoreHome(){
+      if (!$("#candsWrap").classList.contains("hidden")) {
+        $("#candsWrap").classList.add("hidden");
+        $("#feeds").classList.remove("hidden");
+        setStatus("");
+      }
+    }
 
     function suggestMessage(title, meta){
       sug.innerHTML = `<div class="sitem sload"><span class="spinner"></span><span class="sinfo"><span class="stitle">${title}</span>${meta ? `<span class="smeta">${meta}</span>` : ""}</span></div>`;
@@ -329,9 +372,52 @@
         </a>`;
       }).join("");
       $("#candsWrap").classList.remove("hidden");
+      $("#feeds").classList.add("hidden");   // full-search results replace the home feeds
       $("#cands").querySelectorAll(".cand").forEach((el) =>
         el.addEventListener("click", (e) => { const c = cands[Number(el.dataset.i)]; if (!isClickable(c)){ e.preventDefault(); setStatus(blockMsg(c), true); } }));
     }
+
+    // ── Home feeds: In Cinemas + Upcoming (parallel · skeletons · cold-start banner) ──
+    async function getJson(url){ const r = await fetch(url); const d = await r.json().catch(()=>({error:"bad JSON"})); if(!r.ok) throw new Error(d.error||("HTTP "+r.status)); return d; }
+    let _pending = 0, _wakeTimer = null, _wakeEl = null;
+    function wakeShow(){ if(!_wakeEl){ _wakeEl=document.createElement("div"); _wakeEl.className="wakebanner"; _wakeEl.textContent="Server waking up, one moment…"; document.body.appendChild(_wakeEl); } requestAnimationFrame(()=>_wakeEl.classList.add("show")); }
+    function wakeHide(){ if(_wakeEl) _wakeEl.classList.remove("show"); }
+    async function trackedFetch(url){
+      _pending++;
+      if(!_wakeTimer) _wakeTimer=setTimeout(wakeShow, WAKE_MS);
+      try { return await getJson(url); }
+      finally { if(--_pending<=0){ clearTimeout(_wakeTimer); _wakeTimer=null; wakeHide(); } }
+    }
+
+    const FEED_N = 12;
+    function posterCards(list){
+      return list.slice(0, FEED_N).map(m=>{
+        const poster = m.posterUrl ? `<span class="p" style="background-image:url('${esc(m.posterUrl)}')"></span>` : `<span class="p empty">no poster</span>`;
+        const when = m.releaseDate || (m.year||"");
+        return `<a class="pcard" href="/movie.html?id=${m.id}">${poster}<div class="m"><div class="t">${esc(m.title)}</div><div class="d">${esc(when)}${m.language?" · "+esc(m.language):""}</div>${m.voteAverage?`<div class="r">★ ${m.voteAverage.toFixed(1)}</div>`:""}</div></a>`;
+      }).join("");
+    }
+    const skeletons = (n) => Array.from({length:n},()=>'<div class="skelcard"></div>').join("");
+
+    async function loadFeed(kind){
+      const grid = kind==="up" ? $("#feedUp") : $("#feedNow");
+      const countEl = kind==="up" ? $("#upCount") : $("#nowCount");
+      const path = kind==="up" ? "/api/releases/upcoming" : "/api/releases/now-playing";
+      grid.innerHTML = skeletons(FEED_N);
+      try {
+        const d = await trackedFetch(path + "?region=IN");
+        const list = d.results || [];
+        countEl.textContent = list.length ? "· " + Math.min(list.length, FEED_N) : "";
+        grid.innerHTML = list.length ? posterCards(list) : `<div class="feedmsg">Nothing listed right now.</div>`;
+      } catch(e) {
+        countEl.textContent = "";
+        grid.innerHTML = `<div class="feedmsg err">Couldn’t load — tap to try again.</div>`;
+        grid.querySelector(".feedmsg.err").addEventListener("click", ()=>loadFeed(kind));
+      }
+    }
+    // Fire both feeds in parallel — neither blocks the other.
+    loadFeed("now");
+    loadFeed("up");
   </script>
   <script>
     // PWA: register the app-shell service worker (installable + offline shell).
