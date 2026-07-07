@@ -53,6 +53,18 @@ describe("Watchlist — in-memory backend add/list/remove", () => {
     expect(await wl.list("devA")).toEqual([]);
     expect((await wl.list("devB")).map((i) => i.tmdbId).sort((x, y) => x - y)).toEqual([1, 9]);
   });
+
+  it("carries posterUrl through add/list; an item saved without it lists without it", async () => {
+    const wl = new MemoryWatchlist();
+    await wl.init();
+    await wl.add({ type: "film", tmdbId: 1, title: "RRR", posterUrl: "https://image.tmdb.org/t/p/w500/rrr.jpg" }, "devA");
+    await wl.add({ type: "person", tmdbId: 2, title: "Sneha" }, "devA"); // no poster
+    const list = await wl.list("devA");
+    const rrr = list.find((i) => i.tmdbId === 1)!;
+    const sneha = list.find((i) => i.tmdbId === 2)!;
+    expect(rrr.posterUrl).toBe("https://image.tmdb.org/t/p/w500/rrr.jpg");
+    expect(sneha).not.toHaveProperty("posterUrl"); // omitted, not stored as undefined
+  });
 });
 
 // ── Watchlist: Postgres SQL layer (mock Queryable) ────────────────────────────
@@ -63,8 +75,8 @@ describe("Watchlist — Postgres backend issues correct SQL", () => {
       async query(text: string, params?: unknown[]) {
         calls.push({ text, params });
         if (/^\s*INSERT/i.test(text)) {
-          // params are now [device_id, type, tmdb_id, title, note]
-          return { rows: [{ type: params![1], tmdb_id: params![2], title: params![3], note: params![4], added_at: "2026-07-06T00:00:00.000Z" }] };
+          // params are now [device_id, type, tmdb_id, title, note, poster_url]
+          return { rows: [{ type: params![1], tmdb_id: params![2], title: params![3], note: params![4], poster_url: params![5], added_at: "2026-07-06T00:00:00.000Z" }] };
         }
         if (/^\s*SELECT/i.test(text)) {
           return { rows: [{ type: "film", tmdb_id: 42, title: "Kalki", note: null, added_at: "2026-07-06T00:00:00.000Z" }] };
@@ -89,13 +101,24 @@ describe("Watchlist — Postgres backend issues correct SQL", () => {
     expect(all).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS watchlist_device_type_tmdb_idx ON watchlist\(device_id, type, tmdb_id\)/i);
   });
 
-  it("add upserts device-scoped (ON CONFLICT device_id,type,tmdb_id), device_id first param", async () => {
+  it("add upserts device-scoped (device_id + poster_url), poster_url round-trips to posterUrl", async () => {
     const { db, calls } = mockDb();
-    const item = await new PostgresWatchlist(db).add({ type: "person", tmdbId: 7, title: "Sneha", note: "fav" }, "devX");
-    expect(calls[0]!.text).toMatch(/INSERT INTO watchlist \(device_id, type, tmdb_id, title, note\)/i);
-    expect(calls[0]!.text).toMatch(/ON CONFLICT \(device_id, type, tmdb_id\) DO UPDATE/i);
-    expect(calls[0]!.params).toEqual(["devX", "person", 7, "Sneha", "fav"]);
-    expect(item).toEqual({ type: "person", tmdbId: 7, title: "Sneha", note: "fav", addedAt: "2026-07-06T00:00:00.000Z" });
+    const item = await new PostgresWatchlist(db).add(
+      { type: "person", tmdbId: 7, title: "Sneha", note: "fav", posterUrl: "https://image.tmdb.org/t/p/w500/sneha.jpg" },
+      "devX"
+    );
+    expect(calls[0]!.text).toMatch(/INSERT INTO watchlist \(device_id, type, tmdb_id, title, note, poster_url\)/i);
+    expect(calls[0]!.text).toMatch(/ON CONFLICT \(device_id, type, tmdb_id\) DO UPDATE SET .*poster_url = EXCLUDED\.poster_url/i);
+    expect(calls[0]!.params).toEqual(["devX", "person", 7, "Sneha", "fav", "https://image.tmdb.org/t/p/w500/sneha.jpg"]);
+    expect(item).toEqual({ type: "person", tmdbId: 7, title: "Sneha", note: "fav", posterUrl: "https://image.tmdb.org/t/p/w500/sneha.jpg", addedAt: "2026-07-06T00:00:00.000Z" });
+  });
+
+  it("add stores NULL poster_url when none supplied (item has no posterUrl)", async () => {
+    const { db, calls } = mockDb();
+    const item = await new PostgresWatchlist(db).add({ type: "film", tmdbId: 5, title: "RRR" }, "devX");
+    expect(calls[0]!.params).toEqual(["devX", "film", 5, "RRR", null, null]); // note + poster_url both null
+    expect(item).toEqual({ type: "film", tmdbId: 5, title: "RRR", addedAt: "2026-07-06T00:00:00.000Z" });
+    expect(item).not.toHaveProperty("posterUrl");
   });
 
   it("list selects THIS device's rows, ordered by added_at DESC", async () => {

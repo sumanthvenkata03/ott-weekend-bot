@@ -19,6 +19,7 @@ export interface WatchlistItem {
   tmdbId: number;
   title: string;
   note?: string;
+  posterUrl?: string; // film poster / person profile image (whitelisted host only)
   addedAt: string; // ISO timestamp
 }
 
@@ -27,6 +28,7 @@ export interface AddInput {
   tmdbId: number;
   title: string;
   note?: string;
+  posterUrl?: string;
 }
 
 // Every operation is scoped to a `deviceId` — the watchlist is per-device (a phone,
@@ -71,6 +73,7 @@ export class MemoryWatchlist implements WatchlistBackend {
       tmdbId: input.tmdbId,
       title: input.title,
       ...(input.note ? { note: input.note } : {}),
+      ...(input.posterUrl ? { posterUrl: input.posterUrl } : {}),
       addedAt: existing ? existing.addedAt : new Date().toISOString(),
     };
     this.items.set(k, item);
@@ -91,6 +94,7 @@ interface Row {
   tmdb_id: string | number;
   title: string;
   note: string | null;
+  poster_url: string | null;
   added_at: string | Date;
 }
 
@@ -102,6 +106,7 @@ function rowToItem(r: Record<string, unknown>): WatchlistItem {
     tmdbId: Number(row.tmdb_id),
     title: row.title,
     ...(row.note ? { note: row.note } : {}),
+    ...(row.poster_url ? { posterUrl: row.poster_url } : {}),
     addedAt: added,
   };
 }
@@ -121,20 +126,22 @@ export class PostgresWatchlist implements WatchlistBackend {
         tmdb_id BIGINT NOT NULL,
         title TEXT NOT NULL,
         note TEXT,
+        poster_url TEXT,
         added_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
-    // Defensive migration for a PRE-EXISTING (pre-device) table: add the column, drop the
+    // Defensive migration for a PRE-EXISTING (pre-device) table: add the columns, drop the
     // old global UNIQUE(type,tmdb_id) constraint, and add the per-device unique index.
     // Every step is idempotent (IF EXISTS / IF NOT EXISTS) so re-running init() is safe.
     await this.db.query(`ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS device_id TEXT NOT NULL DEFAULT 'legacy'`);
+    await this.db.query(`ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS poster_url TEXT`);
     await this.db.query(`ALTER TABLE watchlist DROP CONSTRAINT IF EXISTS watchlist_type_tmdb_id_key`);
     await this.db.query(`CREATE UNIQUE INDEX IF NOT EXISTS watchlist_device_type_tmdb_idx ON watchlist(device_id, type, tmdb_id)`);
   }
 
   async list(deviceId: string): Promise<WatchlistItem[]> {
     const { rows } = await this.db.query(
-      `SELECT type, tmdb_id, title, note, added_at FROM watchlist WHERE device_id = $1 ORDER BY added_at DESC`,
+      `SELECT type, tmdb_id, title, note, poster_url, added_at FROM watchlist WHERE device_id = $1 ORDER BY added_at DESC`,
       [deviceId]
     );
     return rows.map(rowToItem);
@@ -142,11 +149,11 @@ export class PostgresWatchlist implements WatchlistBackend {
 
   async add(input: AddInput, deviceId: string): Promise<WatchlistItem> {
     const { rows } = await this.db.query(
-      `INSERT INTO watchlist (device_id, type, tmdb_id, title, note)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (device_id, type, tmdb_id) DO UPDATE SET title = EXCLUDED.title, note = EXCLUDED.note
-       RETURNING type, tmdb_id, title, note, added_at`,
-      [deviceId, input.type, input.tmdbId, input.title, input.note ?? null]
+      `INSERT INTO watchlist (device_id, type, tmdb_id, title, note, poster_url)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (device_id, type, tmdb_id) DO UPDATE SET title = EXCLUDED.title, note = EXCLUDED.note, poster_url = EXCLUDED.poster_url
+       RETURNING type, tmdb_id, title, note, poster_url, added_at`,
+      [deviceId, input.type, input.tmdbId, input.title, input.note ?? null, input.posterUrl ?? null]
     );
     return rowToItem(rows[0]!);
   }

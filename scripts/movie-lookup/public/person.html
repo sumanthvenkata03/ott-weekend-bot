@@ -342,7 +342,7 @@
         btn.disabled = true;
         try {
           if (saved){ await fetch(`/api/watchlist/person/${p.id}`, { method:"DELETE", headers: deviceHeaders() }); saved = false; }
-          else { await fetch("/api/watchlist", { method:"POST", headers:{"Content-Type":"application/json", ...deviceHeaders()}, body: JSON.stringify({ type:"person", id:p.id, title:p.name }) }); saved = true; }
+          else { await fetch("/api/watchlist", { method:"POST", headers:{"Content-Type":"application/json", ...deviceHeaders()}, body: JSON.stringify({ type:"person", id:p.id, title:p.name, ...(p.profileUrl ? { posterUrl: p.profileUrl } : {}) }) }); saved = true; }
           paint();
         } catch(e){ } finally { btn.disabled = false; }
       });

@@ -570,7 +570,7 @@
         btn.disabled = true;
         try {
           if (saved){ await fetch(`/api/watchlist/film/${d.id}`, { method:"DELETE", headers: deviceHeaders() }); saved = false; }
-          else { await fetch("/api/watchlist", { method:"POST", headers:{"Content-Type":"application/json", ...deviceHeaders()}, body: JSON.stringify({ type:"film", id:d.id, title:d.title }) }); saved = true; }
+          else { await fetch("/api/watchlist", { method:"POST", headers:{"Content-Type":"application/json", ...deviceHeaders()}, body: JSON.stringify({ type:"film", id:d.id, title:d.title, ...(d.posterUrl ? { posterUrl: d.posterUrl } : {}) }) }); saved = true; }
           paint();
         } catch(e){ /* leave state */ } finally { btn.disabled = false; }
       });

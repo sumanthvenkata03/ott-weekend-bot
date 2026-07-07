@@ -227,7 +227,11 @@ const server = createServer(async (req, res) => {
           const title = String(body.title ?? "").trim();
           if (!isWatchType(type) || tmdbId === undefined || !title) return sendJson(res, 400, { error: "type (film|person), id, title are required" });
           const note = body.note ? String(body.note) : undefined;
-          const item = await watchlist.add({ type, tmdbId, title, note }, deviceId);
+          // Accept a client-supplied poster ONLY if it's a string on a whitelisted image
+          // host (reuses the download proxy's SSRF guard) — else silently drop the field
+          // (no 4xx), so junk/injection is never stored but a posterless save still works.
+          const posterUrl = typeof body.posterUrl === "string" && isAllowedImageUrl(body.posterUrl) ? body.posterUrl : undefined;
+          const item = await watchlist.add({ type, tmdbId, title, note, posterUrl }, deviceId);
           return sendJson(res, 200, { item, store: watchlist.kind });
         }
         return sendJson(res, 405, { error: "GET or POST only" });
