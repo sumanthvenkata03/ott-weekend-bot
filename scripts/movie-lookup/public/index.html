@@ -3,7 +3,6 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="robots" content="noindex,nofollow" />
   <title>TBSI · Movie Lookup</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#1A1614" />
@@ -12,6 +11,14 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="TBSI Lookup" />
+  <link rel="canonical" href="https://thebigscreenindex.com/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="The Big Screen Index" />
+  <meta property="og:title" content="The Big Screen Index — Movie Lookup &amp; Poster Gallery" />
+  <meta property="og:description" content="Search Indian &amp; world cinema — films, people, series &amp; studios. Full film records, poster galleries, cast, and where to watch." />
+  <meta property="og:image" content="https://thebigscreenindex.com/icon-512.png" />
+  <meta property="og:url" content="https://thebigscreenindex.com/" />
+  <meta name="twitter:card" content="summary_large_image" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -42,6 +49,10 @@
     .nav{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;margin:18px 0 0;}
     .nav a{font-family:var(--sans);font-size:13.5px;font-weight:500;letter-spacing:.01em;text-decoration:none;color:var(--cream-60);border:1px solid var(--cream-12);background:transparent;border-radius:100px;padding:9px 16px;transition:color .15s,border-color .15s;}
     .nav a:hover{border-color:var(--cream-30);color:var(--cream);}
+    .langchips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 6px;}
+    .lchip{font-family:var(--sans);font-size:12.5px;font-weight:500;letter-spacing:.01em;padding:8px 14px;border:1px solid var(--cream-12);background:transparent;color:var(--cream-60);cursor:pointer;border-radius:100px;transition:color .15s,border-color .15s,background .15s;}
+    .lchip:hover{color:var(--cream);border-color:var(--cream-30);}
+    .lchip.active{background:var(--gold-light);color:var(--ink);border-color:var(--gold-light);}
 
     .searchzone{max-width:600px;margin:22px auto 4px;position:relative;}
     .search{display:flex;gap:10px;}
@@ -136,7 +147,7 @@
     /* Touch devices (phones/tablets): guarantee ~44px minimum tap targets.
        Scoped to pointer:coarse so the confirmed mouse/desktop layout is unchanged. */
     @media (pointer:coarse){
-      .back,.savebtn,.tab,.fbtn,.nav a,.rawbar button,.chosen .cx,.seeall{display:inline-flex;align-items:center;justify-content:center;min-height:44px;}
+      .back,.savebtn,.tab,.fbtn,.lchip,.nav a,.rawbar button,.chosen .cx,.seeall{display:inline-flex;align-items:center;justify-content:center;min-height:44px;}
       .fsort{min-height:44px;}
       .crewrow{min-height:44px;}
       .rm{min-height:40px;display:inline-flex;align-items:center;}
@@ -177,6 +188,7 @@
     </div>
 
     <div id="feeds" class="feeds">
+      <div class="langchips" id="langChips"></div>
       <section class="feed">
         <div class="seclabel"><span>★ In Cinemas <span class="count" id="nowCount"></span></span><a class="seeall" href="/releases.html">see all →</a></div>
         <div class="prow" id="feedNow"></div>
@@ -415,14 +427,49 @@
     }
 
     const FEED_N = 12;
+    const rawFeeds = { now: [], up: [] };   // full fetched lists (unfiltered)
+
+    // ── Feed language filter (chips) — shared with /releases.html via localStorage. ──
+    // Single-select; default "Indian" (te/ta/hi/ml/kn/mr/bn/pa); filters BOTH feeds.
+    const INDIAN_ISOS = new Set(["te","ta","hi","ml","kn","mr","bn","pa"]);
+    const FEED_LANGS = [
+      { key:"indian", label:"Indian" }, { key:"te", label:"Telugu" }, { key:"ta", label:"Tamil" },
+      { key:"hi", label:"Hindi" }, { key:"ml", label:"Malayalam" }, { key:"kn", label:"Kannada" }, { key:"all", label:"All" },
+    ];
+    let feedLang = "indian";
+    try { const s = localStorage.getItem("tbsi_feed_lang"); if (s && FEED_LANGS.some(l=>l.key===s)) feedLang = s; } catch(e){}
+    const langLabel = () => (FEED_LANGS.find(l=>l.key===feedLang)||{}).label || "";
+    function langMatches(m){ if(feedLang==="all") return true; if(feedLang==="indian") return INDIAN_ISOS.has(m.languageIso); return m.languageIso===feedLang; }
+    function buildLangChips(){
+      const el = $("#langChips");
+      el.innerHTML = FEED_LANGS.map(l=>`<button class="lchip${l.key===feedLang?" active":""}" data-k="${l.key}">${l.label}</button>`).join("");
+      el.querySelectorAll(".lchip").forEach(b=>b.addEventListener("click", ()=>{
+        feedLang = b.dataset.k;
+        try { localStorage.setItem("tbsi_feed_lang", feedLang); } catch(e){}
+        el.querySelectorAll(".lchip").forEach(x=>x.classList.toggle("active", x===b));
+        renderFeed("now"); renderFeed("up");
+      }));
+    }
+
     function posterCards(list){
-      return list.slice(0, FEED_N).map(m=>{
+      return list.map(m=>{
         const poster = m.posterUrl ? `<span class="p" style="background-image:url('${esc(m.posterUrl)}')"></span>` : `<span class="p empty">${initial(m.title)}</span>`;
         const when = m.releaseDate || (m.year||"");
         return `<a class="pcard" href="/movie.html?id=${m.id}">${poster}<div class="m"><div class="t">${esc(m.title)}</div><div class="d">${esc(when)}${m.language?" · "+esc(m.language):""}</div>${m.voteAverage?`<div class="r">★ ${m.voteAverage.toFixed(1)}</div>`:""}</div></a>`;
       }).join("");
     }
     const skeletons = (n) => Array.from({length:n},()=>'<div class="skelcard"></div>').join("");
+
+    // Render a feed from its cached raw list, filtered by the current language + capped.
+    function renderFeed(kind){
+      const grid = kind==="up" ? $("#feedUp") : $("#feedNow");
+      const countEl = kind==="up" ? $("#upCount") : $("#nowCount");
+      const filtered = rawFeeds[kind].filter(langMatches).slice(0, FEED_N);
+      countEl.textContent = filtered.length ? "· " + filtered.length : "";
+      grid.innerHTML = filtered.length
+        ? posterCards(filtered)
+        : (rawFeeds[kind].length ? `<div class="feedmsg">No ${esc(langLabel())} titles — try All.</div>` : `<div class="feedmsg">Nothing listed right now.</div>`);
+    }
 
     async function loadFeed(kind){
       const grid = kind==="up" ? $("#feedUp") : $("#feedNow");
@@ -431,16 +478,16 @@
       grid.innerHTML = skeletons(FEED_N);
       try {
         const d = await trackedFetch(path + "?region=IN");
-        const list = d.results || [];
-        countEl.textContent = list.length ? "· " + Math.min(list.length, FEED_N) : "";
-        grid.innerHTML = list.length ? posterCards(list) : `<div class="feedmsg">Nothing listed right now.</div>`;
+        rawFeeds[kind] = d.results || [];
+        renderFeed(kind);
       } catch(e) {
         countEl.textContent = "";
         grid.innerHTML = `<div class="feedmsg err">Couldn’t load — tap to try again.</div>`;
         grid.querySelector(".feedmsg.err").addEventListener("click", ()=>loadFeed(kind));
       }
     }
-    // Fire both feeds in parallel — neither blocks the other.
+    // Build the chips, then fire both feeds in parallel — neither blocks the other.
+    buildLangChips();
     loadFeed("now");
     loadFeed("up");
   </script>
@@ -450,5 +497,7 @@
       window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
     }
   </script>
+  <!-- Privacy-friendly analytics (GoatCounter). count.js self-skips localhost. -->
+  <script data-goatcounter="https://thebigscreenindex.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 </body>
 </html>

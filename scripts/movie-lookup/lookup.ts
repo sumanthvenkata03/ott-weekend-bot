@@ -137,7 +137,9 @@ export interface FilmographyItem {
   id: number; title: string; year?: number; mediaType: string;
   role: string; department: "cast" | "crew"; posterUrl?: string; popularity?: number;
 }
-export interface PersonDetail {
+/** Light person payload — everything EXCEPT the image gallery. Powers the
+ *  first paint of person.html + the compare page (neither needs the crawl). */
+export interface PersonProfile {
   id: number;
   name: string;
   knownForDepartment?: string;
@@ -155,10 +157,20 @@ export interface PersonDetail {
   profileUrl?: string;
   knownFor: PersonKnownFor[];
   filmography: FilmographyItem[];
+  rawData: Record<string, unknown>;
+}
+/** Just the aggregated image gallery for a person (the slow, crawl-backed half). */
+export interface PersonImages {
+  id: number;
   images: ImageItem[];
   imageSources: string[];
   imageStats: { portraits: number; stills: number; stillFilms: number };
   rawData: Record<string, unknown>;
+}
+export interface PersonDetail extends PersonProfile {
+  images: ImageItem[];
+  imageSources: string[];
+  imageStats: { portraits: number; stills: number; stillFilms: number };
 }
 
 export interface MovieImages { id: number; posters: ImageItem[]; backdrops: ImageItem[]; sources: string[]; rawData: Record<string, unknown>; }
@@ -415,28 +427,12 @@ export async function fullCredits(id: number): Promise<MovieCredits> {
   };
 }
 
-// ── 5. Person detail + full image gallery ────────────────────────────────────
-export async function personDetail(id: number): Promise<PersonDetail> {
-  // Fetch identity first (name + IMDb + Wikidata ids) so the keyless (Wikidata/
-  // Commons/Wikipedia) and keyed (TVDB) person-image adapters can resolve the
-  // SAME human — TMDb's own /person/images is sparse for people.
+// ── 5a. Person profile — the LIGHT half (no images). One TMDb identity read; ──
+// bio + meta + ids + filmography, NONE of the image-source crawl. This is what
+// the person page paints first and the compare page reads.
+export async function personProfile(id: number): Promise<PersonProfile> {
   const person = await tmdbGet<TmdbPerson>(`/person/${id}`, { append_to_response: "combined_credits,external_ids" });
   const filmography = buildFilmography(person.combined_credits);
-  const ctx: PersonImageContext = {
-    tmdbId: id,
-    ...(person.name ? { name: person.name } : {}),
-    ...(person.external_ids?.imdb_id ? { imdbId: person.external_ids.imdb_id } : {}),
-    ...(person.external_ids?.wikidata_id ? { wikidataId: person.external_ids.wikidata_id } : {}),
-  };
-  // Portraits (verified person images across sources) + film stills (backdrops of
-  // the person's films) fetched together. Portraits FIRST so a URL shared with a
-  // still stays a portrait after dedupe.
-  const [imagesAgg, stills] = await Promise.all([
-    aggregatePersonImages(ctx),
-    harvestFilmStills(filmography),
-  ]);
-  const combinedImages = dedupeImages([...imagesAgg.items, ...stills]);
-  const portraitCount = imagesAgg.items.length;
 
   const knownFor: PersonKnownFor[] = (person.combined_credits?.cast ?? [])
     .slice()
@@ -469,6 +465,36 @@ export async function personDetail(id: number): Promise<PersonDetail> {
     profileUrl: img(person.profile_path, "w300"),
     knownFor,
     filmography,
+    rawData: { tmdb: { person } },
+  };
+}
+
+// ── 5b. Person images — the SLOW half (multi-source crawl). Own identity read ──
+// (name + IMDb/Wikidata ids so the keyless Wikidata/Commons/Wikipedia and keyed
+// TVDB adapters resolve the SAME human; combined_credits for film-still harvest).
+// Its own tmdbGet keeps this endpoint stateless/independent of personProfile —
+// the marginal identity call is negligible next to the crawl it precedes.
+export async function personImages(id: number): Promise<PersonImages> {
+  const person = await tmdbGet<TmdbPerson>(`/person/${id}`, { append_to_response: "combined_credits,external_ids" });
+  const filmography = buildFilmography(person.combined_credits);
+  const ctx: PersonImageContext = {
+    tmdbId: id,
+    ...(person.name ? { name: person.name } : {}),
+    ...(person.external_ids?.imdb_id ? { imdbId: person.external_ids.imdb_id } : {}),
+    ...(person.external_ids?.wikidata_id ? { wikidataId: person.external_ids.wikidata_id } : {}),
+  };
+  // Portraits (verified person images across sources) + film stills (backdrops of
+  // the person's films) fetched together. Portraits FIRST so a URL shared with a
+  // still stays a portrait after dedupe.
+  const [imagesAgg, stills] = await Promise.all([
+    aggregatePersonImages(ctx),
+    harvestFilmStills(filmography),
+  ]);
+  const combinedImages = dedupeImages([...imagesAgg.items, ...stills]);
+  const portraitCount = imagesAgg.items.length;
+
+  return {
+    id: person.id,
     images: combinedImages,
     imageSources: [...new Set(combinedImages.map((i) => i.source))],
     imageStats: {
@@ -476,7 +502,21 @@ export async function personDetail(id: number): Promise<PersonDetail> {
       stills: combinedImages.length - portraitCount,
       stillFilms: selectStillFilms(filmography).length,
     },
-    rawData: { tmdb: { person }, images: imagesAgg.raw },
+    rawData: { images: imagesAgg.raw },
+  };
+}
+
+// ── 5c. Full person detail (profile + images). Kept for back-compat — the tool
+// now calls personProfile / personImages separately so the profile never blocks
+// on the crawl. Nothing internal should call this. ──
+export async function personDetail(id: number): Promise<PersonDetail> {
+  const [profile, imgs] = await Promise.all([personProfile(id), personImages(id)]);
+  return {
+    ...profile,
+    images: imgs.images,
+    imageSources: imgs.imageSources,
+    imageStats: imgs.imageStats,
+    rawData: { ...profile.rawData, ...imgs.rawData },
   };
 }
 

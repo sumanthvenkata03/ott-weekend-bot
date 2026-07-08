@@ -1,0 +1,89 @@
+{
+  "updatedAt": "2026-07-07T20:28:55.905Z",
+  "verdicts": [
+    {
+      "imdbId": null,
+      "title": "Nevermind",
+      "star": 3.5,
+      "tbsiScore": 7,
+      "verdict": "Worth a Try",
+      "confidence": "low",
+      "criticCount": 1,
+      "runAt": "2026-07-05T05:55:46.459Z",
+      "issue": "013",
+      "igUrl": null
+    },
+    {
+      "imdbId": "tt37544992",
+      "title": "Baby Do Die Do",
+      "star": 3.3,
+      "tbsiScore": 6.5,
+      "verdict": "Worth a Try",
+      "confidence": "high",
+      "criticCount": 6,
+      "runAt": "2026-07-05T05:55:46.459Z",
+      "issue": "013",
+      "igUrl": null
+    },
+    {
+      "imdbId": "tt37895011",
+      "title": "Rao Bahadur",
+      "star": 2.9,
+      "tbsiScore": 5.8,
+      "verdict": "Skip",
+      "confidence": "high",
+      "criticCount": 6,
+      "runAt": "2026-07-05T05:55:46.459Z",
+      "issue": "013",
+      "igUrl": null
+    },
+    {
+      "imdbId": "tt28089784",
+      "title": "Satluj",
+      "star": 3.8,
+      "tbsiScore": 7.5,
+      "verdict": "Worth a Try",
+      "confidence": "high",
+      "criticCount": 4,
+      "runAt": "2026-07-05T05:55:46.459Z",
+      "issue": "013",
+      "igUrl": null
+    },
+    {
+      "imdbId": "tt37458495",
+      "title": "Gatta Kusthi 2",
+      "star": 3.2,
+      "tbsiScore": 6.3,
+      "verdict": "Divisive",
+      "confidence": "high",
+      "criticCount": 4,
+      "runAt": "2026-07-05T05:55:46.459Z",
+      "issue": "013",
+      "igUrl": null
+    },
+    {
+      "imdbId": "tt32065777",
+      "title": "Nagabandham - The Secret Treasure",
+      "star": 2.5,
+      "tbsiScore": 5,
+      "verdict": "Skip",
+      "confidence": "high",
+      "criticCount": 4,
+      "runAt": "2026-07-05T05:55:46.459Z",
+      "issue": "013",
+      "igUrl": null
+    },
+    {
+      "imdbId": "tt28363783",
+      "title": "Alpha",
+      "star": 2,
+      "tbsiScore": 4,
+      "verdict": "Skip",
+      "confidence": "high",
+      "criticCount": 4,
+      "runAt": "2026-07-05T05:55:46.459Z",
+      "issue": "013",
+      "igUrl": null
+    }
+  ]
+}

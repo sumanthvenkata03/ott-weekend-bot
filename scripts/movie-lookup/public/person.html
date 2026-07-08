@@ -3,7 +3,6 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="robots" content="noindex,nofollow" />
   <title>TBSI · Person</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#1A1614" />
@@ -60,6 +59,8 @@
     .savebtn:hover{border-color:var(--gold-light);}
     .savebtn.on{background:var(--gold-light);color:var(--ink);border-color:var(--gold-light);}
     .savebtn:disabled{opacity:.6;cursor:default;}
+    .heroactions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+    .heroactions .savebtn{margin-top:0;}
     .fcontrols{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px;}
     .fbtn{font-family:var(--sans);font-size:13px;font-weight:500;letter-spacing:.01em;padding:8px 14px;border:1px solid var(--cream-12);background:transparent;border-radius:100px;cursor:pointer;color:var(--cream-60);transition:color .15s,border-color .15s,background .15s;}
     .fbtn:hover{color:var(--cream);border-color:var(--cream-30);}
@@ -211,13 +212,14 @@
       finally { if(--_pending<=0){ clearTimeout(_wakeTimer); _wakeTimer=null; wakeHide(); } }
     }
 
-    // Skeleton shown while the (single) person request is in flight — profile +
-    // filmography + gallery all arrive together, so one loading state covers them.
+    // Skeleton shown until the (fast) profile request lands. The gallery is a
+    // separate, slower request that keeps its own skeletons + "Loading gallery…"
+    // line after the profile paints (see render / fillGallery).
     function showLoading(){
       $("#body").innerHTML = `
         <div class="phead">
           <div><div class="ppic skelcard"></div></div>
-          <div><div class="loading"><span class="spinner"></span>Loading profile, filmography &amp; gallery…</div></div>
+          <div><div class="loading"><span class="spinner"></span>Loading profile &amp; filmography…</div></div>
         </div>
         <div class="seclabel"><span>Image Gallery</span></div>
         <div class="grid">${Array.from({length:8},()=>'<div class="skelcard"></div>').join("")}</div>`;
@@ -225,9 +227,24 @@
     }
 
     let IMAGES = [];
+    // Gallery coordination: the profile render and the image crawl race
+    // independently. Whichever lands first stashes state; the gallery is only
+    // painted once BOTH the profile DOM exists and the images result is in — so
+    // ordering is safe even if the (usually slower) crawl somehow wins.
+    let _profileRendered = false, _imagesState = null; // {ok:true,data} | {ok:false}
+    function applyGalleryWhenReady(){
+      if (!_profileRendered || !_imagesState) return;
+      if (_imagesState.ok) fillGallery(_imagesState.data); else galleryError();
+    }
     (async function init(){
       if (!id) { setStatus("No person id in URL.", true); return; }
       showLoading();
+      // Fire BOTH fetches in PARALLEL — the slow multi-source image crawl starts
+      // immediately, not after the profile renders. Both go through trackedFetch
+      // so the cold-start "waking up" banner still covers either.
+      trackedFetch("/api/person/" + encodeURIComponent(id) + "/images")
+        .then((imgs) => { _imagesState = { ok: true, data: imgs }; applyGalleryWhenReady(); })
+        .catch(() => { _imagesState = { ok: false }; applyGalleryWhenReady(); });
       try {
         const p = await trackedFetch("/api/person/" + encodeURIComponent(id));
         document.title = "TBSI · " + p.name;
@@ -237,7 +254,6 @@
     })();
 
     function render(p){
-      IMAGES = p.images || [];
       const pic = p.profileUrl ? `<img class="ppic" src="${esc(p.profileUrl)}" alt="" />` : `<div class="ppic" style="aspect-ratio:2/3"></div>`;
 
       const meta = [];
@@ -261,7 +277,10 @@
             <h1>${esc(p.name)}</h1>
             <div class="pmeta">${meta.join("<br>")}</div>
             <div class="idrow">${ids.join("")}</div>
-            <button class="savebtn" id="saveBtn">☆ Save</button>
+            <div class="heroactions">
+              <button class="savebtn" id="saveBtn">☆ Save</button>
+              <button class="savebtn" id="shareBtn">↗ Share</button>
+            </div>
             ${p.biography?`<div class="bio">${esc(p.biography)}</div>`:""}
           </div>
         </div>
@@ -284,16 +303,34 @@
         <div class="filmo" id="filmoGrid"></div>
 
         <div class="seclabel"><span>Image Gallery</span><span class="count" id="galCount"></span></div>
-        <div class="tabs" id="galTabs">
+        <div class="loading" id="galLoading"><span class="spinner"></span>Loading gallery…</div>
+        <div class="tabs hidden" id="galTabs">
           <div class="tab active" data-f="all">All</div>
           <div class="tab" data-f="portrait">Portraits</div>
           <div class="tab" data-f="still">Film stills</div>
         </div>
-        <div class="grid" id="galGrid"></div>`;
+        <div class="grid" id="galGrid">${Array.from({length:8},()=>'<div class="skelcard"></div>').join("")}</div>`;
       $("#body").classList.remove("hidden");
-      setupGallery(p);
       wireFilmo();
       initSave(p);
+      initShare(p.name);
+      // Profile DOM (incl. the gallery section) is up; paint the gallery if its
+      // images payload has already arrived, else wait for it.
+      _profileRendered = true;
+      applyGalleryWhenReady();
+    }
+
+    // ── Gallery arrival (images payload) / failure — profile stays up either way ──
+    function fillGallery(g){
+      const load = $("#galLoading"); if (load) load.remove();
+      $("#galTabs").classList.remove("hidden");
+      setupGallery(g);
+    }
+    function galleryError(){
+      const load = $("#galLoading");
+      if (load){ load.classList.add("err"); load.innerHTML = "Couldn't load the gallery."; }
+      $("#galTabs").classList.add("hidden");
+      const grid = $("#galGrid"); if (grid) grid.innerHTML = "";
     }
 
     // ── Filmography sort + filter (client-side; mirror of compute.ts) ──
@@ -348,27 +385,45 @@
       });
     }
 
-    let GALFILTER = "all";
-    function setupGallery(p){
-      const st = p.imageStats || { portraits: 0, stills: 0, stillFilms: 0 };
+    // ── Share (Web Share API → clipboard fallback) ──
+    // Shares the server-injected canonical URL (production origin) so a shared link
+    // always points at the public site, even from a localhost preview.
+    function pageCanonical(){ const l = document.querySelector('link[rel="canonical"]'); return (l && l.href) || location.href; }
+    function initShare(title){
+      const btn = $("#shareBtn"); if(!btn) return;
+      const label = btn.textContent;
+      btn.addEventListener("click", async ()=>{
+        const url = pageCanonical();
+        const shareTitle = (title ? title + " · " : "") + "The Big Screen Index";
+        if (navigator.share) { try { await navigator.share({ title: shareTitle, url }); } catch(e){ /* user cancelled */ } }
+        else { try { await navigator.clipboard.writeText(url); btn.textContent = "Link copied ✓"; setTimeout(()=>{ btn.textContent = label; }, 1400); } catch(e){ /* clipboard blocked */ } }
+      });
+    }
+
+    let GALFILTER = "all", GAL = null;
+    function setupGallery(g){
+      GAL = g || {};
+      IMAGES = GAL.images || [];
+      const st = GAL.imageStats || { portraits: 0, stills: 0, stillFilms: 0 };
       // hide empty tabs
       $("#galTabs").querySelector('[data-f="portrait"]').style.display = st.portraits ? "" : "none";
       $("#galTabs").querySelector('[data-f="still"]').style.display = st.stills ? "" : "none";
       $("#galTabs").querySelectorAll(".tab").forEach(t=> t.addEventListener("click", ()=>{
         GALFILTER = t.dataset.f;
         $("#galTabs").querySelectorAll(".tab").forEach(x=>x.classList.toggle("active", x===t));
-        renderGallery(p);
+        renderGallery();
       }));
-      renderGallery(p);
+      renderGallery();
     }
-    function renderGallery(p){
-      const st = p.imageStats || { portraits: 0, stills: 0, stillFilms: 0 };
+    function renderGallery(){
+      const st = (GAL && GAL.imageStats) || { portraits: 0, stills: 0, stillFilms: 0 };
+      const sources = (GAL && GAL.imageSources) || [];
       const picks = IMAGES.map((im,i)=>({im,i})).filter(({im})=>
         GALFILTER==="all" ? true : GALFILTER==="still" ? im.kind==="still" : im.kind!=="still");
       $("#galCount").textContent =
         `${IMAGES.length} total · ${st.portraits} portraits · ${st.stills} film stills` +
         (st.stillFilms?` (from ${st.stillFilms} films)`:"") +
-        ((p.imageSources||[]).length?`  ·  ${p.imageSources.join(", ")}`:"");
+        (sources.length?`  ·  ${sources.join(", ")}`:"");
       const grid = $("#galGrid");
       grid.innerHTML = picks.length
         ? picks.map(({im,i})=>`<div class="gimg" data-i="${i}">
@@ -442,5 +497,7 @@
       window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
     }
   </script>
+  <!-- Privacy-friendly analytics (GoatCounter). count.js self-skips localhost. -->
+  <script data-goatcounter="https://thebigscreenindex.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 </body>
 </html>

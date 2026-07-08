@@ -3,7 +3,6 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="robots" content="noindex,nofollow" />
   <title>TBSI · Film Record</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#1A1614" />
@@ -58,6 +57,8 @@
     .savebtn:hover{border-color:var(--gold-light);}
     .savebtn.on{background:var(--gold-light);color:var(--ink);border-color:var(--gold-light);}
     .savebtn:disabled{opacity:.6;cursor:default;}
+    .heroactions{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px;}
+    .heroactions .savebtn{margin:0;}
     .fields{display:grid;grid-template-columns:repeat(2,1fr);gap:18px 26px;margin-top:8px;}
     @media (max-width:640px){.fields{grid-template-columns:1fr;}}
     .field.full{grid-column:1/-1;}
@@ -68,6 +69,13 @@
     .chip{font-family:var(--mono);font-size:11px;padding:4px 11px;border:1px solid var(--cream-12);border-radius:100px;background:rgba(244,236,220,.04);color:var(--cream);}
     .chip.plat{border-color:rgba(46,87,66,.9);background:rgba(46,87,66,.35);color:#9CC7AF;font-weight:500;}
     .chip.score{border-color:var(--brass);background:rgba(196,154,63,.15);color:var(--gold-light);font-weight:500;}
+    /* TBSI verdict tiers: Must Watch + Divisive → green/bottle, Worth a Try → brass, Skip → vermillion. */
+    .chip.v-green{border-color:rgba(46,87,66,.9);background:rgba(46,87,66,.4);color:#9CC7AF;font-weight:600;}
+    .chip.v-brass{border-color:var(--brass);background:rgba(196,154,63,.2);color:var(--gold-light);font-weight:600;}
+    .chip.v-red{border-color:var(--vermillion);background:rgba(163,50,35,.28);color:#E0938A;font-weight:600;}
+    .chip.early{border:1px solid var(--brass);background:transparent;color:var(--brass);font-weight:600;letter-spacing:.06em;}
+    .verdictline{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+    .verdictline .vmeta{font-family:var(--mono);font-size:11px;color:var(--cream-60);}
     a.link{color:var(--brass);text-decoration:none;border-bottom:1px solid var(--cream-30);}
     a.link:hover{color:var(--gold-light);border-color:var(--gold-light);}
     .note{font-family:var(--mono);font-size:11px;color:var(--cream-60);line-height:1.5;border-left:2px solid var(--brass);padding:4px 0 4px 12px;margin-top:6px;}
@@ -300,6 +308,7 @@
         loadProviders(id);
         loadVideos(id, DETAIL.title, DETAIL.year);
         loadBackground(id, DETAIL.title, DETAIL.year);
+        loadVerdict(DETAIL);
       } catch (e) { setStatus("Failed to load: " + e.message, true); }
     })();
 
@@ -340,8 +349,11 @@
             ${d.originalTitle?`<div class="orig">${esc(d.originalTitle)}</div>`:""}
             ${d.tagline?`<div class="tagline">“${esc(d.tagline)}”</div>`:""}
             <div class="metaline">${meta.join("&nbsp; · &nbsp;")}</div>
-            <button class="savebtn" id="saveBtn">☆ Save</button>
-            <div class="fields">
+            <div class="heroactions">
+              <button class="savebtn" id="saveBtn">☆ Save</button>
+              <button class="savebtn" id="shareBtn">↗ Share</button>
+            </div>
+            <div class="fields" id="heroFields">
               ${fieldFull("Synopsis", d.synopsis?esc(d.synopsis):"", "syn")}
               ${field("Genre", fieldChips(d.genre))}
               ${field("Streaming (India)", d.platforms&&d.platforms.length?fieldChips(d.platforms,"plat"):`<span style="color:var(--ink-soft)">Not streaming in India yet</span>`)}
@@ -403,6 +415,7 @@
       renderCast(d.cast||[]);
       renderCrew(d.crew||[]);
       initSave(d);
+      initShare(d.title);
       RAW.detail = d.rawData; renderRaw();
       const rawCopyBtn = $("#rawCopy"); // only present on local hosts (Raw Data is IS_LOCAL-gated)
       if (rawCopyBtn) rawCopyBtn.addEventListener("click", ()=>{ navigator.clipboard.writeText($("#rawPre").textContent).then(()=>{ rawCopyBtn.textContent="Copied ✓"; setTimeout(()=>rawCopyBtn.textContent="Copy JSON",1200); }); });
@@ -498,6 +511,28 @@
           </div>`).join("");
       } catch(e){ $("#bgCount").textContent="unavailable"; $("#bg").innerHTML=`<div class="loading err">Couldn’t load background.</div>`; }
     }
+
+    // ── TBSI Verdict bridge ──
+    // Fetch the curated verdicts once; if this film's imdbId matches a row, PREPEND a
+    // "TBSI Verdict" field to the hero fields grid. No match → render nothing. The
+    // "Issue №… ↗" link shows ONLY when igUrl is a real http(s) URL (never invented).
+    async function loadVerdict(d){
+      if (!d.imdbId) return;
+      let data;
+      try { data = await trackedFetch("/api/verdicts"); } catch(e){ return; }
+      const row = (data.verdicts||[]).find(v => v.imdbId && String(v.imdbId) === String(d.imdbId));
+      if (!row || !row.verdict) return;
+      const tier = row.verdict === "Skip" ? "v-red" : row.verdict === "Worth a Try" ? "v-brass" : "v-green"; // Must Watch + Divisive → green
+      const bits = [`<span class="chip ${tier}">${esc(row.verdict)}</span>`];
+      if (row.star != null) bits.push(`<span class="vmeta">★ ${esc(row.star)}/5</span>`);
+      if (row.criticCount != null) bits.push(`<span class="vmeta">${esc(row.criticCount)} critic${row.criticCount===1?"":"s"}</span>`);
+      if (row.confidence === "low") bits.push(`<span class="chip early">EARLY</span>`);
+      const ig = typeof row.igUrl === "string" && /^https?:\/\//i.test(row.igUrl) ? row.igUrl : null;
+      if (ig && row.issue) bits.push(`<a class="link" href="${esc(ig)}" target="_blank" rel="noopener">As printed in Issue №${esc(row.issue)} ↗</a>`);
+      const html = `<div class="field full"><div class="k">TBSI Verdict</div><div class="v"><div class="verdictline">${bits.join("")}</div></div></div>`;
+      const fields = document.getElementById("heroFields");
+      if (fields) fields.insertAdjacentHTML("afterbegin", html);
+    }
     function syncTabs(){ $("#tabPosters").classList.toggle("active",curTab==="posters"); $("#tabBackdrops").classList.toggle("active",curTab==="backdrops"); }
     function renderGrid(){
       const list=GAL[curTab]||[], grid=$("#grid");
@@ -576,6 +611,21 @@
       });
     }
 
+    // ── Share (Web Share API → clipboard fallback) ──
+    // Shares the server-injected canonical URL (production origin) so a shared link
+    // always points at the public site, even from a localhost preview.
+    function pageCanonical(){ const l = document.querySelector('link[rel="canonical"]'); return (l && l.href) || location.href; }
+    function initShare(title){
+      const btn = $("#shareBtn"); if(!btn) return;
+      const label = btn.textContent;
+      btn.addEventListener("click", async ()=>{
+        const url = pageCanonical();
+        const shareTitle = (title ? title + " · " : "") + "The Big Screen Index";
+        if (navigator.share) { try { await navigator.share({ title: shareTitle, url }); } catch(e){ /* user cancelled */ } }
+        else { try { await navigator.clipboard.writeText(url); btn.textContent = "Link copied ✓"; setTimeout(()=>{ btn.textContent = label; }, 1400); } catch(e){ /* clipboard blocked */ } }
+      });
+    }
+
     // ── Person modal ──
     // Clicking a cast/crew person opens the rich person page (bio + age +
     // filmography poster grid + full image gallery).
@@ -594,5 +644,7 @@
       window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
     }
   </script>
+  <!-- Privacy-friendly analytics (GoatCounter). count.js self-skips localhost. -->
+  <script data-goatcounter="https://thebigscreenindex.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 </body>
 </html>

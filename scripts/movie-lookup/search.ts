@@ -161,11 +161,22 @@ function tokenPresence(tokens: string[], norm: string): number {
 // high-priority type bury a full-name match of a lower-priority type (e.g. a
 // person matching only "raj" must not outrank the company "Yash Raj Films"). Name
 // relevance dominates; explicit TYPE keywords (TYPE_BOOST) do the strong steering.
-// person−movie gap (18) exceeds the max popularity/vote tiebreaker swing (~15) so
-// a same-name person stays above a same-name movie even when the movie is far more
-// popular; the gaps to company (22) stay below the partial-vs-full name-relevance
-// gap (25) so a full-name company isn't buried by one-token partial people.
+// The person>movie guarantee applies to NOTABLE people: a notable same-name person
+// (person−movie gap 18 exceeds the ~15 max popularity/vote swing) stays above a
+// same-name movie even when the movie is far more popular. An OBSCURE namesake (no
+// image AND ~zero popularity) instead uses TYPE_BASE_PERSON_OBSCURE (below movie),
+// so an image-less, ~zero-popularity person no longer buries a real same-name film.
+// The gaps to company (22) stay below the partial-vs-full name-relevance gap (25)
+// so a full-name company isn't buried by one-token partial people.
 const TYPE_BASE: Record<ResultType, number> = { person: 22, movie: 4, series: 2, company: 0 };
+// Notability gate for people. Notable = has a profile image OR popularity ≥ the
+// threshold. A notable person keeps TYPE_BASE.person; an obscure namesake (no image
+// AND ~zero popularity) drops to a base of 0 — BELOW movie(4). Since an obscure
+// person's popularity contribution is at most ~1.8 (pop < 3 ⇒ log10(1+pop)*3), a base
+// of 0 guarantees ANY same-name film (base 4) — even a brand-new, low-popularity one
+// like the 2026 "Lenin" — surfaces above it. Both tunable.
+const PERSON_NOTABLE_MIN_POP = 3;
+const TYPE_BASE_PERSON_OBSCURE = 0;
 const TYPE_RANK: Record<ResultType, number> = { person: 0, movie: 1, series: 2, company: 3 };
 // An EXPLICIT type keyword ("movie", "actor", "company") strongly steers that type
 // to the top — big enough that a reasonably name-matching item of the requested
@@ -194,8 +205,15 @@ function scoreMulti(pq: ParsedQuery, hit: MultiHit): RankedResult {
   const iso = hit.original_language;
 
   let score = nameRelevance(pq, title, original);
-  score += TYPE_BASE[type];
-  if (pq.typeBoosts.includes(type)) score += TYPE_BOOST;                           // soft TYPE keyword boost
+  if (type === "person") {
+    // Notable people keep the full people-first base; an image-less, ~zero-popularity
+    // namesake drops below movie so a real same-name film isn't buried by it.
+    const notable = !!hit.profile_path || (hit.popularity ?? 0) >= PERSON_NOTABLE_MIN_POP;
+    score += notable ? TYPE_BASE.person : TYPE_BASE_PERSON_OBSCURE;
+  } else {
+    score += TYPE_BASE[type];
+  }
+  if (pq.typeBoosts.includes(type)) score += TYPE_BOOST;                           // soft TYPE keyword boost (steers regardless of notability)
 
   const knownForTitle = (hit.known_for ?? []).map((k) => k.title ?? k.name).find(Boolean);
   if (type === "person") {

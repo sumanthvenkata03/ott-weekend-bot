@@ -3,7 +3,6 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="robots" content="noindex,nofollow" />
   <title>TBSI · Compare</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#1A1614" />
@@ -12,6 +11,14 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="TBSI Lookup" />
+  <link rel="canonical" href="https://thebigscreenindex.com/compare.html" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="The Big Screen Index" />
+  <meta property="og:title" content="Compare · The Big Screen Index" />
+  <meta property="og:description" content="Compare two films or two people side by side — shared cast &amp; crew, scores, and collaborations." />
+  <meta property="og:image" content="https://thebigscreenindex.com/icon-512.png" />
+  <meta property="og:url" content="https://thebigscreenindex.com/compare.html" />
+  <meta name="twitter:card" content="summary_large_image" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -257,7 +264,7 @@
           <div class="body"><h2>${esc(p.name)}</h2><div class="sub">${[p.knownForDepartment,(p.age!=null?(p.ageAtDeath?("aged "+p.age+" at death"):(p.age+" yrs")):"")].filter(Boolean).map(esc).join(" · ")}</div>
             <div class="kv">
               <span class="k">Born</span><span class="v">${esc(p.birthday||"—")}${p.placeOfBirth?" · "+esc(p.placeOfBirth):""}</span>
-              <span class="k">Credits</span><span class="v">${(p.filmography||[]).length} titles · ${p.imageStats?p.imageStats.portraits+" portraits":""}</span>
+              <span class="k">Credits</span><span class="v">${(p.filmography||[]).length} titles${p.imageStats?" · "+p.imageStats.portraits+" portraits":""}</span>
             </div>
             <div class="kv"><span class="k">Open</span><span class="v"><a class="namelink" href="/person.html?id=${p.id}">detail ↗</a></span></div>
           </div></div>`;
@@ -274,5 +281,7 @@
   <script>
     if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
   </script>
+  <!-- Privacy-friendly analytics (GoatCounter). count.js self-skips localhost. -->
+  <script data-goatcounter="https://thebigscreenindex.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 </body>
 </html>

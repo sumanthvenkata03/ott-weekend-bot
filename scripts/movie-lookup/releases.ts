@@ -14,6 +14,7 @@ export interface ReleaseItem {
   releaseDate?: string;
   posterUrl?: string;
   language?: string;
+  languageIso?: string; // raw TMDb original_language (e.g. "te") — used by the feed language chips
   voteAverage?: number;
   popularity?: number;
 }
@@ -51,7 +52,7 @@ export function mapReleases(raw: TmdbListResponse, kind: ReleaseKind, region: st
     ...(yearOf(r.release_date) !== undefined ? { year: yearOf(r.release_date) } : {}),
     ...(r.release_date ? { releaseDate: r.release_date } : {}),
     ...(r.poster_path ? { posterUrl: img(r.poster_path, "w342") } : {}),
-    ...(r.original_language ? { language: langName(r.original_language) } : {}),
+    ...(r.original_language ? { language: langName(r.original_language), languageIso: r.original_language } : {}),
     ...(typeof r.vote_average === "number" ? { voteAverage: r.vote_average } : {}),
     ...(typeof r.popularity === "number" ? { popularity: r.popularity } : {}),
   }));
@@ -66,6 +67,14 @@ export function mapReleases(raw: TmdbListResponse, kind: ReleaseKind, region: st
 
 export async function movieReleases(kind: ReleaseKind, region = "IN"): Promise<ReleasesResult> {
   const path = kind === "upcoming" ? "/movie/upcoming" : "/movie/now_playing";
-  const raw = await tmdbGet<TmdbListResponse>(path, { region, language: "en-US", page: "1" });
-  return mapReleases(raw, kind, region);
+  // Pages 1–3 for a deeper window (more language variety for the chips). A failed page
+  // degrades to empty rather than failing the whole feed.
+  const pages = await Promise.all(
+    [1, 2, 3].map((p) => tmdbGet<TmdbListResponse>(path, { region, language: "en-US", page: String(p) }).catch(() => ({} as TmdbListResponse)))
+  );
+  // Merge + dedupe by id (first occurrence wins) before the pure mapper sorts.
+  const seen = new Set<number>();
+  const results: TmdbListItem[] = [];
+  for (const pg of pages) for (const r of pg.results ?? []) { if (!seen.has(r.id)) { seen.add(r.id); results.push(r); } }
+  return mapReleases({ results }, kind, region);
 }

@@ -24,7 +24,7 @@ import {
   extractWikidataImages, extractCommonsCategory,
   dedupeImages, dedupeVideos, type ImageItem, type VideoItem,
 } from "./sources.js";
-import { computeAge, buildFilmography, movieProviders, selectStillFilms, filmImagesToStills } from "./lookup.js";
+import { computeAge, buildFilmography, movieProviders, selectStillFilms, filmImagesToStills, personProfile } from "./lookup.js";
 import { overlapRatio, titleTokens } from "./wiki.js";
 import { runCheck, describeError } from "./keycheck.js";
 
@@ -214,6 +214,36 @@ describe("person detail helpers", () => {
   });
 });
 
+describe("personProfile — light path (NO image crawl)", () => {
+  it("returns filmography but NO images, and touches ONLY TMDb (never wikidata/wikimedia/commons/tvdb)", async () => {
+    vi.mocked(ofetch).mockClear();
+    vi.mocked(ofetch).mockResolvedValueOnce({
+      id: 141083, name: "Test Person", known_for_department: "Acting",
+      biography: "Bio.", birthday: "1980-01-01", profile_path: "/pp.jpg",
+      combined_credits: {
+        cast: [{ id: 10, title: "A Film", release_date: "2020-01-01", media_type: "movie", character: "Hero", poster_path: "/p.jpg", popularity: 9 }],
+        crew: [],
+      },
+      external_ids: { imdb_id: "nm0000001", wikidata_id: "Q42" },
+    });
+
+    const prof = await personProfile(141083);
+
+    // (i) light shape: filmography present, image keys absent.
+    expect(Array.isArray(prof.filmography)).toBe(true);
+    expect(prof.filmography.length).toBe(1);
+    expect("images" in prof).toBe(false);
+    expect("imageSources" in prof).toBe(false);
+    expect("imageStats" in prof).toBe(false);
+
+    // (ii) exactly one HTTP call, to TMDb only — the image-source hosts are never hit.
+    const urls = vi.mocked(ofetch).mock.calls.map((c) => String(c[0]));
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain("api.themoviedb.org");
+    expect(urls.some((u) => /wikidata\.org|wikimedia\.org|commons|thetvdb\.com/i.test(u))).toBe(false);
+  });
+});
+
 describe("watch-providers mapping (mocked network)", () => {
   it("maps TMDb watch/providers into per-country flatrate/rent/buy", async () => {
     vi.mocked(ofetch).mockResolvedValueOnce({
@@ -281,7 +311,7 @@ describe("person-image sources (Wikidata/Commons/Wikipedia/TVDB)", () => {
 });
 
 describe("cinema-wide search — people + movies + series + companies", () => {
-  const personSneha: MultiHit = { id: 100, media_type: "person", name: "Sneha", known_for_department: "Acting", popularity: 1, known_for: [{ title: "Pattas", media_type: "movie" }] };
+  const personSneha: MultiHit = { id: 100, media_type: "person", name: "Sneha", known_for_department: "Acting", profile_path: "/sneha.jpg", popularity: 1, known_for: [{ title: "Pattas", media_type: "movie" }] };
   const movieSneha: MultiHit = { id: 200, media_type: "movie", title: "Sneha", popularity: 6, vote_count: 300 };
   // Same name, differing department — isolates the ROLE-keyword boost.
   const rajDirector: MultiHit = { id: 300, media_type: "person", name: "Rajamouli", known_for_department: "Directing", popularity: 12 };
@@ -344,6 +374,31 @@ describe("cinema-wide search — people + movies + series + companies", () => {
   it("back-compat: rankHits still returns mediaType for movie/tv (existing movie search)", () => {
     const r = rankHits(parseQuery("sneha"), [movieSneha]);
     expect(r[0]!.mediaType).toBe("movie");
+  });
+});
+
+describe("search — people notability gate (obscure namesake vs real same-name film)", () => {
+  // No profile image AND ~zero popularity ⇒ obscure.
+  const obscureLenin: MultiHit = { id: 10, media_type: "person", name: "Lenin", known_for_department: "Acting", popularity: 0.5 };
+  const filmLenin: MultiHit = { id: 11, media_type: "movie", title: "Lenin", original_language: "te", release_date: "2026-07-10", popularity: 15, vote_count: 40 };
+  // Has an image ⇒ notable, even at low popularity.
+  const notableLenin: MultiHit = { id: 12, media_type: "person", name: "Lenin", known_for_department: "Acting", profile_path: "/l.jpg", popularity: 2 };
+  const popularFilm: MultiHit = { id: 13, media_type: "movie", title: "Lenin", popularity: 90, vote_count: 5000 };
+
+  it("(i) an image-less ~zero-pop namesake ranks BELOW a real same-name film", () => {
+    const r = rankCandidates(parseQuery("lenin"), [obscureLenin, filmLenin], []);
+    expect(r[0]!.type).toBe("movie");
+    expect(r[0]!.id).toBe(11);
+  });
+  it("(ii) a NOTABLE same-name person still outranks a popular film (guarantee holds)", () => {
+    const r = rankCandidates(parseQuery("lenin"), [popularFilm, notableLenin], []);
+    expect(r[0]!.type).toBe("person");
+    expect(r[0]!.id).toBe(12);
+  });
+  it("(iii) an explicit TYPE keyword boosts even an obscure person above the film", () => {
+    const r = rankCandidates(parseQuery("actor lenin"), [filmLenin, obscureLenin], []);
+    expect(r[0]!.type).toBe("person");
+    expect(r[0]!.id).toBe(10);
   });
 });
 
