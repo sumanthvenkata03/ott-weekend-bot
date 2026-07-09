@@ -1,8 +1,10 @@
 // src/reconcile/__tests__/ai-review.test.ts
-// OFFLINE tests for the advisory AI-review tier. The LLM transport is mocked, so
-// these are deterministic and never touch the network/CLI. They lock the
-// authority boundary: annotate changes no tier, never feeds the hash, and fails
-// soft toward MORE caution. Run: npx vitest run --dir src/reconcile
+// OFFLINE tests for annotateWithAiReview — the ADVISORY attach step. The LLM
+// transport is mocked, so these are deterministic and never touch the
+// network/CLI. They lock the authority boundary of ANNOTATE: it changes no tier,
+// demotes NOTHING (enforcement is a separate pass — see auto-demote.test.ts),
+// never feeds the hash, computes the Phase-1 trust fields in code, and fails soft
+// toward MORE caution. Run: npx vitest run --dir src/reconcile
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../../content/claude.js", () => ({ callClaudeJSON: vi.fn() }));
@@ -19,7 +21,7 @@ vi.mock("../../shared/cache.js", () => ({
   },
 }));
 import { callClaudeJSON } from "../../content/claude.js";
-import { annotateWithAiReview, buildReviewPrompt } from "../ai-review.js";
+import { annotateWithAiReview, buildReviewPrompt, classifyDomainTrust } from "../ai-review.js";
 import { computeDropHash } from "../gate.js";
 import type { ReconcileResult, ReconciledFilm } from "../types.js";
 
@@ -62,8 +64,8 @@ beforeEach(() => {
   cacheMock.store.clear();
 });
 
-describe("annotateWithAiReview — advisory, hash-invariant, fail-soft", () => {
-  it("attaches advisory verdicts by tmdbId, leaves tiers untouched, and does NOT change the hash (no demotion)", async () => {
+describe("annotateWithAiReview — advisory attach, hash-invariant, no demotion", () => {
+  it("attaches verdicts + trust fields by tmdbId, leaves tiers untouched, and does NOT change the hash", async () => {
     const films = [
       film({ tmdbId: 1, title: "Kashmir 1947", tier: "green" }),
       film({ tmdbId: 2, title: "Sardar 2", tier: "yellow" }),
@@ -71,105 +73,91 @@ describe("annotateWithAiReview — advisory, hash-invariant, fail-soft", () => {
     ];
     const results = [result(films)];
     const before = computeDropHash(results);
-    // Advisory-only verdicts (confirm/doubt) — neither demotes, so the hash must NOT move.
     mockCall.mockResolvedValue({
       reviews: [
-        { tmdbId: 1, verdict: "confirm", reason: "trade press confirms the date", sourceUrl: "https://news.example/kashmir" },
+        { tmdbId: 1, verdict: "confirm", reason: "trade press confirms the date", sourceUrl: "https://www.thehindu.com/kashmir" },
         { tmdbId: 2, verdict: "doubt", reason: "one source contests the date", sourceUrl: "https://news.example/sardar" },
       ],
     });
 
     await annotateWithAiReview(results);
 
-    expect(computeDropHash(results)).toBe(before);          // hash unchanged — non-demoting verdicts stay OUTSIDE the hash
-    expect(films[0]!.tier).toBe("green");                   // tier untouched (never overwritten)
-    expect(films[0]!.aiReview).toEqual({ verdict: "confirm", reason: "trade press confirms the date", sourceUrl: "https://news.example/kashmir" });
+    expect(computeDropHash(results)).toBe(before);          // annotate never moves the hash (no demotion here)
+    expect(films[0]!.tier).toBe("green");                   // tier untouched
+    expect(films[0]!.aiReview?.verdict).toBe("confirm");
+    expect(films[0]!.aiReview?.trust).toBe("confirmed");    // allowlisted source → confirmed
+    expect(films[0]!.aiReview?.sourceDomainTrust).toBe("allow");
     expect(films[1]!.aiReview?.verdict).toBe("doubt");
-    expect(films[0]!.aiDemoted).toBeUndefined();            // confirm → not demoted
-    expect(films[1]!.aiDemoted).toBeUndefined();            // doubt → flag-only, not demoted
-    expect(films[2]!.aiReview).toBeUndefined();             // 🔴 is skipped (gate-excluded already)
+    expect(films[1]!.aiReview?.trust).toBe("unconfirmed");  // doubt → unconfirmed
+    expect(films[0]!.aiDemoted).toBeUndefined();            // annotate demotes NOTHING
+    expect(films[1]!.aiDemoted).toBeUndefined();
+    expect(films[2]!.aiReview).toBeUndefined();             // 🔴 skipped (gate-excluded already)
     expect(mockCall).toHaveBeenCalledTimes(1);              // ONE batched call for the edition
   });
 
-  it("sets aiDemoted on a SOURCED reject ONLY — keyed on the verdict, not the tier (Blast 🟡/✅ is safe)", async () => {
+  it("trust mapping: reject → contradicted; confirm → confirmed; denylist-only confirm → unconfirmed (code overrides LLM)", async () => {
     const films = [
-      film({ tmdbId: 1, title: "Sardar 2", tier: "green" }),       // sourced reject → demoted
-      film({ tmdbId: 2, title: "Contested", tier: "yellow" }),     // doubt → keep
-      film({ tmdbId: 3, title: "Blast", tier: "yellow" }),         // 🟡 tier but ✅ verdict → keep
-      film({ tmdbId: 4, title: "Obscure", tier: "green" }),        // unverified → keep
+      film({ tmdbId: 1, title: "Rejected", tier: "green" }),
+      film({ tmdbId: 2, title: "Confirmed", tier: "green" }),
+      film({ tmdbId: 3, title: "Piracy-sourced", tier: "green" }),
     ];
     const results = [result(films)];
     mockCall.mockResolvedValue({
       reviews: [
-        { tmdbId: 1, verdict: "reject", reason: "releases Sept 10, not this window", sourceUrl: "https://news.example/sardar2" },
-        { tmdbId: 2, verdict: "doubt", reason: "date contested", sourceUrl: "https://news.example/contested" },
-        { tmdbId: 3, verdict: "confirm", reason: "platform confirms the drop", sourceUrl: "https://news.example/blast" },
-        { tmdbId: 4, verdict: "unverified", reason: "couldn't confirm via search" },
+        { tmdbId: 1, verdict: "reject", reason: "cancelled per trade", sourceUrl: "https://variety.com/x" },
+        { tmdbId: 2, verdict: "confirm", reason: "confirmed", sourceUrl: "https://www.pinkvilla.com/x" },
+        { tmdbId: 3, verdict: "confirm", reason: "date per aggregator", sourceUrl: "https://mlsbd.tv/some-film" },
       ],
     });
-
     await annotateWithAiReview(results);
-
-    expect(films[0]!.aiDemoted).toEqual({ originalTier: "green", verdict: "reject", reason: "releases Sept 10, not this window", sourceUrl: "https://news.example/sardar2" });
-    expect(films[0]!.tier).toBe("green");                   // demotion preserves the original tier
-    expect(films[1]!.aiDemoted).toBeUndefined();            // ⚠️ doubt → flag-only
-    expect(films[2]!.aiDemoted).toBeUndefined();            // ✅ verdict on a 🟡 film → never demoted (Blast safety)
-    expect(films[3]!.aiDemoted).toBeUndefined();            // ❓ unverified → keep
+    expect(films[0]!.aiReview?.trust).toBe("contradicted");
+    expect(films[1]!.aiReview?.trust).toBe("confirmed");
+    expect(films[2]!.aiReview?.sourceDomainTrust).toBe("deny");
+    expect(films[2]!.aiReview?.trust).toBe("unconfirmed");   // a piracy-only "confirm" is NOT trusted
   });
 
-  it("a sourceless reject → unverified, and is NOT demoted (no actionable bare claim)", async () => {
-    const films = [film({ tmdbId: 5, title: "Sourceless Reject", tier: "green" })];
-    const results = [result(films)];
-    mockCall.mockResolvedValue({ reviews: [{ tmdbId: 5, verdict: "reject", reason: "seems off" }] });
-    await annotateWithAiReview(results);
-    expect(films[0]!.aiReview?.verdict).toBe("unverified");
-    expect(films[0]!.aiDemoted).toBeUndefined();
-  });
-
-  it("CACHE determinism: a re-run with the same input HITS the cache — same demotion, NO second LLM call", async () => {
-    const mk = (): ReconcileResult[] => [result([film({ tmdbId: 1, title: "Postponed", tier: "green" })])];
-    mockCall.mockResolvedValue({ reviews: [{ tmdbId: 1, verdict: "reject", reason: "postponed to July", sourceUrl: "https://news.example/postponed" }] });
-
-    const first = mk();
-    await annotateWithAiReview(first);
-    expect(mockCall).toHaveBeenCalledTimes(1);                       // review run = one live call
-    expect(first[0]!.reconciled[0]!.aiDemoted?.verdict).toBe("reject");
-
-    // The --approve re-run: FRESH film objects, same identity + window → cache hit.
-    const second = mk();
-    await annotateWithAiReview(second);
-    expect(mockCall).toHaveBeenCalledTimes(1);                       // STILL one — re-run read the cache
-    expect(second[0]!.reconciled[0]!.aiDemoted?.verdict).toBe("reject"); // demotion reproduced deterministically
-  });
-
-  it("downgrades a doubt/reject with NO sourceUrl to unverified (no bare authoritative claim)", async () => {
+  it("downgrades a doubt/reject with NO sourceUrl to unverified (no bare authoritative claim) → trust unconfirmed", async () => {
     const films = [film({ tmdbId: 5, title: "Sourceless", tier: "green" })];
     const results = [result(films)];
     mockCall.mockResolvedValue({ reviews: [{ tmdbId: 5, verdict: "reject", reason: "seems off" }] });
     await annotateWithAiReview(results);
     expect(films[0]!.aiReview?.verdict).toBe("unverified");
     expect(films[0]!.aiReview?.sourceUrl).toBeUndefined();
+    expect(films[0]!.aiReview?.trust).toBe("unconfirmed");
   });
 
-  it("fail-soft: a failed/garbled review call marks every reviewed film 'unavailable', never blank", async () => {
+  it("CACHE determinism: a re-run with the same input HITS the cache — same verdict, NO second LLM call", async () => {
+    const mk = (): ReconcileResult[] => [result([film({ tmdbId: 1, title: "Postponed", tier: "green" })])];
+    mockCall.mockResolvedValue({ reviews: [{ tmdbId: 1, verdict: "reject", reason: "postponed to July", sourceUrl: "https://news.example/postponed" }] });
+
+    const first = mk();
+    await annotateWithAiReview(first);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+    expect(first[0]!.reconciled[0]!.aiReview?.trust).toBe("contradicted");
+
+    const second = mk();
+    await annotateWithAiReview(second);
+    expect(mockCall).toHaveBeenCalledTimes(1);                       // STILL one — re-run read the cache
+    expect(second[0]!.reconciled[0]!.aiReview?.trust).toBe("contradicted");
+  });
+
+  it("fail-soft: a failed/garbled review call marks every reviewed film 'unavailable' with NO trust (uncertain, never a pass)", async () => {
     const films = [film({ tmdbId: 7, title: "X", tier: "green" }), film({ tmdbId: 8, title: "Y", tier: "yellow" })];
     const results = [result(films)];
-    // A garbled result (no `reviews`) makes the mapping throw inside reviewEdition's
-    // try — the SAME catch that handles a real call rejection/timeout — so every
-    // reviewed film fails soft to "unavailable". (The live rejection path is
-    // exercised separately in the job-level verification.)
     mockCall.mockResolvedValue(undefined as unknown as { reviews: never[] });
     await annotateWithAiReview(results);
     expect(films.every((f) => f.aiReview?.verdict === "unavailable")).toBe(true);
+    expect(films.every((f) => f.aiReview?.trust === undefined)).toBe(true);   // no trust ⇒ enforcement skips it
     expect(films[0]!.aiReview?.reason).toMatch(/verify manually/);
   });
 
-  it("a film the model omits is marked unverified, not silently blank", async () => {
+  it("a film the model omits is marked unverified (trust unconfirmed), not silently blank", async () => {
     const films = [film({ tmdbId: 9, title: "Returned", tier: "green" }), film({ tmdbId: 10, title: "Omitted", tier: "green" })];
     const results = [result(films)];
     mockCall.mockResolvedValue({ reviews: [{ tmdbId: 9, verdict: "confirm", reason: "ok", sourceUrl: "https://x.example" }] });
     await annotateWithAiReview(results);
     expect(films[1]!.aiReview?.verdict).toBe("unverified");
+    expect(films[1]!.aiReview?.trust).toBe("unconfirmed");
     expect(films[1]!.aiReview?.reason).toMatch(/not returned/);
   });
 
@@ -188,29 +176,33 @@ describe("annotateWithAiReview — advisory, hash-invariant, fail-soft", () => {
   });
 });
 
-describe("annotateWithAiReview — seam #3 platform fact-fill (OTT-gated, fill-only-if-empty)", () => {
+describe("annotateWithAiReview — seam #3 platform fact-fill + platformAgrees (OTT-gated, fill-only-if-empty)", () => {
   it("platform=null leaves release.platform untouched (fabrication guard holds)", async () => {
     const f = film({ tmdbId: 1, title: "Nazar", tier: "yellow", pillar: "ott", release: rel([]) });
     const results = [result([f], "ott")];
     mockCall.mockResolvedValue({ reviews: [{ tmdbId: 1, verdict: "unverified", reason: "couldn't confirm via search", platform: null }] });
     await annotateWithAiReview(results);
-    expect(f.release!.platform).toEqual([]);                 // no source → no platform → stays []
+    expect(f.release!.platform).toEqual([]);
+    expect(f.aiReview?.platformFound).toBeUndefined();
   });
 
-  it("a mappable platform + EMPTY release.platform → filled via toPlatform (enum, not raw text)", async () => {
+  it("a mappable platform + EMPTY release.platform → filled via toPlatform (enum, not raw text); no conflict recorded", async () => {
     const f = film({ tmdbId: 2, title: "Karakkam", tier: "yellow", pillar: "ott", release: rel([]) });
     const results = [result([f], "ott")];
     mockCall.mockResolvedValue({ reviews: [{ tmdbId: 2, verdict: "confirm", reason: "SonyLIV confirms", sourceUrl: "https://x.example", platform: "Sony LIV" }] });
     await annotateWithAiReview(results);
-    expect(f.release!.platform).toEqual(["SonyLIV"]);        // "Sony LIV" → enum "SonyLIV"
+    expect(f.release!.platform).toEqual(["SonyLIV"]);
+    expect(f.aiReview?.platformFound).toBe("Sony LIV");
+    expect(f.aiReview?.platformAgrees).toBeUndefined();     // nothing to compare against (was empty)
   });
 
-  it("a platform on a NON-empty release.platform does NOT override (seams 1-2 win)", async () => {
-    const f = film({ tmdbId: 3, title: "Mollywood Times", tier: "green", pillar: "ott", release: rel(["JioHotstar"]) });
+  it("a DIFFERENT platform on a NON-empty release.platform records platformAgrees=false, but annotate does NOT override", async () => {
+    const f = film({ tmdbId: 3, title: "Mollywood Times", tier: "green", pillar: "ott", release: rel(["ZEE5"]) });
     const results = [result([f], "ott")];
-    mockCall.mockResolvedValue({ reviews: [{ tmdbId: 3, verdict: "confirm", reason: "x", sourceUrl: "https://x.example", platform: "Netflix" }] });
+    mockCall.mockResolvedValue({ reviews: [{ tmdbId: 3, verdict: "confirm", reason: "SonyLIV per press", sourceUrl: "https://x.example", platform: "SonyLIV" }] });
     await annotateWithAiReview(results);
-    expect(f.release!.platform).toEqual(["JioHotstar"]);     // unchanged — AI-review never overrides
+    expect(f.release!.platform).toEqual(["ZEE5"]);          // unchanged — annotate never suppresses (enforce does)
+    expect(f.aiReview?.platformAgrees).toBe(false);         // conflict recorded
   });
 
   it("BLAST-RADIUS GUARD: the theatrical edition is NOT filled (OTT-only gate)", async () => {
@@ -218,27 +210,37 @@ describe("annotateWithAiReview — seam #3 platform fact-fill (OTT-gated, fill-o
     const results = [result([f], "theatrical")];
     mockCall.mockResolvedValue({ reviews: [{ tmdbId: 4, verdict: "confirm", reason: "future OTT mentioned", sourceUrl: "https://x.example", platform: "Netflix" }] });
     await annotateWithAiReview(results);
-    expect(f.release!.platform).toEqual([]);                 // theatrical card stays empty
+    expect(f.release!.platform).toEqual([]);                // theatrical card stays empty
   });
 });
 
-describe("buildReviewPrompt — date-recency instruction (Step 2)", () => {
+describe("classifyDomainTrust — code-owned source-domain tiers", () => {
+  it("denylist: exact host, mirror stem, and www prefix all resolve to deny", () => {
+    expect(classifyDomainTrust("https://mlsbd.tv/movie")).toBe("deny");
+    expect(classifyDomainTrust("https://www.mlsbd.shop/x")).toBe("deny");     // mirror stem
+    expect(classifyDomainTrust("https://tamilrockers.wtf/x")).toBe("deny");
+  });
+  it("allowlist trade press → allow; unknown outlet → unknown; non-URL → unknown", () => {
+    expect(classifyDomainTrust("https://www.pinkvilla.com/a")).toBe("allow");
+    expect(classifyDomainTrust("https://123telugu.com/a")).toBe("allow");
+    expect(classifyDomainTrust("https://some-random-blog.example/a")).toBe("unknown");
+    expect(classifyDomainTrust(undefined)).toBe("unknown");
+    expect(classifyDomainTrust("not a url")).toBe("unknown");
+  });
+});
+
+describe("buildReviewPrompt — date-recency instruction", () => {
   it("steers a CONFIRMED out-of-window negative to reject, while guarding against over-removing real films", () => {
     const prompt = buildReviewPrompt(
       "theatrical",
       "2026-06-24 → 2026-06-28",
       [film({ tmdbId: 1, title: "Lenin", tier: "yellow", date: "2026-06-26" })]
     );
-    // The window is interpolated into the recency rule (so "outside the window" is concrete).
     expect(prompt).toContain("2026-06-24 → 2026-06-28");
-    // Recency must be paired with AUTHORITY — a recent rumor must not override an older official source.
     expect(prompt).toContain("RECENT + AUTHORITATIVE");
     expect(prompt).toContain("A recent RUMOR does NOT override an older OFFICIAL confirmation");
-    // Staggered/regional safety: an earlier theatrical/regional release must NOT kill a later in-window OTT drop.
     expect(prompt).toContain("does NOT disqualify a later OTT or wider release");
-    // Vague/indefinite postponements are NOT a reject (avoid false positives).
     expect(prompt).toContain("delayed indefinitely");
-    // Conservative default: when unsure, keep the film (doubt), don't auto-remove it.
     expect(prompt).toContain('When unsure, prefer "doubt"');
   });
 });

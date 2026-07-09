@@ -322,22 +322,25 @@ describe("Gate — hash binding and auto-pass", () => {
     expect(r.reconciled[0]!.foundIn.sort()).toEqual(["ai-net", "tmdb"]);
   });
 
-  it("hash is deterministic; mismatch blocks; exact hash approves; autoPassGreen renders all-green", async () => {
+  it("hash is deterministic; an all-🟢 drop auto-publishes; kill-switch + wrong-hash block; exact hash approves", async () => {
     const r = await greenResult();
     const h1 = computeDropHash([r]);
-    const h2 = computeDropHash([r]);
-    expect(h1).toBe(h2);
+    expect(computeDropHash([r])).toBe(h1);                    // deterministic
 
-    expect(decideGate([r], { autoPassGreen: false }).proceed).toBe(false);
-    expect(decideGate([r], { approveHash: "0000deadbeef", autoPassGreen: false }).proceed).toBe(false);
+    // Phase 3: an all-effective-🟢 drop with no uncertainty auto-publishes in the
+    // same run — no manual approval needed.
+    const auto = decideGate([r], {});
+    expect(auto.proceed).toBe(true);
+    expect(auto.mode).toBe("auto");
+    expect((auto.renderable.ott ?? []).length).toBe(1);
 
-    const approved = decideGate([r], { approveHash: h1, autoPassGreen: false });
+    // WED_DROP_ALWAYS_GATE forces the manual gate: a wrong hash blocks, the exact
+    // hash approves and renders the 🟢+🟡 set.
+    expect(decideGate([r], { alwaysGate: true }).proceed).toBe(false);
+    expect(decideGate([r], { alwaysGate: true, approveHash: "0000deadbeef" }).proceed).toBe(false);
+    const approved = decideGate([r], { alwaysGate: true, approveHash: h1 });
     expect(approved.proceed).toBe(true);
     expect(approved.mode).toBe("approved");
     expect((approved.renderable.ott ?? []).length).toBe(1);
-
-    const auto = decideGate([r], { autoPassGreen: true });
-    expect(auto.proceed).toBe(true);
-    expect(auto.mode).toBe("auto");
   });
 });

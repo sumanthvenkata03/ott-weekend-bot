@@ -79,15 +79,52 @@ export type LandingStatus = "pass" | "warn" | "fail";
 export type AiVerdict = "confirm" | "doubt" | "reject" | "unverified" | "unavailable";
 
 /**
- * Advisory AI-review annotation. It ANNOTATES ONLY: it never changes tier,
- * excludes a film, or feeds the gate hash. The reviewer may FLAG a wrong
- * date/cast in `reason` but must NOT rewrite the film's date/cast/title.
+ * Trust verdict (Phase 1) — the ENFORCEMENT axis, computed IN CODE (never by the
+ * LLM) from the raw AiVerdict + the source-domain trust. Orthogonal to the
+ * display AiVerdict/glyph, which stays as-is.
+ *   confirmed    — a confirm backed by a non-denylisted source
+ *   contradicted — a sourced reject (a confident negative)
+ *   unconfirmed  — doubt / unverified, OR a confirm whose ONLY source is
+ *                  denylisted (piracy/mirror) — code refuses to trust it
+ * NB: an "unavailable" (infra failure) film gets NO trust verdict — it is
+ * uncertain, demotes nothing, and forces the manual gate.
+ */
+export type TrustVerdict = "confirmed" | "contradicted" | "unconfirmed";
+
+/**
+ * Source-domain trust tier (Phase 1), computed in code from the sourceUrl host.
+ *   allow   — trade press / mainstream outlet (can corroborate a single-net film)
+ *   deny    — piracy / mirror / low-trust aggregator (never counts as corroboration)
+ *   unknown — neither list (a real but unclassified source)
+ */
+export type SourceDomainTrust = "allow" | "deny" | "unknown";
+
+/**
+ * Advisory AI-review annotation. The DISPLAY verdict/reason/source ANNOTATE only
+ * and stay OUTSIDE the gate hash. The Phase-1 trust fields (`trust`,
+ * `sourceDomainTrust`, `platformFound`, `platformAgrees`) are the structured,
+ * code-computed inputs the SEPARATE enforcement pass (enforceVerification) acts
+ * on. The reviewer may FLAG a wrong date/cast in `reason` but must NOT rewrite
+ * the film's date/cast/title.
  */
 export interface AiReviewVerdict {
   verdict: AiVerdict;
   reason: string;
   /** A real URL found via search — required for doubt/reject; absent for unverified/unavailable. */
   sourceUrl?: string;
+  /** Trust verdict computed in code (Phase 1). Absent for "unavailable" (uncertain). */
+  trust?: TrustVerdict;
+  /** Domain-trust of sourceUrl (Phase 1): allow=trade press, deny=piracy/mirror, unknown=neither. */
+  sourceDomainTrust?: SourceDomainTrust;
+  /** The OTT platform a found source explicitly stated (structured; Phase 1). */
+  platformFound?: string;
+  /**
+   * Whether `platformFound` AGREES with the film's existing release.platform.
+   * `false` ⇒ a platform CONFLICT (press says X, our data says Y) — enforcement
+   * SUPPRESSES the platform (never auto-substitutes). Absent when there is no
+   * existing platform to compare against (seam-#3 fills that case instead).
+   */
+  platformAgrees?: boolean;
 }
 
 /**
@@ -143,18 +180,50 @@ export interface ReconciledFilm {
   aiReview?: AiReviewVerdict;
 
   /**
-   * AUTO-DEMOTION (Step 1). Set ONLY when aiReview is a SOURCED `reject` (a
-   * confident negative; the discipline guard guarantees the source). Unlike the
-   * advisory verdict, this IS folded into the gate hash (filmFingerprint) and IS
-   * read by renderableFor: a demoted film is REMOVED from the renderable pool.
-   * TIGHTENS ONLY — it can never promote a film into render. `originalTier` is
-   * preserved so the review shows what was pulled (e.g. "🟡→🛑") and why.
+   * ENFORCEMENT DEMOTION. Set by enforceVerification when a reviewed 🟢/🟡 film
+   * is NOT verification-clean — a `contradicted` (sourced reject), an
+   * `unconfirmed` (doubt / unverified / denylist-only confirm), or a platform
+   * failure (a `platform-conflict` on an OTT card, or `no-platform` when
+   * WED_DROP_REQUIRE_PLATFORM is on). Folded into the gate hash (filmFingerprint
+   * appends `|demoted:<verdict>`) and read by renderableFor: a demoted film is
+   * REMOVED from the renderable pool. `originalTier` is preserved so the review
+   * shows what was pulled (e.g. "🟡→🛑"). `sourceUrl` is optional — an
+   * `unconfirmed`/`no-platform` demotion has no cite. `demotionClass` drives the
+   * audit reason so it is always truthful (never a generic "no platform").
    */
   aiDemoted?: {
     originalTier: Tier;
     verdict: AiVerdict;
     reason: string;
-    sourceUrl: string;
+    sourceUrl?: string;
+    demotionClass?: "contradicted" | "unconfirmed" | "platform-conflict" | "no-platform";
+  };
+
+  /**
+   * ENFORCEMENT PROMOTION. Set by enforceVerification when a 🟡 whose ONLY
+   * yellow-driver is `single-net` is corroborated by a non-denylisted search
+   * `confirm` — the web search IS the second net, so it becomes effective-🟢 for
+   * the auto-publish predicate. NOT folded into the gate hash: it never changes
+   * the renderable SET (a 🟡 already renders on --approve), only the auto/gate
+   * decision. Recorded for the Slack audit.
+   */
+  aiPromoted?: {
+    reason: string;
+    sourceUrl?: string;
+  };
+
+  /**
+   * PLATFORM-CONFLICT SUPPRESSION. Set by enforceVerification when a found source
+   * states a platform that DISAGREES with release.platform. The platform is
+   * cleared (release.platform = []) so the card renders the honest Streaming-TBA
+   * path — never auto-substituted. Both values are recorded so the audit line
+   * names them ("JustWatch: X, press: Y"). On an OTT card this then trips the
+   * WED_DROP_REQUIRE_PLATFORM demote (a contradicted platform defeats the whole
+   * point of a Now-Streaming card); theatrical keeps suppression only.
+   */
+  platformSuppressed?: {
+    was: string;
+    pressPlatform: string;
   };
 
   // The renderer-bound record (absent for unverified / series).

@@ -7,14 +7,14 @@
 // It verifies, printing a clear PASS/FAIL per check:
 //   (i)  repo baseline is intact:
 //        - npx tsc --noEmit          → exactly 44 errors
-//        - npx vitest run            → exactly 190 passed (main suite unchanged)
+//        - npx vitest run            → exactly 200 passed (Issue 016 enforcement pin)
 //        - computeDropHash(FIXED)    → green ("92bcfb40772d")
 //   (ii) the tool's own tests (*.check.ts) all pass.
 
 import { execSync } from "node:child_process";
 
 const BASELINE_TSC = 44;
-const BASELINE_TESTS = 190;
+const BASELINE_TESTS = 200;
 
 interface Check { name: string; pass: boolean; detail: string; }
 const results: Check[] = [];

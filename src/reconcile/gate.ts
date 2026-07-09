@@ -2,12 +2,14 @@
 // The human-approval GATE.
 //
 //   - decideGate(results, opts) is PURE: it computes a content hash over the
-//     reconciled list and decides whether to render. The first run (no matching
-//     --approve hash, auto-pass off or not all-green) is BLOCKED → the job writes
-//     the review and STOPS. A re-run with `--approve <hash>` renders ONLY if the
-//     hash still matches (a data change since review ⇒ new hash ⇒ stale approval
-//     rejected). autoPassGreen (default false): an ALL-🟢 edition may render
-//     unattended; ANY 🟡/🔴 forces the manual gate. 🔴 NEVER renders.
+//     reconciled list and decides whether to render. It runs AFTER
+//     enforceVerification, so aiDemoted/aiPromoted are set. AUTO-PUBLISH (Phase 3):
+//     when the drop is fully verification-clean — no "unavailable" film, every
+//     edition non-empty, every renderable film effective-🟢 (true green or
+//     search-promoted) — it renders unattended in the SAME run (unless
+//     WED_DROP_ALWAYS_GATE forces the gate). Otherwise BLOCKED → the job writes
+//     the review and STOPS; a re-run with `--approve <hash>` renders 🟢+🟡 minus
+//     demoted, ONLY if the hash still matches. 🔴 + enforcement-removed NEVER render.
 //
 //   - writeReview() is the only I/O. It delivers the "Wed Drop — REVIEW" artifact:
 //       * Notion: a new page with EVERY film across both editions, written in
@@ -19,12 +21,13 @@
 //     Both writers FAIL SOFT and INDEPENDENTLY; writeReview ALWAYS surfaces the
 //     approve hash + a safety line.
 //
-//   AI-review (Step 1): the advisory verdict TEXT (f.aiReview) still feeds nothing
-//   here. But its ONE actionable consequence — f.aiDemoted, set only on a SOURCED
-//   🛑 reject — IS read here: filmFingerprint folds it into the hash and
-//   renderableFor removes the film (TIGHTENS ONLY; never promotes). A demotion
-//   also forces the manual gate (autoPassGreen can't fire). So the review the
-//   human approves and the set that renders stay identical.
+//   Enforcement (Phase 2, upstream): the advisory verdict TEXT (f.aiReview) still
+//   feeds nothing here. Its actionable outputs do: f.aiDemoted (contradicted /
+//   unconfirmed / platform failure) is folded into the hash (filmFingerprint) and
+//   removes the film from renderableFor; f.aiPromoted marks a search-corroborated
+//   single-net 🟡 as effective-🟢 for the auto-publish predicate (it never adds a
+//   film to the rendered SET). So the review the human approves and the set that
+//   renders stay identical, and the Slack audit reports what enforcement did.
 
 import { createHash } from "node:crypto";
 import { Client } from "@notionhq/client";
@@ -74,8 +77,18 @@ export const WED_DROP_LABELS: GateLabels = {
 export interface GateOptions {
   /** Hash supplied via `--approve <hash>` (binds approval to the reviewed list). */
   approveHash?: string;
-  /** When true, an all-🟢 drop may render with no manual approval. Default false. */
-  autoPassGreen: boolean;
+  /**
+   * DEPRECATED (pre-enforcement auto path). Superseded by the Phase-3
+   * all-effective-🟢 auto-publish predicate below; kept only so existing callers
+   * (reconcile/cli.ts) still type-check. No longer consulted by decideGate.
+   */
+  autoPassGreen?: boolean;
+  /**
+   * Kill-switch (WED_DROP_ALWAYS_GATE). When true, NEVER auto-publish — always
+   * block behind the manual --approve gate, exactly as before Phase 3. Default
+   * false: a fully verification-clean drop auto-publishes in the same run.
+   */
+  alwaysGate?: boolean;
 }
 
 export interface GateDecision {
@@ -129,7 +142,7 @@ function renderableFor(result: ReconcileResult, greenOnly: boolean): Release[] {
   const out: Release[] = [];
   const seen = new Set<string>();
   for (const f of result.reconciled) {
-    if (f.aiDemoted) continue;                         // AI-review auto-removed (sourced 🛑) — TIGHTENS ONLY
+    if (f.aiDemoted) continue;                         // enforcement-removed (🛑) — TIGHTENS ONLY
     if (!f.release) continue;                          // unverified / series — never render
     if (greenOnly ? f.tier !== "green" : f.tier === "red") continue;
     if (seen.has(f.release.id)) continue;
@@ -140,28 +153,65 @@ function renderableFor(result: ReconcileResult, greenOnly: boolean): Release[] {
 }
 
 /**
- * Decide whether to render, with no I/O. allGreen requires every edition to be
- * non-empty and free of 🟡/🔴.
+ * A renderable film that counts as effective-🟢 for auto-publish: a true 🟢, OR
+ * a single-net 🟡 that enforcement PROMOTED (the web search corroborated it).
+ * A plain 🟡 (multi-issue, or a confirm that wasn't promotable) is NOT effective
+ * green — it forces the manual gate.
+ */
+function isEffectiveGreen(f: ReconciledFilm): boolean {
+  return f.tier === "green" || !!f.aiPromoted;
+}
+
+/**
+ * Decide whether to render, with no I/O. Runs AFTER enforceVerification, so
+ * `aiDemoted` / `aiPromoted` are already set. AUTO-PUBLISH (Phase 3) fires — with
+ * no manual approval — iff the drop is fully verification-clean:
+ *   - not force-gated (WED_DROP_ALWAYS_GATE / opts.alwaysGate),
+ *   - no film left UNCERTAIN (AI-review "unavailable" — an infra failure needs eyes),
+ *   - EVERY edition has ≥1 renderable film (an edition wiped to 0 by enforcement
+ *     is a human signal, never an auto-publish — the empty-edition guard),
+ *   - EVERY renderable film is effective-🟢 (true green OR promoted).
+ * Otherwise the manual gate is unchanged: `--approve <hash>` renders 🟢+🟡 minus
+ * demoted; anything else blocks. A demotion no longer forces the gate on its own —
+ * a clean remainder auto-publishes, with the enforcement audit reported to Slack.
  */
 export function decideGate(results: ReconcileResult[], opts: GateOptions): GateDecision {
   const hash = computeDropHash(results);
-  // A sourced 🛑 auto-demotion forces the MANUAL gate: even an otherwise all-🟢
-  // drop must not auto-publish when AI-review pulled a film — the operator sees
-  // the removal and confirms. So autoPassGreen can't fire while anyDemoted. (The
-  // tier-based counts don't reflect aiDemoted, hence this explicit guard.)
-  const anyDemoted = results.some((r) => r.reconciled.some((f) => f.aiDemoted));
-  const allGreen = !anyDemoted && results.every((r) => r.counts.total > 0 && r.counts.yellow === 0 && r.counts.red === 0);
+  const renderableByPillar = (): Partial<Record<string, Release[]>> => {
+    const out: Partial<Record<string, Release[]>> = {};
+    for (const r of results) out[r.pillar] = renderableFor(r, false);
+    return out;
+  };
 
-  if (opts.autoPassGreen && allGreen) {
-    const renderable: Partial<Record<string, Release[]>> = {};
-    for (const r of results) renderable[r.pillar] = renderableFor(r, true);
-    return { proceed: true, mode: "auto", hash, renderable, reason: "autoPassGreen: every edition is all-🟢" };
+  const anyUncertain = results.some((r) =>
+    r.reconciled.some((f) => f.aiReview?.verdict === "unavailable")
+  );
+  const everyEditionNonEmpty =
+    results.length > 0 && results.every((r) => renderableFor(r, false).length > 0);
+  const everyRenderableGreen = results.every((r) =>
+    r.reconciled
+      .filter((f) => f.release && !f.aiDemoted && f.tier !== "red")
+      .every(isEffectiveGreen)
+  );
+
+  if (!opts.alwaysGate && !anyUncertain && everyEditionNonEmpty && everyRenderableGreen) {
+    return {
+      proceed: true,
+      mode: "auto",
+      hash,
+      renderable: renderableByPillar(),
+      reason: "auto-publish: every renderable film is verified-🟢 (or search-promoted) across all editions",
+    };
   }
 
   if (opts.approveHash && opts.approveHash === hash) {
-    const renderable: Partial<Record<string, Release[]>> = {};
-    for (const r of results) renderable[r.pillar] = renderableFor(r, false);
-    return { proceed: true, mode: "approved", hash, renderable, reason: `approved hash ${hash} — rendering 🟢+🟡 (🔴 excluded)` };
+    return {
+      proceed: true,
+      mode: "approved",
+      hash,
+      renderable: renderableByPillar(),
+      reason: `approved hash ${hash} — rendering 🟢+🟡 (🔴 + enforcement-removed excluded)`,
+    };
   }
 
   const why = opts.approveHash
@@ -225,13 +275,14 @@ function aiReviewRuns(f: ReconciledFilm): unknown[] {
   return runs;
 }
 
-/** One auto-removed film → a line showing what it WAS (original tier) → 🛑, the reason, and [source]. */
+/** One auto-removed film → a line showing what it WAS (original tier) → 🛑, the class + reason, and [source] when cited. */
 function demotedBlocks(f: ReconciledFilm): unknown[] {
   const d = f.aiDemoted!;
+  const cls = d.demotionClass ? `${d.demotionClass}: ` : "";
   const runs: unknown[] = [
-    textRun(`${TIER_EMOJI[d.originalTier]}→🛑 ${f.title} (${f.language}) — auto-removed: ${d.reason} `),
-    linkRun("[source]", d.sourceUrl),
+    textRun(`${TIER_EMOJI[d.originalTier]}→🛑 ${f.title} (${f.language}) — auto-removed (${cls}${d.reason}) `),
   ];
+  if (d.sourceUrl) runs.push(linkRun("[source]", d.sourceUrl));
   return [{ object: "block" as const, type: "paragraph" as const, paragraph: { rich_text: runs } }];
 }
 
@@ -404,6 +455,47 @@ function aiRemovedNames(results: ReconcileResult[]): string[] {
   return results.flatMap((r) => r.reconciled.filter((f) => f.aiDemoted).map((f) => f.title));
 }
 
+/**
+ * The enforcement AUDIT — what enforceVerification did, in plain lines, for the
+ * Slack ping (blocked path, below) AND the job's auto-publish notification
+ * (Refinement 3). Truthful by construction: dropped lines name the reason CLASS,
+ * suppressed lines name BOTH platform values. Exported so both paths share it.
+ */
+export function summarizeEnforcement(results: ReconcileResult[]): {
+  promoted: string[];
+  dropped: string[];
+  suppressed: string[];
+} {
+  const promoted: string[] = [];
+  const dropped: string[] = [];
+  const suppressed: string[] = [];
+  for (const r of results) {
+    for (const f of r.reconciled) {
+      if (f.aiPromoted) {
+        const dom = f.aiReview?.sourceDomainTrust ? ` [${f.aiReview.sourceDomainTrust}]` : "";
+        promoted.push(`${f.title}${dom}`);
+      }
+      if (f.aiDemoted) {
+        dropped.push(`${f.title} (${f.aiDemoted.demotionClass ?? f.aiDemoted.verdict})`);
+      }
+      if (f.platformSuppressed) {
+        suppressed.push(`${f.title}: JustWatch ${f.platformSuppressed.was} vs press ${f.platformSuppressed.pressPlatform}`);
+      }
+    }
+  }
+  return { promoted, dropped, suppressed };
+}
+
+/** Flatten the audit into issue-block lines for a Slack notification (auto path). */
+export function enforcementAuditLines(results: ReconcileResult[]): string[] {
+  const a = summarizeEnforcement(results);
+  const lines: string[] = [];
+  if (a.promoted.length) lines.push(`🔼 Promoted (search-corroborated): ${a.promoted.join(", ")}`);
+  if (a.dropped.length) lines.push(`✂️ Dropped by AI-review: ${a.dropped.join(", ")}`);
+  if (a.suppressed.length) lines.push(`⚠️ Platform suppressed: ${a.suppressed.join(", ")}`);
+  return lines;
+}
+
 function truncList(names: string[], max = 8): string {
   if (names.length === 0) return "—";
   if (names.length <= max) return names.join(", ");
@@ -439,13 +531,16 @@ async function postReviewToSlack(
   });
   const flagged = aiFlaggedNames(results);
   const removed = aiRemovedNames(results);
+  const audit = summarizeEnforcement(results);
 
   const blocks: unknown[] = [
     { type: "header", text: { type: "plain_text", text: `🕵️ ${labels.reviewTitle}`, emoji: true } },
     section(`*Reconciliation review · ${windowLabel}*\nRender is GATED — nothing published until approved.`),
     section(editionLines.join("\n")),
     section(`*AI net added:* ${truncList(aiAddedNames(results))}`),
-    ...(removed.length ? [section(`*🛑 Auto-removed by AI-review (NOT in drop):* ${truncList(removed)}`)] : []),
+    ...(audit.promoted.length ? [section(`*🔼 Promoted (search-corroborated):* ${truncList(audit.promoted)}`)] : []),
+    ...(removed.length ? [section(`*🛑 Auto-removed by AI-review (NOT in drop):* ${truncList(audit.dropped)}`)] : []),
+    ...(audit.suppressed.length ? [section(`*⚠️ Platform suppressed (press disagrees — never auto-substituted):* ${truncList(audit.suppressed)}`)] : []),
     ...(flagged.length ? [section(`*AI-review — verify these:* ${truncList(flagged)}`)] : []),
     section(`*Approve:*\n\`\`\`${labels.approveCommand} ${hash}\`\`\``),
   ];

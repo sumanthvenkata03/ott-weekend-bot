@@ -5,14 +5,16 @@
 // it the right film?) and ANNOTATES each 🟢/🟡 film with a verdict + source so
 // the human's final review is a glance at a pre-flagged page.
 //
-// AUTHORITY BOUNDARY (Step 1): this changes NO tier and approves NOTHING. It
-// attaches the advisory `aiReview` verdict, AND — for a SOURCED `reject` only —
-// sets the actionable `aiDemoted` field, which removes the film from the
-// renderable pool (the gate reads aiDemoted, not the verdict text). It only ever
-// TIGHTENS: ✅ confirm / ⚠️ doubt / ❓ unverified / ⚠️ unavailable never demote,
-// and nothing is ever promoted into render. The verdict TEXT stays outside the
-// hash; `aiDemoted` is folded in (filmFingerprint), so the approved review and
-// what renders stay identical.
+// AUTHORITY BOUNDARY: annotateWithAiReview changes NO tier and demotes NOTHING.
+// It ATTACHES facts — the advisory `aiReview` verdict/reason/source PLUS the
+// Phase-1 code-owned trust fields (`trust`, `sourceDomainTrust`, `platformFound`,
+// `platformAgrees`) — and does the seam-#3 platform fact-fill. The SEPARATE
+// enforceVerification pass (post-annotate, pre-gate) is the one that ACTS on
+// those facts: PROMOTE a search-corroborated single-net 🟡 to effective-🟢,
+// DEMOTE a contradicted/unconfirmed film (or an OTT film with no confirmed
+// platform) out of the renderable pool, and SUPPRESS a conflicting platform. The
+// verdict TEXT stays outside the gate hash; `aiDemoted` is folded in
+// (filmFingerprint), so the approved review and what renders stay identical.
 //
 // Budget + determinism: ONE batched callClaudeJSON-with-web-search per edition
 // (≤2/drop), CACHED by (version + window + reviewed-film projection). It now runs
@@ -28,7 +30,13 @@ import { callClaudeJSON } from "../content/claude.js";
 import { cached } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
 import { toPlatform } from "../shared/platform.js";
-import type { AiReviewVerdict, ReconciledFilm, ReconcileResult } from "./types.js";
+import type {
+  AiReviewVerdict,
+  ReconciledFilm,
+  ReconcileResult,
+  SourceDomainTrust,
+  TrustVerdict,
+} from "./types.js";
 
 // The model returns these FOUR verdicts. "unavailable" is set only by fail-soft
 // code here, never by the model.
@@ -45,6 +53,76 @@ const VerdictSchema = z.object({
 const AiReviewSchema = z.object({
   reviews: z.array(VerdictSchema).default([]),
 });
+
+// ── Source-domain trust (Phase 1) — computed IN CODE, never by the LLM ───────
+//
+// The LLM is optimistic and cannot be trusted to judge its OWN sources. So the
+// domain trust is decided here: a `confirm` whose ONLY cite is a denylisted
+// piracy/mirror domain is NOT corroboration — code coerces it to `unconfirmed`
+// regardless of what the model said (Issue 016: a film whose only date source
+// was a Bangla piracy aggregator). The allowlist is trade press we trust to
+// corroborate a single-net film (it feeds the promotion path). Both lists are
+// CONSERVATIVE and trivially extensible — add a line, add a comment.
+
+/** Piracy / mirror / low-trust aggregators. A `confirm` sourced ONLY here ⇒ unconfirmed. */
+const DENYLIST_DOMAINS: string[] = [
+  "mlsbd.tv", // Bangla piracy aggregator — Issue 016's lone date source for a film
+];
+/**
+ * Mirror STEM patterns — piracy sites cycle TLDs/subdomains constantly, so an
+ * exact-host list rots. Match the recognizable stem anywhere in the host. Keep
+ * these tight (word-bounded) so a legit outlet is never swept in.
+ */
+const DENYLIST_PATTERNS: RegExp[] = [
+  /(^|\.)ml[sw]bd\b/i, // mlsbd / mlwbd family (mlsbd.tv, mlsbd.shop, mlwbd.*, …)
+  /(^|\.)(tamilrockers|tamilmv|movierulz|ibomma|filmyzilla|filmywap|9xmovies|katmovie|hdhub4u|vegamovies|sdmoviespoint|desiremovies|worldfree4u|skymovies)\b/i,
+];
+/** Trade press / mainstream outlets trusted to corroborate a single-net film. */
+const ALLOWLIST_DOMAINS: string[] = [
+  "pinkvilla.com",
+  "bollywoodhungama.com",
+  "variety.com",
+  "thehindu.com",
+  "hindustantimes.com",
+  "filmibeat.com",
+  "123telugu.com",
+  "deccanchronicle.com",
+  "indianexpress.com",
+  "news9live.com",
+  "keralatv.in",
+];
+
+/** Registrable-ish host (lowercased, www-stripped); undefined for a non-URL. */
+function hostOf(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).host.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return undefined;
+  }
+}
+
+/** Classify a source URL's domain trust. A missing/unparseable URL is "unknown". */
+export function classifyDomainTrust(url: string | undefined): SourceDomainTrust {
+  const host = hostOf(url);
+  if (!host) return "unknown";
+  const suffixMatch = (d: string) => host === d || host.endsWith(`.${d}`);
+  if (DENYLIST_DOMAINS.some(suffixMatch) || DENYLIST_PATTERNS.some((re) => re.test(host))) return "deny";
+  if (ALLOWLIST_DOMAINS.some(suffixMatch)) return "allow";
+  return "unknown";
+}
+
+/**
+ * Map the raw AiVerdict + domain trust → the code-owned TrustVerdict. The ONE
+ * place the denylist overrides LLM optimism: a `confirm` whose only source is
+ * denylisted is downgraded to `unconfirmed`. "unavailable" never reaches here
+ * (it stays uncertain, demotes nothing).
+ */
+function trustVerdictFor(verdict: AiReviewVerdict["verdict"], domainTrust: SourceDomainTrust): TrustVerdict {
+  if (verdict === "confirm") return domainTrust === "deny" ? "unconfirmed" : "confirmed";
+  if (verdict === "reject") return "contradicted";
+  return "unconfirmed"; // doubt / unverified
+}
 
 /** The 🟢/🟡 films an edition submits for review (🔴 is gate-excluded; skip it). */
 function reviewableFilms(r: ReconcileResult): ReconciledFilm[] {
@@ -196,33 +274,42 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
         if ((v.verdict === "doubt" || v.verdict === "reject") && !v.sourceUrl) {
           review = { verdict: "unverified", reason: `${v.reason} (no source cited)` };
         } else {
-          review = v;
+          review = { ...v };
         }
+        // Phase 1 — code-owned TRUST fields (the enforcement axis). The denylist
+        // overrides LLM optimism here: a confirm sourced only from a piracy/mirror
+        // domain becomes `unconfirmed`. These annotate; enforceVerification acts.
+        review.sourceDomainTrust = classifyDomainTrust(review.sourceUrl);
+        review.trust = trustVerdictFor(review.verdict, review.sourceDomainTrust);
         f.aiReview = review;
+
+        // Structured PLATFORM fact (Phase 1). platformFound = what a found source
+        // stated; platformAgrees = whether it matches our EXISTING platform,
+        // computed against release.platform BEFORE the seam-#3 fill so a real
+        // conflict is visible (press says X, our data says Y). A found platform
+        // that maps to no enum can't be compared → leave platformAgrees undefined.
+        const rawFound = f.tmdbId !== undefined ? platformById.get(f.tmdbId) : undefined;
+        if (rawFound) {
+          review.platformFound = rawFound;
+          const foundEnum = toPlatform(rawFound);
+          if (foundEnum && f.release && f.release.platform.length > 0) {
+            review.platformAgrees = f.release.platform.includes(foundEnum);
+          }
+        }
+
         // Seam #3 — LAST-RESORT platform fill. Only for the OTT edition, and only
         // when release.platform is still EMPTY (JustWatch/stub/reconcile — seams
         // 1-2 — always win). Verdict-independent: a source-stated platform is a
         // fact regardless of the date verdict. Enum-normalized via toPlatform; an
         // unmappable/absent name leaves [] (the honest "STREAMING TBA" path).
         if (r.pillar === "ott" && f.release && f.release.platform.length === 0) {
-          const p = toPlatform(f.tmdbId !== undefined ? platformById.get(f.tmdbId) : undefined);
+          const p = toPlatform(rawFound);
           if (p) f.release.platform = [p];
-        }
-        // AUTO-DEMOTE (Step 1) — a SOURCED reject ONLY. Keyed on the VERDICT, not
-        // the tier (a 🟡 film with a ✅ verdict is untouched). TIGHTENS ONLY: it
-        // removes the film from renderable and moves the hash; it never promotes.
-        if (review.verdict === "reject" && review.sourceUrl) {
-          f.aiDemoted = {
-            originalTier: f.tier,
-            verdict: "reject",
-            reason: review.reason,
-            sourceUrl: review.sourceUrl,
-          };
         }
         assessed++;
       } else {
         // Call succeeded but this film wasn't returned — never silently blank.
-        f.aiReview = { verdict: "unverified", reason: "not returned by AI-review" };
+        f.aiReview = { verdict: "unverified", reason: "not returned by AI-review", trust: "unconfirmed", sourceDomainTrust: "unknown" };
       }
     }
     log.info(`AI-review [${r.pillar}]: ${assessed}/${films.length} films assessed via web search${miss ? "" : " (cache hit)"}`);
@@ -241,7 +328,118 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
 export async function annotateWithAiReview(results: ReconcileResult[]): Promise<ReconcileResult[]> {
   const total = results.reduce((n, r) => n + reviewableFilms(r).length, 0);
   if (total === 0) return results;
-  log.info(`\n🔬 AI-review — fact-checking ${total} 🟢/🟡 film(s) via web search (sourced 🛑 → auto-removed; changes no tier)...`);
+  log.info(`\n🔬 AI-review — fact-checking ${total} 🟢/🟡 film(s) via web search (verdicts feed enforcement; changes no tier)...`);
   await Promise.all(results.map((r) => reviewEdition(r)));
   return results;
+}
+
+// ── Enforcement (Phase 2) — post-annotate, pre-gate. PURE + deterministic ────
+//
+// Reads only the facts annotate attached (no LLM, no Date/random) so a
+// review-run and its --approve re-run enforce IDENTICALLY (the raw verdicts ride
+// the 24h review cache upstream). Mutates films in place: aiDemoted / aiPromoted
+// / platformSuppressed. It only ever TIGHTENS render — the ONE promotion turns a
+// search-corroborated single-net 🟡 into effective-🟢 for the auto-publish
+// predicate, but never adds a film to the rendered SET (a 🟡 already renders on
+// --approve).
+
+export interface EnforceOptions {
+  /**
+   * When true (WED_DROP_REQUIRE_PLATFORM default), an OTT-edition film with no
+   * platform after all nets — including a platform SUPPRESSED for conflict — is
+   * NOT renderable. Theatrical is unaffected.
+   */
+  requireOttPlatform: boolean;
+}
+
+/**
+ * A 🟡 whose SOLE yellow-driver is `single-net` — no ambiguous match, possible
+ * duplicate, date conflict, or manifest warn riding alongside. Only such a film
+ * may be promoted by a mere search-confirm (Refinement 1): a 🟡 carrying a
+ * real data problem must still face the human.
+ */
+function singleNetIsSoleYellowDriver(f: ReconciledFilm): boolean {
+  const singleNet = !(f.foundIn.includes("tmdb") && f.foundIn.includes("ai-net"));
+  return (
+    f.tier === "yellow" &&
+    singleNet &&
+    !f.ambiguousMatch &&
+    !f.possibleDuplicate &&
+    !f.conflictDetail &&
+    f.landingStatus !== "warn"
+  );
+}
+
+type DemotionClass = "contradicted" | "unconfirmed" | "platform-conflict" | "no-platform";
+
+function demote(
+  f: ReconciledFilm,
+  demotionClass: DemotionClass,
+  reason: string,
+  sourceUrl?: string
+): void {
+  f.aiDemoted = {
+    originalTier: f.tier,
+    verdict: f.aiReview!.verdict,
+    reason,
+    demotionClass,
+    ...(sourceUrl ? { sourceUrl } : {}),
+  };
+}
+
+/**
+ * ENFORCE the annotated verdicts across both editions. Order per film:
+ *   1. SUPPRESS a conflicting platform (platformAgrees === false) on BOTH
+ *      editions — clear it, record both values for the audit, never substitute.
+ *   2. Act on the trust verdict: contradicted / unconfirmed → DEMOTE;
+ *      confirmed → PROMOTE iff single-net is the sole yellow-driver and the
+ *      source isn't denylisted.
+ *   3. OTT platform requirement: a still-confirmed OTT film left with no
+ *      platform → DEMOTE, with a TRUTHFUL reason (platform-conflict names both
+ *      values; otherwise no-platform).
+ * "unavailable" (infra failure) films are skipped — they demote nothing and (via
+ * decideGate) force the manual gate.
+ */
+export function enforceVerification(results: ReconcileResult[], opts: EnforceOptions): void {
+  for (const r of results) {
+    const isOtt = r.pillar === "ott";
+    for (const f of r.reconciled) {
+      const ar = f.aiReview;
+      if (!ar || ar.verdict === "unavailable" || !ar.trust) continue; // uncertain / not reviewed → leave for the human
+
+      // 1) PLATFORM CONFLICT — suppress (never auto-substitute). Both editions.
+      if (ar.platformAgrees === false && f.release && f.release.platform.length > 0) {
+        f.platformSuppressed = { was: f.release.platform.join("/"), pressPlatform: ar.platformFound ?? "?" };
+        f.release.platform = [];
+      }
+
+      // 2) TRUST verdict.
+      if (ar.trust === "contradicted") {
+        demote(f, "contradicted", ar.reason, ar.sourceUrl);
+      } else if (ar.trust === "unconfirmed") {
+        demote(f, "unconfirmed", ar.reason, ar.sourceUrl);
+      } else {
+        // confirmed → maybe promote a clean single-net 🟡 (the search is net #2).
+        if (singleNetIsSoleYellowDriver(f) && ar.sourceDomainTrust !== "deny") {
+          f.aiPromoted = {
+            reason: "search-corroborated (single-net 🟡 confirmed by web search)",
+            ...(ar.sourceUrl ? { sourceUrl: ar.sourceUrl } : {}),
+          };
+        }
+      }
+
+      // 3) OTT platform requirement — only reaches still-confirmed films.
+      if (!f.aiDemoted && isOtt && opts.requireOttPlatform && f.release && f.release.platform.length === 0) {
+        if (f.platformSuppressed) {
+          demote(
+            f,
+            "platform-conflict",
+            `platform conflict (JustWatch: ${f.platformSuppressed.was}, press: ${f.platformSuppressed.pressPlatform})`
+          );
+        } else {
+          demote(f, "no-platform", "no OTT platform confirmed by any net");
+        }
+      }
+    }
+  }
 }

@@ -6,7 +6,6 @@ import { generateWednesdayDrop, MAX_WED_DROP_FILMS } from "../content/weekend/we
 import { writeWednesdayDropToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
-import { config } from "../shared/config.js";
 import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
 import { buildHashtags } from "../shared/hashtags.js";
 import { renderWedDrop } from "../rendering/render-wed-drop.js";
@@ -18,8 +17,8 @@ import { excludedKeysFor, recordFeatured, filmKey, type PillarKey } from "../sha
 import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
 import { editionWindow, RECONCILE_LANGUAGES } from "../reconcile/run.js";
 import { verifyCandidates } from "../reconcile/verify.js";
-import { annotateWithAiReview } from "../reconcile/ai-review.js";
-import { decideGate, writeReview, WED_DROP_LABELS } from "../reconcile/gate.js";
+import { annotateWithAiReview, enforceVerification } from "../reconcile/ai-review.js";
+import { decideGate, writeReview, enforcementAuditLines, WED_DROP_LABELS } from "../reconcile/gate.js";
 import { capPoolForSelector } from "../reconcile/select.js";
 import type { ReconcileResult } from "../reconcile/types.js";
 
@@ -89,7 +88,8 @@ async function produceEdition(
   pool: Release[],
   issueNumber: string,
   windowStart: string,
-  windowEnd: string
+  windowEnd: string,
+  auditLines: string[] = []
 ): Promise<void> {
   const meta = EDITION_META[edition];
   log.info(`\n— ${meta.notionTitle} — ${pool.length} candidate(s) in pool —`);
@@ -130,7 +130,10 @@ async function produceEdition(
   const featured = capPoolForSelector(finalPool);
   log.info(`  Feeding ${featured.length} ${edition} candidates to the LLM (picks up to ${MAX_WED_DROP_FILMS} or skips)`);
 
-  // Generate the edition's draft via Claude.
+  // Generate the edition's draft via Claude. `nameFlags` carries any copy
+  // name-discipline violations (a hallucinated/out-of-data person named in copy)
+  // that survived one retry — the offending film was dropped, and the flag is
+  // surfaced to Slack below (never silently stripped).
   const draft = await generateWednesdayDrop(featured, edition, windowStart, windowEnd);
 
   if (draft.slides.length === 0) {
@@ -205,7 +208,17 @@ async function produceEdition(
     throw err;
   }
 
-  // Slack notification (edition-labeled) with cover preview + card previews
+  // Slack notification (edition-labeled) with cover preview + card previews.
+  // On the AUTO-publish path the enforcement audit (promoted / dropped /
+  // suppressed) has no review ping to ride, so fold it — plus any copy
+  // name-discipline flags — into the existing landing-verifier issues block,
+  // where the operator already looks. (Blocked runs carry the audit in the
+  // review Slack ping instead.)
+  const validation = manifestToSlack(manifest);
+  const extraIssues = [...auditLines, ...draft.nameFlags];
+  if (extraIssues.length > 0) {
+    validation.issuesBlock = [validation.issuesBlock, ...extraIssues].filter(Boolean).join("\n");
+  }
   log.info("  Sending Slack notification...");
   await notifyDraftReady({
     pillar: `Wed Drop · ${meta.slackLabel}`,
@@ -221,7 +234,7 @@ async function produceEdition(
     coverImageUrl: cover.publicUrl,
     bodyCardImageUrls: cardUploads.map(u => u.publicUrl),
     hashtags: enrichedHashtags,
-    validation: manifestToSlack(manifest),
+    validation,
   });
 
   // Log the films actually placed on this edition's published cards so a
@@ -323,13 +336,28 @@ async function main() {
   //    soft to "unavailable", which demotes nothing.
   await annotateWithAiReview(results);
 
-  // 5. GATE — block render behind human approval, hashing over the (possibly
-  //    demoted) set. The first run writes the "Wed Drop — REVIEW" artifact and
-  //    STOPS; a re-run with `--approve <hash>` renders only if the reviewed list
-  //    still hashes the same. 🔴 and AI-removed films never render.
+  // 4b. ENFORCE (Phase 2) — act on the annotated verdicts, post-annotate/pre-gate.
+  //     PROMOTE a search-corroborated single-net 🟡 to effective-🟢; DEMOTE any
+  //     contradicted/unconfirmed film (or a denylist-only "confirm") out of the
+  //     renderable pool; SUPPRESS a conflicting platform. WED_DROP_REQUIRE_PLATFORM
+  //     (default true) additionally drops an OTT film left with no platform.
+  //     Deterministic (no LLM, no clock) → a review-run and its --approve re-run
+  //     enforce identically. Reads process.env directly (mirrors the other
+  //     WED_DROP_* dials; config.ts untouched).
+  const requireOttPlatform = !["false", "0"].includes((process.env.WED_DROP_REQUIRE_PLATFORM ?? "true").trim().toLowerCase());
+  enforceVerification(results, { requireOttPlatform });
+
+  // 5. GATE — AUTO-PUBLISH when the drop is fully verification-clean (see
+  //    decideGate); otherwise block behind human approval, hashing over the
+  //    (possibly demoted) set. The first blocked run writes the "Wed Drop —
+  //    REVIEW" artifact and STOPS; a re-run with `--approve <hash>` renders only
+  //    if the reviewed list still hashes the same. WED_DROP_ALWAYS_GATE=true is
+  //    the kill-switch that forces the old always-block behavior. 🔴 and
+  //    enforcement-removed films never render.
+  const alwaysGate = ["true", "1"].includes((process.env.WED_DROP_ALWAYS_GATE ?? "").trim().toLowerCase());
   const decision = decideGate(results, {
     ...(approveHash ? { approveHash } : {}),
-    autoPassGreen: config.RECONCILE_AUTOPASS_GREEN,
+    alwaysGate,
   });
   log.info(`\n🚦 Gate: ${decision.mode} — ${decision.reason}`);
 
@@ -354,10 +382,46 @@ async function main() {
     return;
   }
 
-  // 6. Approved (or auto-passed) — render only the approved (renderable) pools.
+  // 6. Approved (or auto-published) — render only the approved (renderable) pools.
   log.success(`✅ Gate cleared (${decision.mode}, hash ${decision.hash}) — rendering approved editions.`);
-  const thePool = decision.renderable.theatrical ?? [];
-  const ottPool = decision.renderable.ott ?? [];
+
+  // WED_DROP_FORCE — the operator's disagree-lever against a flaky verdict. A
+  // comma-separated list of TMDb ids / exact titles that re-admits ONLY
+  // enforcement-DEMOTED films (they carry aiDemoted + a release) back into the
+  // renderable pool. Never touches reconcile-🔴 or rejected-bucket leads (those
+  // have no aiDemoted/release). Post-gate + hash-neutral (mirrors WED_DROP_EXCLUDE):
+  // the --approve token stays valid; the operator owns the override, logged loudly
+  // and carried into the Slack audit as "FORCED by operator". For a resolved
+  // platform conflict, pair it with WED_DROP_PLATFORM (Decision 2).
+  const forced = parseExcludeList(process.env.WED_DROP_FORCE);
+  const forceLines: string[] = [];
+  const readmitForced = (pillar: string, pool: Release[]): Release[] => {
+    if (forced.ids.size === 0 && forced.titles.size === 0) return pool;
+    const r = results.find((x) => x.pillar === pillar);
+    if (!r) return pool;
+    const have = new Set(pool.map((p) => p.id));
+    const add: Release[] = [];
+    for (const f of r.reconciled) {
+      if (!f.aiDemoted || !f.release) continue; // ONLY enforcement-demoted films are forceable
+      const match = (f.tmdbId !== undefined && forced.ids.has(f.tmdbId)) || forced.titles.has(f.title.trim().toLowerCase());
+      if (!match || have.has(f.release.id)) continue;
+      add.push(f.release);
+      have.add(f.release.id);
+      const line = `FORCED by operator: re-admitted "${f.title}" (was auto-removed: ${f.aiDemoted.demotionClass ?? f.aiDemoted.verdict})`;
+      log.warn(`  WED_DROP_FORCE — ${line}`);
+      forceLines.push(line);
+    }
+    return add.length ? [...pool, ...add] : pool;
+  };
+  const thePool = readmitForced("theatrical", decision.renderable.theatrical ?? []);
+  const ottPool = readmitForced("ott", decision.renderable.ott ?? []);
+
+  // Enforcement audit for the Slack notification. On AUTO runs there is no review
+  // ping, so the promoted/dropped/suppressed audit rides the draft notification
+  // (produceEdition folds it into the landing-issues block). Approved re-runs
+  // already saw it in the review ping at block time, so only FORCE lines (a
+  // render-time override) are surfaced there.
+  const auditLines = [...(decision.mode === "auto" ? enforcementAuditLines(results) : []), ...forceLines];
 
   // Optional edition scope: WED_DROP_ONLY=ott|theatrical runs just that edition
   // (leaving the other's live assets/copy untouched) — e.g. re-publishing one
@@ -370,7 +434,7 @@ async function main() {
   if (!runThe) {
     log.info("In Theaters: skipped (WED_DROP_ONLY).");
   } else if (thePool.length > 0) {
-    await produceEdition("theatrical", thePool, issueNumber, startDate, endDate);
+    await produceEdition("theatrical", thePool, issueNumber, startDate, endDate, auditLines);
   } else {
     log.info("In Theaters: no approved/renderable films this week — edition skipped.");
   }
@@ -378,7 +442,7 @@ async function main() {
   if (!runOtt) {
     log.info("Now Streaming: skipped (WED_DROP_ONLY).");
   } else if (ottPool.length > 0) {
-    await produceEdition("ott", ottPool, issueNumber, ottStartDate, endDate);
+    await produceEdition("ott", ottPool, issueNumber, ottStartDate, endDate, auditLines);
   } else {
     log.info("Now Streaming: no approved/renderable films this week — edition skipped.");
   }

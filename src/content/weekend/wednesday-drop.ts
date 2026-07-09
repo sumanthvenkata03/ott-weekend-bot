@@ -33,6 +33,10 @@ const WedDropSlideSchema = z.object({
 const WedDropSchema = z.object({
   caption: z.string(),
   hashtags: z.array(z.string()),
+  // Every real person named anywhere in caption/slide bodies (name-discipline,
+  // Phase 4). The deterministic validator checks this against the film data's
+  // allowlist; a name outside it triggers a retry, then a drop.
+  namesUsed: z.array(z.string()).default([]),
   carouselSlides: z.array(WedDropSlideSchema).refine(
     slides => {
       const n = slides.filter(s => s.type === "release").length;
@@ -119,17 +123,112 @@ export function sortWedDropByProminence<
   return { slides: sortedSlides, releases: sortedReleases };
 }
 
+// ── Copy name-discipline (Phase 4) — deterministic, in code ──────────────────
+//
+// The LLM must never name a person absent from the provided film data (the
+// "Tabu" hallucination nothing checked). The allowlist per drop is the UNION of
+// every picked film's cast + leadCast + director + musicDirector + title words +
+// platform + language. A named person is a VIOLATION when it shares ZERO token
+// with that allowlist — deliberately LENIENT (any token overlap passes) so a
+// legitimate blurb is never dropped, while a wholly-unbacked name is always caught.
+
+type LLMSlide = z.infer<typeof WedDropSlideSchema>;
+interface NameViolation {
+  name: string;
+  /** The release-slide TITLE the name sits in, or "caption" (can't drop a film). */
+  where: string;
+}
+
+/** Lowercased significant tokens (≥2 chars) of a free-text name/phrase. */
+function nameTokens(s: string): string[] {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 2);
+}
+
+function buildNameAllowlist(releases: Release[]): Set<string> {
+  const allow = new Set<string>();
+  const addAll = (s?: string) => {
+    if (s) for (const t of nameTokens(s)) allow.add(t);
+  };
+  for (const r of releases) {
+    (r.cast ?? []).forEach(addAll);
+    (r.leadCast ?? []).forEach(addAll);
+    addAll(r.director);
+    addAll(r.musicDirector);
+    addAll(r.title);
+    for (const p of r.platform) addAll(p);
+    addAll(r.language);
+  }
+  return allow;
+}
+
+/** A name is allowed if ANY of its tokens overlaps the allowlist (lenient). */
+function isNameAllowed(name: string, allow: Set<string>): boolean {
+  const toks = nameTokens(name);
+  if (toks.length === 0) return true;
+  return toks.some((t) => allow.has(t));
+}
+
+/** Which release slide's body contains this name, else "caption". */
+function locateName(name: string, output: LLMOutput): string {
+  const needle = name.toLowerCase();
+  const rel = output.carouselSlides.find(
+    (s) => s.type === "release" && s.body.toLowerCase().includes(needle)
+  );
+  return rel ? rel.title : "caption";
+}
+
+/**
+ * Find name-discipline violations: (1) any self-reported `namesUsed` entry
+ * outside the allowlist, and (2) belt-and-braces — a Capitalized name introduced
+ * by "with/starring/alongside/featuring/&" in a body/caption that is outside the
+ * allowlist (catches names the model failed to self-report).
+ */
+function findNameViolations(output: LLMOutput, allow: Set<string>): NameViolation[] {
+  const violations: NameViolation[] = [];
+  const seen = new Set<string>();
+  const push = (name: string, where: string) => {
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    violations.push({ name, where });
+  };
+
+  for (const nm of output.namesUsed ?? []) {
+    if (!isNameAllowed(nm, allow)) push(nm, locateName(nm, output));
+  }
+
+  const texts: Array<{ text: string; where: string }> = [
+    { text: output.caption, where: "caption" },
+    ...output.carouselSlides.filter((s) => s.type === "release").map((s) => ({ text: s.body, where: s.title })),
+  ];
+  const re = /\b(?:with|starring|alongside|featuring|feat\.?|&)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/g;
+  for (const { text, where } of texts) {
+    for (const m of text.matchAll(re)) {
+      const nm = m[1]!;
+      if (!isNameAllowed(nm, allow)) push(nm, where);
+    }
+  }
+  return violations;
+}
+
 /**
  * Generate a Wednesday Drop draft from a list of releases for a given edition
  * ("theatrical" → In Theaters | "ott" → Now Streaming). Each edition is an
- * independent draft built from its own pool.
+ * independent draft built from its own pool. Returns the draft plus `nameFlags`
+ * — copy name-discipline violations that survived one retry (offending film
+ * dropped, or a caption violation kept-but-flagged) for the job to surface in
+ * Slack. `nameFlags` is a plain widening; it never changes WednesdayDropDraft.
  */
 export async function generateWednesdayDrop(
   releases: Release[],
   edition: WedDropEdition,
   weekendStart: string,
   weekendEnd: string
-): Promise<WednesdayDropDraft> {
+): Promise<WednesdayDropDraft & { nameFlags: string[] }> {
   if (releases.length === 0) {
     throw new Error("Cannot generate Wednesday Drop with zero releases");
   }
@@ -191,6 +290,7 @@ DELIVERABLES (respond as JSON):
 {
   "caption": "Instagram caption text under 150 words. OPEN with a specific, catchy hook on the STANDOUT film (name it + its star/director + the angle) — not a generic 'N films this week' opener. Then mention the other notable drop, the hidden gem, the regional spotlight if any, and close with 'Save this' / 'DM us' / 'Which one are you watching?' CTA.",
   "hashtags": ["array", "of", "10-12", "hashtags", "with", "the", "# prefix"],
+  "namesUsed": ["every", "real person", "you name anywhere in the caption or slide bodies"],
   "carouselSlides": [
     { "slideNumber": 1, "type": "cover", "title": "<6-word headline anchored on the standout film>", "body": "<10-word subtext>" },
     { "slideNumber": 2, "type": "index", "title": "This weekend", "body": "<quick visual list: Title (Language) → Platform>" },
@@ -203,6 +303,16 @@ DELIVERABLES (respond as JSON):
 
 ${notableComposersBlock()}
 
+NAME DISCIPLINE (hard rule — non-negotiable): NEVER name a person (actor,
+director, composer, character-as-actor) who is NOT present in the provided
+film data for that film (its Cast / Lead cast / Director / Music director).
+Do NOT recall a star from memory, and do NOT attribute a film to a person you
+"think" is in it. If you are unsure who is in a film, describe it WITHOUT
+naming anyone. List EVERY person you name anywhere (caption + slide bodies) in
+the top-level "namesUsed" array — this is checked against the film data, and a
+name that is not in the data will cause the copy to be regenerated or the film
+dropped.
+
 CAST OVERLAP RULE for release slide body copy — whenever you name an actor
 in a slide's body, at least one of the actors you name MUST also appear in
 that film's "Lead cast (top-billed)" line from the input. Both that line
@@ -213,7 +323,45 @@ recognizable name, just use those.
 
 Be specific. Take stands. Lean South-heavy where the films justify it.`;
   
-  const output = await callClaudeJSON(prompt, WedDropSchema, "sonnet");
+  let output = await callClaudeJSON(prompt, WedDropSchema, "sonnet");
+
+  // Copy name-discipline (Phase 4). Validate names against the film-data
+  // allowlist; ONE retry naming the exact violation; a SECOND violation drops
+  // the offending film(s) (never silently strips, never fails the whole run).
+  const allow = buildNameAllowlist(releases);
+  const nameFlags: string[] = [];
+  let violations = findNameViolations(output, allow);
+  if (violations.length > 0) {
+    log.warn(
+      `Wed Drop [${edition}]: name-discipline violation(s), retrying once — ${violations.map(v => `"${v.name}" @${v.where}`).join("; ")}`
+    );
+    const retryPrompt =
+      `${prompt}\n\nNAME-DISCIPLINE VIOLATION — your previous response named ` +
+      `${violations.map(v => `"${v.name}"`).join(", ")}, which is NOT in the provided film data. ` +
+      `Regenerate the ENTIRE response: never name a person absent from a film's Cast / Lead cast / ` +
+      `Director / Music director, and list every person you name in "namesUsed".`;
+    output = await callClaudeJSON(retryPrompt, WedDropSchema, "sonnet");
+    violations = findNameViolations(output, allow);
+  }
+  if (violations.length > 0) {
+    const dropTitles = new Set(violations.filter(v => v.where !== "caption").map(v => v.where));
+    for (const v of violations) {
+      nameFlags.push(
+        v.where === "caption"
+          ? `copy name-discipline: "${v.name}" not in film data — in CAPTION, kept but review copy manually`
+          : `copy name-discipline: "${v.name}" not in film data — DROPPED film "${v.where}"`
+      );
+    }
+    if (dropTitles.size > 0) {
+      log.error(
+        `Wed Drop [${edition}]: name-discipline — 2 strikes, dropping ${dropTitles.size} film(s): ${[...dropTitles].join(", ")}`
+      );
+      const kept = output.carouselSlides.filter(s => !(s.type === "release" && dropTitles.has(s.title)));
+      // If every real film was dropped, skip the edition (empty carousel).
+      const anyReleaseLeft = kept.some(s => s.type === "release");
+      output = { ...output, carouselSlides: anyReleaseLeft ? kept : [] };
+    }
+  }
 
   // Runtime guard: design contract is 1..MAX_WED_DROP_FILMS release slides, OR
   // all-empty (the "skip the pillar this week" branch). Anything else is a
@@ -266,5 +414,6 @@ Be specific. Take stands. Lean South-heavy where the films justify it.`;
     slides: sorted.slides,
     carouselSlides,
     releases: sorted.releases,
+    nameFlags,
   };
 }
