@@ -11,16 +11,32 @@ import { fetchOmdbByImdbId } from "./omdb.js";
 import { getMdblistRatings, mergeRatings, computeTbsiScore } from "../ratings/mdblist.js";
 import { discoverIndianOTTArrivals } from "./tmdb.js";
 
+// OMDb cross-source sanity set. This is a WRONG-FILM detector, NOT audience
+// curation: OMDb keys off the IMDb id, and a mis-resolved id returns another
+// film's languages entirely (the Lenin case — a Tamil film tagged "Russian").
+// An OMDb-contributed language is trusted only if it is a plausible Indian-release
+// language OR TMDb already vouches for it. Bengali stays PLAUSIBLE — big pan-India
+// films genuinely ship Bengali dubs, so a real "Bengali" chip is honest data —
+// even though we no longer COVER Bengali cinema (a separate discovery decision).
+const PLAUSIBLE_RELEASE_LANGS = new Set<string>([
+  "Telugu", "Tamil", "Hindi", "Malayalam", "Kannada", "Marathi", "Punjabi", "Bengali", "English",
+]);
+
 /**
  * Phase 5.7 — merge OMDb Language (comma-separated dub list) into the
  * existing TMDb-derived audioLanguages. Excludes the original language and
  * filters "English" from the dub list (almost always subtitle-only on
  * Indian films, treat as noise unless it's the original).
  *
- * Logs a one-liner when the two sources disagree, so dry-run monitoring
- * can spot films where one source is missing dubs the other found.
+ * Cross-source sanity: an OMDb-only language that is implausible for an Indian
+ * release (and not already in TMDb's data) is DROPPED as a probable wrong-film-id
+ * artifact, with a loud log line — the "Russian on a Tamil film" class of bug
+ * never reaches a card. Logs a one-liner when the two sources disagree, so dry-run
+ * monitoring can spot films where one source is missing dubs the other found.
+ *
+ * Exported for direct unit testing of the sanity filter.
  */
-function mergeAudioLanguages(
+export function mergeAudioLanguages(
   current: { original: string; dubbed?: string[] } | undefined,
   omdbLanguages: string[],
   filmTitle: string
@@ -28,13 +44,28 @@ function mergeAudioLanguages(
   if (!current) return undefined;
   const tmdbDubs = current.dubbed ?? [];
 
-  const allDubs = new Set<string>([...tmdbDubs, ...omdbLanguages]);
+  // TMDb data is trusted; screen each OMDb language before it can merge in.
+  const tmdbTrusted = new Set<string>([current.original, ...tmdbDubs]);
+  const omdbAccepted: string[] = [];
+  for (const lang of omdbLanguages) {
+    if (PLAUSIBLE_RELEASE_LANGS.has(lang) || tmdbTrusted.has(lang)) {
+      omdbAccepted.push(lang);
+    } else {
+      log.info(
+        `  [lang-merge] dropped OMDb-only '${lang}' (implausible for Indian release — possible wrong-film id) [${filmTitle}]`
+      );
+    }
+  }
+
+  const allDubs = new Set<string>([...tmdbDubs, ...omdbAccepted]);
   allDubs.delete(current.original);
   if (current.original !== "English") allDubs.delete("English");
 
   // Disagreement detection: did OMDb know a dub TMDb didn't, or vice versa?
+  // Compared over the ACCEPTED OMDb set, so a dropped wrong-film value never
+  // masquerades as a real cross-source disagreement.
   const tmdbSet = new Set(tmdbDubs);
-  const omdbDubsForCompare = new Set(omdbLanguages);
+  const omdbDubsForCompare = new Set(omdbAccepted);
   omdbDubsForCompare.delete(current.original);
   if (current.original !== "English") omdbDubsForCompare.delete("English");
   const onlyInTmdb = tmdbDubs.filter(x => !omdbDubsForCompare.has(x));

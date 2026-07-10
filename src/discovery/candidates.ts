@@ -33,7 +33,7 @@ export interface CandidateQuery {
   from: string;
   to: string;
   intent: DropIntent;
-  /** Human language names; defaults to all 8 supported (preserves pillar behavior). */
+  /** Human language names; defaults to all 7 supported (preserves pillar behavior). */
   languages?: string[];
 }
 
@@ -42,7 +42,7 @@ export interface CandidateQuery {
 // don't model is dropped, never coerced to a wrong one. Keep in sync with the
 // Language type in shared/types.ts.
 const VALID_LANGUAGES: ReadonlySet<Language> = new Set<Language>([
-  "Hindi", "Telugu", "Tamil", "Malayalam", "Kannada", "Marathi", "Bengali", "Punjabi",
+  "Hindi", "Telugu", "Tamil", "Malayalam", "Kannada", "Marathi", "Punjabi",
 ]);
 
 /** Map a discovery language STRING to the Language enum; undefined if unrecognized. */

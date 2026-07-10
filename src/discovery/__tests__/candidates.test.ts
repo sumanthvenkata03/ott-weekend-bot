@@ -5,12 +5,12 @@
 // logic — enrichment correctness is pinned separately in src/ingestion.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const SUPPORTED = ["Telugu", "Tamil", "Malayalam", "Kannada", "Hindi", "Bengali", "Marathi", "Punjabi"];
+const SUPPORTED = ["Telugu", "Tamil", "Malayalam", "Kannada", "Hindi", "Marathi", "Punjabi"];
 
 vi.mock("../index.js", () => ({
   discover: vi.fn(),
   unionFilms: (films: unknown[]) => films, // not exercised here (ottSearch mocked to [])
-  SUPPORTED_LANGUAGES: ["Telugu", "Tamil", "Malayalam", "Kannada", "Hindi", "Bengali", "Marathi", "Punjabi"],
+  SUPPORTED_LANGUAGES: ["Telugu", "Tamil", "Malayalam", "Kannada", "Hindi", "Marathi", "Punjabi"],
 }));
 // Identity enrich — keeps this test on routing/adapter only (no TMDb/OMDB/config).
 vi.mock("../../ingestion/releases/index.js", () => ({
@@ -175,12 +175,13 @@ describe("getCandidates — OTT-net intent gating (theatrical isolation)", () =>
 });
 
 describe("getCandidates — language defaulting", () => {
-  it("no languages → defaults to all 8 supported", async () => {
+  it("no languages → defaults to all 7 supported (Bengali trimmed; Marathi + Punjabi stay)", async () => {
     mockDiscover.mockResolvedValue(discoveryResult([]));
     await getCandidates({ from: "2026-01-01", to: "2026-01-31", intent: "theatrical" });
     const arg = mockDiscover.mock.calls[0]![0];
-    expect(arg.languages).toHaveLength(8);
+    expect(arg.languages).toHaveLength(7);
     expect(arg.languages).toContain("Punjabi");
+    expect(arg.languages).not.toContain("Bengali");
   });
 
   it("explicit languages are passed through to discover", async () => {

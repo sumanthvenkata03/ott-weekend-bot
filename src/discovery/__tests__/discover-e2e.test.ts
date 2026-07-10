@@ -144,11 +144,12 @@ describe("discover — resilience", () => {
 });
 
 describe("discover — default & degenerate inputs", () => {
-  it("empty languages list defaults to all 8 supported languages (incl. Punjabi)", async () => {
+  it("empty languages list defaults to all 7 supported languages (incl. Punjabi; Bengali trimmed)", async () => {
     const result = await discover({ from: "2026-03-01", to: "2026-03-31", languages: [] });
-    expect(result.query.languages).toHaveLength(8);
+    expect(result.query.languages).toHaveLength(7);
     expect(result.query.languages).toContain("Punjabi");
-    expect(SUPPORTED_LANGUAGES).toHaveLength(8);
+    expect(result.query.languages).not.toContain("Bengali");
+    expect(SUPPORTED_LANGUAGES).toHaveLength(7);
   });
 
   it("a single-day range with nothing found returns a clean empty result (no throw)", async () => {

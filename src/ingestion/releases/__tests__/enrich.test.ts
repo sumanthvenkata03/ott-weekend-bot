@@ -45,7 +45,8 @@ import {
 } from "../tmdb.js";
 import { fetchOmdbByImdbId } from "../omdb.js";
 import { getMdblistRatings } from "../../ratings/mdblist.js";
-import { enrichReleases, ingestReleases, ingestOTTArrivals } from "../index.js";
+import { enrichReleases, ingestReleases, ingestOTTArrivals, mergeAudioLanguages } from "../index.js";
+import { log } from "../../../shared/logger.js";
 import type { Release } from "../../../shared/types.js";
 
 const credits = {
@@ -168,6 +169,31 @@ describe("ingestReleases — REGRESSION: still identical output after the refact
     vi.mocked(discoverIndianReleases).mockResolvedValue([]);
     expect(await ingestReleases("2026-01-01", "2026-12-31")).toEqual([]);
     expect(getImdbId).not.toHaveBeenCalled();
+  });
+});
+
+describe("mergeAudioLanguages — OMDb cross-source sanity filter (Phase 2)", () => {
+  it("🔒 drops an implausible OMDb-only language (Lenin's wrong-id 'Russian') and logs it", () => {
+    const info = vi.spyOn(log, "info").mockImplementation(() => {});
+    const out = mergeAudioLanguages({ original: "Tamil" }, ["Russian"], "Lenin");
+    expect(out).toEqual({ original: "Tamil" });          // Russian NOT merged onto the card
+    expect(out!.dubbed).toBeUndefined();
+    expect(info).toHaveBeenCalledWith(
+      expect.stringMatching(/dropped OMDb-only 'Russian'.*possible wrong-film id.*Lenin/)
+    );
+  });
+
+  it("keeps a plausible OMDb dub TMDb missed (adds Tamil to a Telugu film)", () => {
+    vi.spyOn(log, "info").mockImplementation(() => {});
+    const out = mergeAudioLanguages({ original: "Telugu" }, ["Telugu", "Tamil"], "SomeFilm");
+    expect(out).toEqual({ original: "Telugu", dubbed: ["Tamil"] });
+  });
+
+  it("English is plausible — never dropped by the sanity filter (valid as an original track)", () => {
+    const info = vi.spyOn(log, "info").mockImplementation(() => {});
+    const out = mergeAudioLanguages({ original: "English" }, ["English", "Hindi"], "SomeFilm");
+    expect(out).toEqual({ original: "English", dubbed: ["Hindi"] });
+    expect(info).not.toHaveBeenCalledWith(expect.stringMatching(/dropped OMDb-only 'English'/));
   });
 });
 

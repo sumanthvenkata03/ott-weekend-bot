@@ -16,8 +16,12 @@ import type {
   WikiCoverage,
 } from "./types.js";
 
+// Active discovery languages. Bengali was TRIMMED from active coverage (Marathi +
+// Punjabi stay). It remains in the Language type + code↔lang maps so an incidental
+// record still translates, but it is never actively searched, and toReleaseStub's
+// VALID_LANGUAGES gate now rejects any stray Bengali find.
 const ALL_LANGUAGES = [
-  "Telugu", "Tamil", "Malayalam", "Kannada", "Hindi", "Bengali", "Marathi", "Punjabi",
+  "Telugu", "Tamil", "Malayalam", "Kannada", "Hindi", "Marathi", "Punjabi",
 ];
 
 export const SUPPORTED_LANGUAGES = ALL_LANGUAGES;
@@ -182,7 +186,7 @@ function crossNetGuard(tmdbCoverage: TmdbCoverage[], wikiCoverage: WikiCoverage[
     } else if (w.status === "ok") {
       log.warn(
         `⚠ COVERAGE: Wikipedia page for ${w.language} ${w.year} EXISTS but parsed 0 while ` +
-          `TMDb found ${t} — possible parser break`
+          `TMDb found ${t} — possible parser break or Wikipedia list gap`
       );
     } else {
       log.warn(
@@ -222,7 +226,7 @@ export async function discover(query: DiscoveryQuery): Promise<DiscoveryResult> 
   validateRange(query.from, query.to);
 
   const languages = query.languages.length > 0 ? query.languages : ALL_LANGUAGES;
-  log.info(`Discovery: ${query.from} → ${query.to} · ${languages.join(", ")}`);
+  log.info(`Discovery: ${query.from} → ${query.to} · ${languages.length} active languages: ${languages.join(", ")}`);
 
   const [tmdbRes, wikiRes] = await Promise.allSettled([
     discoverTmdb(languages, query.from, query.to),

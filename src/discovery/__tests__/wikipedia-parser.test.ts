@@ -144,6 +144,19 @@ describe("parsePage — captured real pages", () => {
     expect(films.some((f) => f.releaseDate?.startsWith("2026-09"))).toBe(true);
   });
 
+  it("🔒 Kannada 2026: the standard quarter layout parses in full (131 films, 0 skipped) — canary vs a silent parse/list regression", () => {
+    // Captured live 2026-07 (tables-only trim). The page that supposedly "parsed
+    // 0" in fact uses the same Opening|Title|Director|Cast|Studio|Ref quarter
+    // layout as te/ta/ml and parses cleanly — this pins that so a real future
+    // break (or list gap) is caught by the COVERAGE canary, not chased as a ghost.
+    const { films, skipped } = parsePage(loadWikiHtml("kannada-2026.json"), "Kannada", 2026, "p", ...FULL_2026);
+    expect(films.length).toBe(131);
+    expect(skipped).toBe(0);
+    // rowspan + month resolution work across the whole year (Jan…Oct present)
+    expect(new Set(films.map((f) => f.releaseDate?.slice(0, 7))).size).toBeGreaterThanOrEqual(8);
+    expect(films.some((f) => f.title === "Shivaleela")).toBe(true);
+  });
+
   it("🔒 date inclusivity: both `from` and `to` boundaries are INCLUDED, outside is EXCLUDED", () => {
     const html = loadWikiHtml("telugu-2026.json");
     expect(parsePage(html, "Telugu", 2026, "p", "2026-01-01", "2026-01-01").films.length).toBe(4); // on `from`==`to`

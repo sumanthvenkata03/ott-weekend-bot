@@ -68,11 +68,11 @@ describe("calendar-invalid release dates degrade to approximate (parsePage, pure
 });
 
 describe("discover() degenerate inputs (both nets mocked)", () => {
-  it("empty language list resolves to all 8 supported languages — defined, non-crashing", async () => {
+  it("empty language list resolves to all 7 supported languages — defined, non-crashing", async () => {
     vi.mocked(ofetch).mockImplementation(wikiOfetch({}) as never);
     vi.mocked(tmdbFetchCached).mockImplementation(tmdbRouter({}) as never);
     const result = await discover({ from: "2026-01-01", to: "2026-01-31", languages: [] });
-    expect(result.query.languages).toHaveLength(8);
+    expect(result.query.languages).toHaveLength(7);
     expect(result.films).toEqual([]);
   });
 });

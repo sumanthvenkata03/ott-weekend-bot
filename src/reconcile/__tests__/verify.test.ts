@@ -79,8 +79,9 @@ describe("verifyCandidates — composes AI net + reconcile core", () => {
     expect(annotateWithAiReview).toHaveBeenCalledWith([result]);
   });
 
-  it("🔒 language align (5a): the default AI-net corroboration set is the full 8 (find-8/verify-8)", () => {
-    expect(RECONCILE_LANGUAGES).toHaveLength(8);
-    expect(RECONCILE_LANGUAGES).toEqual(expect.arrayContaining(["Bengali", "Marathi", "Punjabi"]));
+  it("🔒 language align (5a): the default AI-net corroboration set is the active 7 (find-7/verify-7, Bengali trimmed)", () => {
+    expect(RECONCILE_LANGUAGES).toHaveLength(7);
+    expect(RECONCILE_LANGUAGES).toEqual(expect.arrayContaining(["Marathi", "Punjabi"]));
+    expect(RECONCILE_LANGUAGES).not.toContain("Bengali");
   });
 });
