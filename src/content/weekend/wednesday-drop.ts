@@ -123,53 +123,174 @@ export function sortWedDropByProminence<
   return { slides: sortedSlides, releases: sortedReleases };
 }
 
-// ── Copy name-discipline (Phase 4) — deterministic, in code ──────────────────
-//
-// The LLM must never name a person absent from the provided film data (the
-// "Tabu" hallucination nothing checked). The allowlist per drop is the UNION of
-// every picked film's cast + leadCast + director + musicDirector + title words +
-// platform + language. A named person is a VIOLATION when it shares ZERO token
-// with that allowlist — deliberately LENIENT (any token overlap passes) so a
-// legitimate blurb is never dropped, while a wholly-unbacked name is always caught.
-
-type LLMSlide = z.infer<typeof WedDropSlideSchema>;
-interface NameViolation {
-  name: string;
-  /** The release-slide TITLE the name sits in, or "caption" (can't drop a film). */
-  where: string;
+/**
+ * Manual audio-language override (WED_DROP_LANG operator dial — mirrors
+ * WED_DROP_PLATFORM). A ';'-separated list of `Title=Lang1|Lang2|…` pairs; the
+ * first language becomes audioLanguages.original, the rest become dubbed. The job
+ * applies these POST-GATE, before the LLM + render, so the card's language row
+ * reflects the operator-verified track — killing wrong-film bleed (e.g. an OMDb
+ * "Russian" mismatch on a mismatched hit) without a code edit. Post-gate ⇒
+ * hash-neutral (the --approve token stays valid; only the rendered set changes).
+ */
+export function parseLangOverrides(
+  raw: string | undefined
+): Map<string, { original: string; dubbed?: string[] }> {
+  const map = new Map<string, { original: string; dubbed?: string[] }>();
+  for (const pair of (raw ?? "").split(";").map((s) => s.trim()).filter(Boolean)) {
+    const eq = pair.indexOf("=");
+    if (eq === -1) continue;
+    const title = pair.slice(0, eq).trim().toLowerCase();
+    const langs = pair
+      .slice(eq + 1)
+      .split("|")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!title || langs.length === 0) continue;
+    const [original, ...dubbed] = langs;
+    map.set(title, dubbed.length ? { original: original!, dubbed } : { original: original! });
+  }
+  return map;
 }
 
-/** Lowercased significant tokens (≥2 chars) of a free-text name/phrase. */
+/** Apply WED_DROP_LANG overrides to a pool, returning a new pool + the count set. */
+export function applyLangOverrides(
+  pool: Release[],
+  overrides: Map<string, { original: string; dubbed?: string[] }>
+): { pool: Release[]; applied: number } {
+  if (overrides.size === 0) return { pool, applied: 0 };
+  let applied = 0;
+  const out = pool.map((r) => {
+    const lang = overrides.get(r.title.trim().toLowerCase());
+    if (!lang) return r;
+    applied += 1;
+    return { ...r, audioLanguages: lang };
+  });
+  return { pool: out, applied };
+}
+
+// ── Copy self-policing (Phase 4 → Name Sweep v2 + Superlative Guard) ─────────
+//
+// Two deterministic, in-code guards vet the copy before it can render, both
+// feeding the SAME one-retry / two-strike machinery in generateWednesdayDrop:
+//
+//  1. NAME SWEEP v2 — the LLM must never name a person absent from the provided
+//     film data (the "Tabu"/"Madhuri" hallucinations nothing caught). v1 leaned on
+//     the model's self-reported `namesUsed` plus a narrow "starring <Name>" regex,
+//     so a name joined by "and"/"," (the actual escapes) or simply omitted from
+//     `namesUsed` sailed through. v2 sweeps the REAL text for name-shaped runs and
+//     checks each against the film data, independent of self-report.
+//  2. SUPERLATIVE GUARD — a "top/highest/best-rated" claim must belong to the single
+//     highest-tbsiScore film in the edition, else it is an unbacked rating claim.
+//
+// STRICT person-backing (Decision 2): a swept person-name is backed only when ALL
+// its name-tokens are a subset of ONE film-data person's full name. This refuses the
+// union-allowlist laundering of same-surname pattern-completions ("Shahid Kapoor"
+// riding a real "Janhvi Kapoor"). A rare false drop is recoverable via WED_DROP_FORCE
+// + the loud audit line; a laundered hallucination on a card is not.
+
+interface CopyViolation {
+  /** "name" = unbacked/undeclared person · "superlative" = false rating claim. */
+  kind: "name" | "superlative";
+  /** The offending text — the name, or the matched "top-rated"-style phrase. */
+  name: string;
+  /** The release-slide TITLE it sits in, or "caption" (a caption can't drop a film). */
+  where: string;
+  /** Superlatives only: the film that actually leads, named in the retry prompt. */
+  leader?: string;
+}
+
+// Honorifics carry no identity — strip them so "Mr. Bachchan" ~ "Bachchan".
+const HONORIFICS = new Set(["mr", "mrs", "ms", "dr", "sri", "smt", "shri"]);
+
+// Words that legitimately appear Titlecased in Wed Drop copy but are NOT people
+// (pillar boilerplate + join words + streaming brands). Any of these tokens inside
+// a swept run is treated as filler, so single non-name caps (Prayagraj, Eid,
+// Netflix) and editorial phrases ("This Weekend", "Now Streaming", "Prime Video")
+// are never mistaken for a name.
+const NON_PERSON_WORDS: readonly string[] = [
+  "the", "this", "that", "these", "now", "new", "our", "your", "one", "which",
+  "weekend", "week", "weeks", "streaming", "stream", "theaters", "theatres",
+  "theater", "cinema", "cinemas", "screen", "big", "box", "office", "drop",
+  "watch", "watching", "must", "binge", "hidden", "gem", "arrival", "arrivals",
+  "pick", "picks", "save", "dm", "us", "start", "starting", "south", "north",
+  "indian", "india", "film", "films", "movie", "movies", "series", "show",
+  "in", "on", "at", "of", "and", "or", "for", "with", "to", "from",
+  "starring", "featuring", "alongside", "feat",
+  "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+  "january", "february", "march", "april", "may", "june", "july", "august",
+  "september", "october", "november", "december",
+  // Streaming brands (so "Prime Video", "Jio Hotstar", "Sony LIV" are not names)
+  "netflix", "prime", "video", "hotstar", "disney", "jiocinema", "jiohotstar",
+  "jio", "sonyliv", "sony", "liv", "zee5", "zee", "aha", "hoichoi", "sunnxt",
+  "sun", "nxt", "mubi", "lionsgate", "apple", "tv", "manoramamax", "max",
+];
+
+// Rating superlatives that require the film to be the edition's strict-max
+// tbsiScore. Hyphen/space/case tolerant — covers the production wart "our
+// top-rated pick" verbatim. Bare curation ("our top pick") is intentionally NOT
+// here: no score backing required.
+const SUPERLATIVE_RE = /\b(?:top|highest|best)[-\s]?rated\b/i;
+
+interface NameAllowlist {
+  /** One token-set per real film-data person (for strict subset backing). */
+  persons: Set<string>[];
+  /** Flat token set of non-person words: title / platform / language / boilerplate. */
+  nonPerson: Set<string>;
+}
+
+/** Diacritic-, case- and honorific-normalized significant tokens (≥2 chars). */
 function nameTokens(s: string): string[] {
   return s
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .split(/\s+/)
-    .filter((t) => t.length >= 2);
+    .filter((t) => t.length >= 2 && !HONORIFICS.has(t));
 }
 
-function buildNameAllowlist(releases: Release[]): Set<string> {
-  const allow = new Set<string>();
-  const addAll = (s?: string) => {
-    if (s) for (const t of nameTokens(s)) allow.add(t);
+function buildNameAllowlist(releases: Release[]): NameAllowlist {
+  const persons: Set<string>[] = [];
+  const nonPerson = new Set<string>(NON_PERSON_WORDS);
+  const addPerson = (s?: string) => {
+    if (!s) return;
+    const toks = nameTokens(s);
+    if (toks.length) persons.push(new Set(toks));
+  };
+  const addNonPerson = (s?: string) => {
+    if (s) for (const t of nameTokens(s)) nonPerson.add(t);
   };
   for (const r of releases) {
-    (r.cast ?? []).forEach(addAll);
-    (r.leadCast ?? []).forEach(addAll);
-    addAll(r.director);
-    addAll(r.musicDirector);
-    addAll(r.title);
-    for (const p of r.platform) addAll(p);
-    addAll(r.language);
+    (r.cast ?? []).forEach(addPerson);
+    (r.leadCast ?? []).forEach(addPerson);
+    addPerson(r.director);
+    addPerson(r.musicDirector);
+    addNonPerson(r.title);
+    for (const p of r.platform) addNonPerson(p);
+    addNonPerson(r.language);
   }
-  return allow;
+  return { persons, nonPerson };
 }
 
-/** A name is allowed if ANY of its tokens overlaps the allowlist (lenient). */
-function isNameAllowed(name: string, allow: Set<string>): boolean {
-  const toks = nameTokens(name);
+/** Name-tokens with non-person filler (boilerplate / title / platform / join words) removed. */
+function personTokens(raw: string, allow: NameAllowlist): string[] {
+  return nameTokens(raw).filter((t) => !allow.nonPerson.has(t));
+}
+
+/**
+ * STRICT person-backing: every name-token of the candidate must appear in ONE
+ * person's full-name token set (partial mention OK in the subset direction:
+ * {kapoor} ⊆ {anil,kapoor}; a cross-person blend is NOT: {shahid,kapoor} ⊄ any
+ * single person, so "Shahid Kapoor" riding a real "Janhvi Kapoor" stays caught).
+ */
+function isPersonBacked(toks: string[], persons: Set<string>[]): boolean {
   if (toks.length === 0) return true;
-  return toks.some((t) => allow.has(t));
+  return persons.some((p) => toks.every((t) => p.has(t)));
+}
+
+/** True when the candidate's tokens are covered by some self-reported namesUsed entry. */
+function isDeclared(toks: string[], declared: Set<string>[]): boolean {
+  return declared.some((d) => toks.every((t) => d.has(t)) || [...d].every((t) => toks.includes(t)));
 }
 
 /** Which release slide's body contains this name, else "caption". */
@@ -181,38 +302,131 @@ function locateName(name: string, output: LLMOutput): string {
   return rel ? rel.title : "caption";
 }
 
+// A capitalized "name word": Unicode-uppercase start, allowing internal
+// apostrophes/hyphens and initials' periods ("S.", "A.R.", "D'Cruz", "Mr.").
+const CAP_WORD = String.raw`\p{Lu}[\p{L}'’.\-]*`;
+// (a) A run of 2–3 consecutive capitalized words = a name-shaped N-gram.
+const NGRAM_RE = new RegExp(`(${CAP_WORD}(?:\\s+${CAP_WORD}){1,2})`, "gu");
+// (b) A join-trigger + a SINGLE capitalized token NOT followed by another capital
+//     (multi-word runs after a trigger are already the N-gram rule's job). Triggers
+//     are matched in both cases WITHOUT the /i flag, which would defeat \p{Lu}.
+const TRIGGER = String.raw`(?:\b[Ww]ith|\b[Ss]tarring|\b[Aa]longside|\b[Ff]eaturing|\b[Ff]eat\.?|\b[Aa]nd|&|×|,)`;
+// The first lookahead pins the capture to a WHOLE word (so greedy \p{L}* can't
+// backtrack to a partial like "Ani" from "Anil"); the second keeps a multi-word
+// name (whose 2nd word is capitalized) as the N-gram rule's job, not a lone single.
+const TRIGGER_SINGLE_RE = new RegExp(`${TRIGGER}\\s+(${CAP_WORD})(?![\\p{L}'’.\\-])(?!\\s+\\p{Lu})`, "gu");
+
+/** Text surfaces the sweep reads: the caption + every release-slide body. */
+function copyTexts(output: LLMOutput): Array<{ text: string; where: string }> {
+  return [
+    { text: output.caption, where: "caption" },
+    ...output.carouselSlides
+      .filter((s) => s.type === "release")
+      .map((s) => ({ text: s.body, where: s.title })),
+  ];
+}
+
 /**
- * Find name-discipline violations: (1) any self-reported `namesUsed` entry
- * outside the allowlist, and (2) belt-and-braces — a Capitalized name introduced
- * by "with/starring/alongside/featuring/&" in a body/caption that is outside the
- * allowlist (catches names the model failed to self-report).
+ * Every copy violation feeding the retry/two-strike path:
+ *  • NAME SWEEP v2 — name-shaped runs (2–3 word N-grams + join-trigger singles) plus
+ *    every self-reported namesUsed entry. A run that is not film-data-backed, or a
+ *    backed run the model failed to declare in namesUsed, is a violation.
+ *  • SUPERLATIVE GUARD — a "top/highest/best-rated" phrase on a film that is not the
+ *    strict, UNIQUE-max tbsiScore film among the edition's scored picks.
  */
-function findNameViolations(output: LLMOutput, allow: Set<string>): NameViolation[] {
-  const violations: NameViolation[] = [];
+function findCopyViolations(output: LLMOutput, allow: NameAllowlist, releases: Release[]): CopyViolation[] {
+  const violations: CopyViolation[] = [];
   const seen = new Set<string>();
-  const push = (name: string, where: string) => {
-    const key = name.toLowerCase();
+  const push = (v: CopyViolation) => {
+    const key = `${v.kind}:${v.name.toLowerCase()}:${v.where.toLowerCase()}`;
     if (seen.has(key)) return;
     seen.add(key);
-    violations.push({ name, where });
+    violations.push(v);
   };
 
+  // ── Name sweep v2 ──
+  const declared = (output.namesUsed ?? []).map((n) => new Set(nameTokens(n)));
+  for (const { text, where } of copyTexts(output)) {
+    const cands = new Set<string>();
+    for (const m of text.matchAll(NGRAM_RE)) cands.add(m[1]!);
+    for (const m of text.matchAll(TRIGGER_SINGLE_RE)) cands.add(m[1]!);
+    for (const raw of cands) {
+      const toks = personTokens(raw, allow);
+      if (toks.length === 0) continue;                              // fully boilerplate → not a name
+      if (!isPersonBacked(toks, allow.persons)) { push({ kind: "name", name: raw, where }); continue; }
+      if (!isDeclared(toks, declared)) push({ kind: "name", name: raw, where }); // undeclared
+    }
+  }
+  // Self-report cannot launder: a declared name that is not film-data-backed is a
+  // violation too (catches a hallucination named only in a non-scanned slide).
   for (const nm of output.namesUsed ?? []) {
-    if (!isNameAllowed(nm, allow)) push(nm, locateName(nm, output));
+    const toks = personTokens(nm, allow);
+    if (toks.length === 0) continue;
+    if (!isPersonBacked(toks, allow.persons)) push({ kind: "name", name: nm, where: locateName(nm, output) });
   }
 
-  const texts: Array<{ text: string; where: string }> = [
-    { text: output.caption, where: "caption" },
-    ...output.carouselSlides.filter((s) => s.type === "release").map((s) => ({ text: s.body, where: s.title })),
-  ];
-  const re = /\b(?:with|starring|alongside|featuring|feat\.?|&)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/g;
-  for (const { text, where } of texts) {
-    for (const m of text.matchAll(re)) {
-      const nm = m[1]!;
-      if (!isNameAllowed(nm, allow)) push(nm, where);
+  // ── Superlative guard (Phase 2) ──
+  const scored = output.carouselSlides
+    .filter((s) => s.type === "release")
+    .map((s) => ({ title: s.title, score: releases.find((r) => r.title === s.title)?.tbsiScore }))
+    .filter((x): x is { title: string; score: number } => typeof x.score === "number");
+  let leader: string | undefined;
+  if (scored.length > 0) {
+    const max = Math.max(...scored.map((x) => x.score));
+    const top = scored.filter((x) => x.score === max);
+    if (top.length === 1) leader = top[0]!.title; // strict UNIQUE max only
+  }
+  for (const s of output.carouselSlides) {
+    if (s.type !== "release") continue;
+    const m = s.body.match(SUPERLATIVE_RE);
+    if (!m) continue;
+    if (s.title !== leader) {
+      push({ kind: "superlative", name: m[0]!, where: s.title, ...(leader ? { leader } : {}) });
     }
   }
   return violations;
+}
+
+/** Build the one-retry prompt naming the exact violations (unbacked names + false ratings). */
+function retryPromptFor(prompt: string, violations: CopyViolation[]): string {
+  const names = violations.filter((v) => v.kind === "name");
+  const supers = violations.filter((v) => v.kind === "superlative");
+  let out = prompt;
+  if (names.length) {
+    out +=
+      `\n\nNAME-DISCIPLINE VIOLATION — your previous response named ` +
+      `${names.map((v) => `"${v.name}"`).join(", ")}, which is NOT backed by the provided film data ` +
+      `(every named person must appear in that film's Cast / Lead cast / Director / Music director), ` +
+      `or was used without being listed in "namesUsed". Regenerate the ENTIRE response: never name a ` +
+      `person absent from a film's data, and list EVERY person you name in "namesUsed".`;
+  }
+  if (supers.length) {
+    out +=
+      `\n\nRATING-CLAIM VIOLATION — ` +
+      supers
+        .map((v) =>
+          v.leader
+            ? `"${v.where}" says "${v.name}" but the highest-rated film here is "${v.leader}"`
+            : `"${v.where}" makes a "${v.name}" claim but no film here has a verified top rating`
+        )
+        .join("; ") +
+      `. Regenerate: only the single highest-rated film may use a "top/highest/best-rated" phrase; ` +
+      `every other film must sell itself WITHOUT a comparative rating claim.`;
+  }
+  return out;
+}
+
+/** The Slack issue line for a surviving violation (kept-in-caption vs dropped-film). */
+function copyFlagFor(v: CopyViolation): string {
+  if (v.kind === "superlative") {
+    const tail = v.leader ? ` (edition leader: "${v.leader}")` : "";
+    return v.where === "caption"
+      ? `copy rating-claim: "${v.name}" in CAPTION is not the edition's top-rated film${tail} — kept, review copy`
+      : `copy rating-claim: "${v.name}" on "${v.where}" is not the edition's top-rated film${tail} — DROPPED film`;
+  }
+  return v.where === "caption"
+    ? `copy name-discipline: "${v.name}" not in film data — in CAPTION, kept but review copy manually`
+    : `copy name-discipline: "${v.name}" not in film data — DROPPED film "${v.where}"`;
 }
 
 /**
@@ -325,36 +539,26 @@ Be specific. Take stands. Lean South-heavy where the films justify it.`;
   
   let output = await callClaudeJSON(prompt, WedDropSchema, "sonnet");
 
-  // Copy name-discipline (Phase 4). Validate names against the film-data
-  // allowlist; ONE retry naming the exact violation; a SECOND violation drops
-  // the offending film(s) (never silently strips, never fails the whole run).
+  // Copy self-policing (Phase 4). NAME SWEEP v2 + SUPERLATIVE GUARD share ONE
+  // path: validate the copy, ONE retry naming the exact violation(s); a SECOND
+  // strike drops the offending film(s) (never silently strips, never fails the
+  // whole run). A caption-only violation is kept-but-flagged (can't drop a film).
   const allow = buildNameAllowlist(releases);
   const nameFlags: string[] = [];
-  let violations = findNameViolations(output, allow);
+  let violations = findCopyViolations(output, allow, releases);
   if (violations.length > 0) {
     log.warn(
-      `Wed Drop [${edition}]: name-discipline violation(s), retrying once — ${violations.map(v => `"${v.name}" @${v.where}`).join("; ")}`
+      `Wed Drop [${edition}]: copy self-policing violation(s), retrying once — ${violations.map(v => `${v.kind}:"${v.name}" @${v.where}`).join("; ")}`
     );
-    const retryPrompt =
-      `${prompt}\n\nNAME-DISCIPLINE VIOLATION — your previous response named ` +
-      `${violations.map(v => `"${v.name}"`).join(", ")}, which is NOT in the provided film data. ` +
-      `Regenerate the ENTIRE response: never name a person absent from a film's Cast / Lead cast / ` +
-      `Director / Music director, and list every person you name in "namesUsed".`;
-    output = await callClaudeJSON(retryPrompt, WedDropSchema, "sonnet");
-    violations = findNameViolations(output, allow);
+    output = await callClaudeJSON(retryPromptFor(prompt, violations), WedDropSchema, "sonnet");
+    violations = findCopyViolations(output, allow, releases);
   }
   if (violations.length > 0) {
     const dropTitles = new Set(violations.filter(v => v.where !== "caption").map(v => v.where));
-    for (const v of violations) {
-      nameFlags.push(
-        v.where === "caption"
-          ? `copy name-discipline: "${v.name}" not in film data — in CAPTION, kept but review copy manually`
-          : `copy name-discipline: "${v.name}" not in film data — DROPPED film "${v.where}"`
-      );
-    }
+    for (const v of violations) nameFlags.push(copyFlagFor(v));
     if (dropTitles.size > 0) {
       log.error(
-        `Wed Drop [${edition}]: name-discipline — 2 strikes, dropping ${dropTitles.size} film(s): ${[...dropTitles].join(", ")}`
+        `Wed Drop [${edition}]: copy self-policing — 2 strikes, dropping ${dropTitles.size} film(s): ${[...dropTitles].join(", ")}`
       );
       const kept = output.carouselSlides.filter(s => !(s.type === "release" && dropTitles.has(s.title)));
       // If every real film was dropped, skip the edition (empty carousel).

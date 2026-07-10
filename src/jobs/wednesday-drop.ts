@@ -2,7 +2,7 @@
 import { addDays, endOfWeek, format, startOfDay, startOfWeek } from "date-fns";
 import { getCandidates } from "../discovery/candidates.js";
 import type { Release, Platform } from "../shared/types.js";
-import { generateWednesdayDrop, MAX_WED_DROP_FILMS } from "../content/weekend/wednesday-drop.js";
+import { generateWednesdayDrop, MAX_WED_DROP_FILMS, parseLangOverrides, applyLangOverrides } from "../content/weekend/wednesday-drop.js";
 import { writeWednesdayDropToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
@@ -121,13 +121,25 @@ async function produceEdition(
   const { pool: finalPool, applied: platformsSet } = applyPlatformOverrides(renderablePool, platformOverrides);
   if (platformsSet > 0) log.info(`  Platform override (WED_DROP_PLATFORM): set platform on ${platformsSet} film(s) in the ${edition} pool`);
 
+  // Manual audio-language override (WED_DROP_LANG) — operator dial mirroring
+  // WED_DROP_PLATFORM. Post-gate, applied before the LLM + render so the card's
+  // language row reflects the operator-verified track — killing wrong-film bleed
+  // (e.g. a mismatched OMDb "Russian" hit). Hash-neutral; audited to Slack below.
+  const { pool: langPool, applied: langsSet } = applyLangOverrides(finalPool, parseLangOverrides(process.env.WED_DROP_LANG));
+  const langAuditLines: string[] = [];
+  if (langsSet > 0) {
+    const line = `LANG override by operator: set audio language on ${langsSet} film(s) in the ${edition} pool`;
+    log.warn(`  ${line}`);
+    langAuditLines.push(line);
+  }
+
   // Per-edition candidate cap (capPoolForSelector): the popularity slice applies
   // ONLY to the TMDb-pool portion — AI-net finds are CAP-EXEMPT so they always
   // reach the LLM selector instead of being amputated by the popularity sort
   // (they carry no tmdbPopularity and would otherwise sink below the cut). The
   // LLM remains the editorial filter (picks up to MAX or skips); this only
   // guarantees AI finds reach its INPUT, not that they get published.
-  const featured = capPoolForSelector(finalPool);
+  const featured = capPoolForSelector(langPool);
   log.info(`  Feeding ${featured.length} ${edition} candidates to the LLM (picks up to ${MAX_WED_DROP_FILMS} or skips)`);
 
   // Generate the edition's draft via Claude. `nameFlags` carries any copy
@@ -215,7 +227,7 @@ async function produceEdition(
   // where the operator already looks. (Blocked runs carry the audit in the
   // review Slack ping instead.)
   const validation = manifestToSlack(manifest);
-  const extraIssues = [...auditLines, ...draft.nameFlags];
+  const extraIssues = [...auditLines, ...langAuditLines, ...draft.nameFlags];
   if (extraIssues.length > 0) {
     validation.issuesBlock = [validation.issuesBlock, ...extraIssues].filter(Boolean).join("\n");
   }
