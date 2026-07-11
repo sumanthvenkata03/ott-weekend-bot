@@ -107,6 +107,49 @@ function platformLogoStem(p: string): string {
     .replace(/jio-?hotstar/g, "jiohotstar");
 }
 
+/** Long-title downsize: a very long single word (>14 chars) or a long total
+ *  title (>22 chars) drops the title to 48px so it wraps inside the 40% column
+ *  instead of overflowing the canvas (e.g. "Lakshmikanthan Kolai Vazhakku"). */
+function titleClassFor(title: string): "title-sm" | undefined {
+  const longestWord = title.split(/\s+/).reduce((m, w) => Math.max(m, w.length), 0);
+  return longestWord > 14 || title.length > 22 ? "title-sm" : undefined;
+}
+
+/** Buzz relabel — heat's absolute band → the top-strip chip label, AT DISPLAY
+ *  TIME ONLY. heat.ts (bands/thresholds/null semantics) is untouched; this map
+ *  lives in the render layer. null heat → no label (chip omitted, wordmark only). */
+const BUZZ_DISPLAY = {
+  "HIGH BUZZ": "HIGH BUZZ",
+  "WARM":      "MEDIUM BUZZ",
+  "QUIET":     "LOW BUZZ",
+} as const;
+
+function buzzLabelFor(release: Release | undefined): SatVerdictCard["buzzLabel"] {
+  const heat = release ? computeHeat(release) : null;
+  return heat ? BUZZ_DISPLAY[heat.label] : undefined;
+}
+
+/** Max characters of the " · "-joined, UPPERCASE cast line that fits on one line
+ *  in the bottom strip. Trailing whole names are dropped until the line fits —
+ *  names are NEVER cut mid-name. Finalized from the render: the 38-char worst-case
+ *  line measures 464px in the 584px usable width (≈12.2px/char), so the true
+ *  single-line ceiling is ~47 chars; 44 leaves ~1 name-char of safety for
+ *  wide-glyph (M/W-heavy) names before a trailing name is dropped. */
+const CAST_FIT_CHARS = 44;
+
+/** Cast receipts for the bottom strip: leadCast when present, else the first 3 of
+ *  cast, else undefined (hairline only). UPPERCASE, " · "-joined, ≤3 names, with
+ *  trailing whole names dropped until the line fits CAST_FIT_CHARS. */
+function castLineFor(release: Release | undefined): string | undefined {
+  if (!release) return undefined;
+  const source = release.leadCast && release.leadCast.length > 0 ? release.leadCast : release.cast;
+  if (!source || source.length === 0) return undefined;
+  const names = source.slice(0, 3).map(n => n.toUpperCase());
+  let count = names.length;
+  while (count > 1 && names.slice(0, count).join(" · ").length > CAST_FIT_CHARS) count--;
+  return names.slice(0, count).join(" · ");
+}
+
 function buildCard(
   slide: SaturdayVerdictDraft["verdicts"][number],
   release: Release | undefined
@@ -118,6 +161,11 @@ function buildCard(
     platformLogos: slide.platform.map(platformLogoStem),
     verdict: slide.verdict,
     verdictKind: verdictKind(slide.verdict),
+    ...(titleClassFor(slide.filmTitle) ? { titleClass: titleClassFor(slide.filmTitle)! } : {}),
+    // Top-strip buzz chip (display-relabelled heat) + bottom-strip cast receipts.
+    // Both derived from the release here so the template reads them off the card.
+    ...(buzzLabelFor(release) ? { buzzLabel: buzzLabelFor(release)! } : {}),
+    ...(castLineFor(release) ? { castLine: castLineFor(release)! } : {}),
     oneLineVerdict: slide.oneLineVerdict,
     watchIf: slide.watchIf,
     ...(release?.posterUrl ? { posterUrl: release.posterUrl } : {}),
@@ -247,10 +295,9 @@ export async function renderSatVerdict(
       } : {}),
     });
     const hasSeal = stamp.stampKind === "tbsi" || stamp.stampKind === "tmdb";
-    // HEAT (🔥) — separate, display-only. Derived from the release's popularity
-    // signals ONLY; null (→ no sticker) when there's no signal. Independent of the
-    // seal/verdict above — it is never read by, and never feeds, the verdict.
-    const heat = release ? computeHeat(release) : null;
+    // HEAT (🔥) — display-only buzz. Now relabelled to card.buzzLabel in buildCard
+    // (top strip); no longer spread into the context here. Independent of the
+    // seal/verdict — it is never read by, and never feeds, the verdict.
     const cardCtx: SatVerdictCardContext = {
       ...baseCtx,
       card,
@@ -260,7 +307,6 @@ export async function renderSatVerdict(
       totalSlots: cards.length,
       hasSeal,
       ...stamp,
-      ...(heat ? { heat } : {}),
     };
     const cardPath = `${outputDir}/sat-verdict-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
     await renderToPNG({
@@ -391,7 +437,11 @@ if (isMainModule) {
         },
       },
       {
-        filmTitle: "Kaalam",
+        // Deliberate long-title overflow regression: a 29-char title with a
+        // 14-char word exercises the .title-sm downsize + break-word wrap. Its
+        // paired release below MUST carry the same title (render matches by exact
+        // title) or the sample loses its platform/heat/poster data.
+        filmTitle: "Lakshmikanthan Kolai Vazhakku",
         language: "Tamil",
         platform: ["Netflix"],
         verdict: "🎟️ One-Time Watch",
@@ -448,8 +498,10 @@ if (isMainModule) {
         // Sample ratings — 4-source stamp (tbsiScore 8.2)
         tbsiScore: 8.2, tbsiSourceCount: 4,
         imdbRating: 8.8, rottenTomatoes: 87, metacritic: 74, letterboxd: 4.2,
-        // Prominence: mid — leads on rating but NOT the biggest film (see below).
-        tmdbPopularity: 400,
+        // BUZZ REGRESSION: pop 3 → QUIET → "LOW BUZZ" chip. CAST SOURCE: no
+        // leadCast → falls back to the first-3 of `cast` above (2 names). Still
+        // card 3 by prominence (3 < Lakshmikanthan's 10 < Pati Patni's 900).
+        tmdbPopularity: 3,
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
         fetchedAt: new Date().toISOString(),
@@ -465,14 +517,17 @@ if (isMainModule) {
         runtime: 138,
         director: "Rahul Sadasivan",
         cast: ["Mammootty", "Arjun Ashokan", "Sidharth Bharathan"],
+        // CAST SOURCE: explicit leadCast (2 names) → "MAMMOOTTY · ARJUN ASHOKAN".
+        leadCast: ["Mammootty", "Arjun Ashokan"],
         synopsis: "A 17th-century horror set in a forsaken mansion.",
         // Real verified TMDb poster URL — tests CDN fetch end-to-end
         posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
         // Sample ratings — 3-source stamp (tbsiScore 7.4, no Letterboxd)
         tbsiScore: 7.4, tbsiSourceCount: 3,
         imdbRating: 7.0, rottenTomatoes: 88, metacritic: 72,
-        // Prominence: lowest of the three.
-        tmdbPopularity: 250,
+        // BUZZ REGRESSION: no tmdbPopularity AND zero votes → computeHeat returns
+        // null → NO chip (wordmark only; absence ≠ LOW BUZZ). Absent pop also sinks
+        // this to last in prominence (0), so card order is unchanged.
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
         fetchedAt: new Date().toISOString(),
@@ -487,7 +542,10 @@ if (isMainModule) {
         genre: ["Romance", "Comedy"],
         runtime: 142,
         director: "Mudassar Aziz",
-        cast: ["Ayushmann Khurrana", "Tabu", "Wamiqa Gabbi"],
+        // CAST REGRESSION: empty cast AND no leadCast → castLine absent → bottom
+        // strip renders the brass hairline ONLY (the empty-receipts state). This
+        // is the DIFFERENT card from the null-heat one (Bramayugam), per spec.
+        cast: [],
         synopsis: "The third installment of a franchise nobody asked for.",
         // Given a poster so the prominence-first hero renders as a clean poster
         // hero. NOTE: if the biggest film had NO poster, the current (un-redesigned)
@@ -496,7 +554,8 @@ if (isMainModule) {
         posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
         // Prominence: BIGGEST film (a tent-pole franchise) despite a Skip verdict —
         // under prominence-first it becomes card 1 + the cover hero, proving the
-        // "biggest leads, irrespective of verdict" behavior.
+        // "biggest leads, irrespective of verdict" behavior. BUZZ REGRESSION: pop
+        // 900 → saturates → "HIGH BUZZ" chip.
         tmdbPopularity: 900,
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
@@ -504,7 +563,8 @@ if (isMainModule) {
       },
       {
         id: "sample-4",
-        title: "Kaalam",
+        // Long-title regression — must match the slide filmTitle above exactly.
+        title: "Lakshmikanthan Kolai Vazhakku",
         language: "Tamil",
         isSeries: false,
         platform: ["Netflix"],
@@ -512,14 +572,22 @@ if (isMainModule) {
         genre: ["Drama", "Thriller"],
         runtime: 156,
         director: "Vetri Maaran",
-        cast: ["Dhanush", "Aishwarya Rajesh"],
+        // Worst-case card: a real 3rd cast name is added to THIS film's own roster
+        // (kept internally consistent — no cross-film names) so the receipts line
+        // exercises the 3-name at-threshold case.
+        cast: ["Dhanush", "Aishwarya Rajesh", "Sasikumar"],
+        // CAST SOURCE: explicit 3-name leadCast → "DHANUSH · AISHWARYA RAJESH ·
+        // SASIKUMAR" = 38 chars, at/near the fit threshold (all 3 kept).
+        leadCast: ["Dhanush", "Aishwarya Rajesh", "Sasikumar"],
         synopsis: "An ambitious epic that lands as a solid one-time watch.",
         posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
         // Sample ratings — mid, ONE-TIME WATCH (a grounded but middling read, see the verdict above).
         tbsiScore: 5.2, tbsiSourceCount: 2,
         imdbRating: 6.5,
-        // Prominence: card 2 (between Pati Patni 900 and Pennum Porattum 400).
-        tmdbPopularity: 500,
+        // BUZZ REGRESSION: pop 10 → score 52 → WARM → "MEDIUM BUZZ" chip (the
+        // squint-test card). Still card 2 by prominence (10 sits between Pati
+        // Patni's 900 and Pennum's 3), so card/cover order is unchanged.
+        tmdbPopularity: 10,
         subtitleLanguages: ["English"],
         sources: ["TMDb"],
         fetchedAt: new Date().toISOString(),

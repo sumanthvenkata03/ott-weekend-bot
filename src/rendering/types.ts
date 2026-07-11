@@ -88,6 +88,17 @@ export interface SatVerdictCard extends CardEnrichment {
   platformLogos: string[];     // ["netflix", "jiohotstar"] — filename stems
   verdict: Verdict;
   verdictKind: "must-watch" | "worth-a-try" | "one-time-watch" | "skip";  // for template styling
+  /** Long-title downsize hook: "title-sm" drops the title to 48px (see buildCard). */
+  titleClass?: "title-sm";
+  /** Top-strip buzz chip label — heat's absolute band relabelled AT DISPLAY TIME
+   *  ONLY (HIGH BUZZ / WARM→MEDIUM BUZZ / QUIET→LOW BUZZ). Computed in buildCard
+   *  via computeHeat(); ABSENT when heat is null (chip omitted, wordmark only).
+   *  The relabel lives here in the render layer — heat.ts is untouched. */
+  buzzLabel?: "HIGH BUZZ" | "MEDIUM BUZZ" | "LOW BUZZ";
+  /** Bottom-strip cast receipts — UPPERCASE, " · "-joined, ≤3 lead names fit to a
+   *  single line (trailing whole names dropped to fit). Computed in buildCard from
+   *  leadCast (else first-3 cast); ABSENT when neither exists (hairline only). */
+  castLine?: string;
   oneLineVerdict: string;
   watchIf: string;
   posterUrl?: string;
@@ -142,10 +153,9 @@ export interface SatVerdictCardContext extends RenderBase, PlatformStyle {
   /** Grounded Verdict seal extras — see StampContext. */
   stampStar?: string;
   stampVariant?: "firm" | "early";
-  /** Phase 2 — HEAT axis (🔥), DISPLAY-ONLY buzz/popularity. Computed at render
-   *  time by computeHeat() from the Release; absent when there's no signal (no
-   *  sticker). Has ZERO bearing on the verdict/★/seal — purely editorial color. */
-  heat?: import("../content/weekend/heat.js").Heat;
+  // HEAT axis (🔥) is now relabelled to card.buzzLabel in buildCard and rendered
+  // from the card (top strip). The old context-level `heat` field + its Heat
+  // import were removed — no dead wiring. computeHeat() itself is unchanged.
 }
 
 // ============================================================

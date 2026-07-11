@@ -25,17 +25,84 @@
     width: 100%; height: 100%;
     display: grid;
     grid-template-columns: 60% 40%;
+    /* Pin the single row to the canvas height. Without this the implicit row is
+       `auto` and grows to the tallest column's content (~1372px here), so the
+       stretched poster column overflowed the 1350 canvas and its bottom border +
+       part of the bottom strip were clipped. minmax(0,1fr) fixes the row at 1350
+       and lets each column clip internally instead of enlarging the row. */
+    grid-template-rows: minmax(0, 1fr);
   }
 
-  /* ── LEFT 60% — poster shown in FULL (object-fit:contain, never cropped).
-     The slot space the portrait poster doesn't cover is filled by a blurred,
-     darkened copy of the SAME poster (ambient colour, not flat black).
-     Vermillion border treatment kept. ── */
+  /* ── LEFT 60% — three FIXED zones stacked in a flex column, identical on every
+     card regardless of poster aspect:
+       TOP STRIP (112px)    — ★ wordmark (left) + buzz chip (right)
+       POSTER MIDDLE (rest) — poster in FULL (object-fit:contain, never cropped);
+                              the letterbox gap is filled by the blurred-copy
+                              mechanic UNCHANGED, now clipped to this zone
+       BOTTOM STRIP (96px)  — cast receipts, brass hairline above
+     The old per-poster blurred bands are gone: the strips are solid near-ink and
+     the same height on every card. Vermillion border treatment kept. ── */
   .poster-col {
     position: relative;
     overflow: hidden;
     background-color: var(--ink);
     border: 4px solid var(--vermillion);
+    display: flex;
+    flex-direction: column;
+  }
+  /* TOP STRIP — solid near-ink; wordmark left-anchored, buzz chip right-anchored. */
+  .strip-top {
+    flex: 0 0 112px;
+    background: #14100e;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 30px;
+  }
+  .strip-top .wordmark {
+    font-family: 'Inter', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--cream);
+    white-space: nowrap;
+  }
+  /* POSTER MIDDLE — the letterbox zone. position:relative + overflow:hidden so the
+     absolutely-positioned blur/scrim/poster layers clip to THIS zone (not the
+     whole column), keeping the strips clean. */
+  .poster-mid {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+  /* BOTTOM STRIP — solid near-ink; brass hairline above centered cast receipts.
+     Empty castLine → the hairline renders alone (empty-receipts state). */
+  .strip-bottom {
+    flex: 0 0 96px;
+    background: #14100e;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0 28px;
+  }
+  .strip-bottom .cast-hairline {
+    width: 140px;
+    height: 0.75px;
+    background: var(--brass);
+    margin-bottom: 14px;
+  }
+  .strip-bottom .cast-line {
+    font-family: 'Inter', sans-serif;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--cream);
+    white-space: nowrap;
+    text-align: center;
   }
   /* Ambient fill: same poster, object-fit:cover (allowed to crop — pure fill),
      heavily blurred + darkened. scale(1.15) overfills so the blur has no
@@ -95,14 +162,14 @@
     line-height: 1;
   }
 
-  /* HEAT chip (🔥) — DISPLAY-ONLY buzz badge, top-left of the poster. Rendered
-     ONLY when `heat` is present. Inline SVG flame (headless Chromium has no
-     colour-emoji font, so a literal 🔥 would render as tofu). */
+  /* BUZZ chip (🔥) — DISPLAY-ONLY buzz badge, right-anchored in the top strip.
+     Pill styling + inline SVG flame preserved from the old heat sticker; only the
+     absolute positioning was dropped (it's now a flex child of .strip-top).
+     Rendered ONLY when `card.buzzLabel` is present. Inline SVG flame because
+     headless Chromium has no colour-emoji font (a literal 🔥 would be tofu). */
   .heat-sticker {
-    position: absolute;
-    top: 30px; left: 30px;
-    z-index: 6;
     display: flex; align-items: center; gap: 8px;
+    flex-shrink: 0;
     padding: 11px 16px 11px 13px;
     background: var(--vermillion);
     color: var(--cream);
@@ -121,6 +188,10 @@
     display: grid;
     grid-template-rows: repeat(4, 1fr);
     color: var(--ink);
+    /* Grid item of .card — default min-width:auto (=min-content) let a long,
+       unbreakable title blow the 40% track past the 1080px canvas. Pin to 0 so
+       the column honours its track and the title wraps/shrinks instead. */
+    min-width: 0;
   }
   .row {
     display: flex;
@@ -130,6 +201,7 @@
     text-align: center;
     padding: 26px 30px;
     min-height: 0;
+    min-width: 0;
   }
   .row + .row { border-top: 1.5px solid rgba(26, 22, 20, 0.16); }
 
@@ -148,7 +220,12 @@
     line-height: 1.0;
     letter-spacing: -1px;
     color: var(--ink);
+    overflow-wrap: break-word;
   }
+  /* Long-title step (set via titleClass in buildCard): a very long word or a
+     long total title drops to 48px so it wraps inside the 40% column instead of
+     overflowing the canvas. Usable width ≈ 372px (432px track − 2×30px pad). */
+  .row-title .title.title-sm { font-size: 48px; }
   /* Row 2 — one-line caption: heavier + bigger, full ink (a strong line, not a whisper) */
   .row-caption .caption {
     font-family: 'Playfair Display', serif;
@@ -197,24 +274,41 @@
 <body class="{{ card.verdictKind }}">
 <div class="card">
 
-  <!-- LEFT 60% — poster + heat chip -->
+  <!-- LEFT 60% — three fixed zones: top strip / poster middle / bottom strip -->
   <div class="poster-col">
-    {% if card.posterUrl %}
-      <img src="{{ card.posterUrl }}" class="poster-bg" alt="" aria-hidden="true" onerror="this.style.display='none'" />
-      <div class="poster-scrim"></div>
-      <img src="{{ card.posterUrl }}" class="poster-img" alt="" onerror="this.style.display='none'" />
-    {% endif %}
-    <div class="poster-fallback {% if card.posterUrl %}poster-fallback-hidden{% endif %}">
-      <div class="lang">{{ card.language | upper }}</div>
-      <div class="title-stack">{{ card.filmTitle }}</div>
+
+    <!-- TOP STRIP — ★ wordmark (left) + buzz chip (right). Chip omitted entirely
+         when card.buzzLabel is absent (null heat → wordmark only; absence ≠ low). -->
+    <div class="strip-top">
+      <div class="wordmark">&#9733; THE BIG SCREEN INDEX</div>
+      {% if card.buzzLabel %}
+      <div class="heat-sticker">
+        <svg class="flame" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 6 8 7.5 8 12a4 4 0 0 0 8 0c0-1.5-.7-2.8-1.6-3.9.2 1 .1 2-.5 2.7.5-2-.6-3.8-1.9-5C12.6 5 12 3.6 12 2Z"/></svg>
+        <span>{{ card.buzzLabel }}</span>
+      </div>
+      {% endif %}
     </div>
-    {# HEAT (🔥) — display-only buzz sticker; omitted entirely when heat is null. #}
-    {% if heat %}
-    <div class="heat-sticker">
-      <svg class="flame" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 6 8 7.5 8 12a4 4 0 0 0 8 0c0-1.5-.7-2.8-1.6-3.9.2 1 .1 2-.5 2.7.5-2-.6-3.8-1.9-5C12.6 5 12 3.6 12 2Z"/></svg>
-      <span>{{ heat.label }}</span>
+
+    <!-- POSTER MIDDLE — blur-fill letterbox mechanic UNCHANGED, clipped to this zone -->
+    <div class="poster-mid">
+      {% if card.posterUrl %}
+        <img src="{{ card.posterUrl }}" class="poster-bg" alt="" aria-hidden="true" onerror="this.style.display='none'" />
+        <div class="poster-scrim"></div>
+        <img src="{{ card.posterUrl }}" class="poster-img" alt="" onerror="this.style.display='none'" />
+      {% endif %}
+      <div class="poster-fallback {% if card.posterUrl %}poster-fallback-hidden{% endif %}">
+        <div class="lang">{{ card.language | upper }}</div>
+        <div class="title-stack">{{ card.filmTitle }}</div>
+      </div>
     </div>
-    {% endif %}
+
+    <!-- BOTTOM STRIP — CAST RECEIPTS. Brass hairline above; centered cast line.
+         Empty castLine → hairline only (empty-receipts state). -->
+    <div class="strip-bottom">
+      <div class="cast-hairline"></div>
+      {% if card.castLine %}<div class="cast-line">{{ card.castLine }}</div>{% endif %}
+    </div>
+
   </div>
 
   <!-- RIGHT 40% — cream content, 4 equal rows -->
@@ -223,7 +317,7 @@
     <!-- Row 1: title + kicker (streaming status · language) -->
     <div class="row row-title">
       <div class="kicker">{% if card.platform and card.platform.length > 0 %}&#9733; {{ card.platform[0] | upper }} &middot; {{ card.language | upper }}{% else %}&#9733; {{ card.language | upper }}{% endif %}</div>
-      <div class="title">{{ card.filmTitle }}</div>
+      <div class="title {{ card.titleClass }}">{{ card.filmTitle }}</div>
     </div>
 
     <!-- Row 2: one-line caption -->
