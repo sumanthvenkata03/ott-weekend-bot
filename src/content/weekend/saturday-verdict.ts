@@ -73,7 +73,7 @@ PAGE IDENTITY:
 
 CRITICAL TONE RULES:
 - NEVER hedge. Take stands. "Skip" is a valid call.
-- "⚖️ Divisive" is a real call: critics are genuinely SPLIT (some love it, some pan it) — present it as a divide, do NOT flatten it into a Skip or a rec.
+- "🎟️ One-Time Watch" is a real call: worth a single watch but not a keeper — present it as "good for one spin", do NOT flatten it into a Skip or inflate it into a rec.
 - Acknowledge weaknesses even on the strong picks. Audiences trust honest critics.
 
 NEVER use these AI-cliche phrases: "dive into", "delve", "in today's fast-paced world", "buckle up", "look no further", "without further ado", "elevates".

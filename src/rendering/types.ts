@@ -87,7 +87,7 @@ export interface SatVerdictCard extends CardEnrichment {
   platform: string[];
   platformLogos: string[];     // ["netflix", "jiohotstar"] — filename stems
   verdict: Verdict;
-  verdictKind: "must-watch" | "worth-a-try" | "divisive" | "skip";  // for template styling
+  verdictKind: "must-watch" | "worth-a-try" | "one-time-watch" | "skip";  // for template styling
   oneLineVerdict: string;
   watchIf: string;
   posterUrl?: string;
@@ -104,8 +104,8 @@ export interface SatVerdictCoverTile {
   filmTitle: string;
   language: string;
   /** Border-color class derived from the film's verdict:
-   *  "skip" (vermillion) | "watchit" (divisive→green) | "try" (worth-a-try→cream) | "mustwatch" (green) */
-  verdictClass: "skip" | "watchit" | "try" | "mustwatch";
+   *  "skip" (vermillion) | "onetime" (one-time-watch→brass) | "try" (worth-a-try→cream) | "mustwatch" (green) */
+  verdictClass: "skip" | "onetime" | "try" | "mustwatch";
 }
 
 /**

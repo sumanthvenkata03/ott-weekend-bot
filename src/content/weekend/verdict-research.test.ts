@@ -418,4 +418,33 @@ console.log("  Tier A/B/C + roundup classification OK\n");
   eq(r.credibleCriticCount, 0);
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// (6) VERDICT BANDS — the 4-band ★ ladder, including the One-Time Watch tier.
+//     With NO audience and every critic at explicit = sentiment = s, the blend
+//     renormalizes to tbsiScore = s×2, so star = s exactly — deterministic
+//     boundary hits. Every star here is < 3.9, so the evidence cap can never
+//     interfere at any critic count.
+// ════════════════════════════════════════════════════════════════════════════
+console.log("\n(6) verdict bands (Skip / One-Time Watch / Worth a Try)");
+{
+  const band = (s: number) => computeVerdictScore({ found: true, criticRatings: [critic(s, s)] }, NO_AUD);
+
+  const skip = band(2.2);
+  eq(skip.star, 2.2, "s=2.2 → ★2.2");
+  eq(skip.verdict, "Skip", "★2.2 (< 2.3) → Skip");
+
+  const otwLow = band(2.3);
+  eq(otwLow.star, 2.3, "s=2.3 → ★2.3");
+  eq(otwLow.verdict, "One-Time Watch", "★2.3 boundary → One-Time Watch (>= fires)");
+
+  const otwHigh = band(2.9);
+  eq(otwHigh.star, 2.9, "s=2.9 → ★2.9");
+  eq(otwHigh.verdict, "One-Time Watch", "★2.9 → One-Time Watch");
+
+  const worth = band(3.0);
+  eq(worth.star, 3.0, "s=3.0 → ★3.0");
+  eq(worth.verdict, "Worth a Try", "★3.0 boundary → Worth a Try");
+}
+console.log("  4-band ladder OK\n");
+
 console.log(`\n✅ all ${assertions} assertions passed`);

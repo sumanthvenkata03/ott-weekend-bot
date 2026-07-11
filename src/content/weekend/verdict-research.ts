@@ -69,10 +69,15 @@ export const REVIEW_TONE_WEIGHT = 0.10;
  * Verdict thresholds on the SAME rounded ★/5 the reader sees — NOT the raw
  * tbsiScore. Deriving the verdict from `star` guarantees the star and the
  * verdict can never disagree at a tier boundary (e.g. ★4.0 is always "Must
- * Watch", never "Worth a Try").
+ * Watch", never "Worth a Try"). A simple 4-band ladder; >= fires at every cut:
+ *   ★ ≥ 4.0 → Must Watch
+ *   ★ ≥ 3.0 → Worth a Try
+ *   ★ ≥ 2.3 → One-Time Watch
+ *   ★ < 2.3 → Skip
  */
 export const MUST_WATCH_STAR_MIN = 4.0; // ★ ≥ 4.0 → Must Watch
-export const WORTH_TRY_STAR_MIN = 3.0; // ★ ≥ 3.0 → Worth a Try; else Skip
+export const WORTH_TRY_STAR_MIN = 3.0; // ★ ≥ 3.0 → Worth a Try
+export const ONE_TIME_WATCH_STAR_MIN = 2.3; // ★ ≥ 2.3 → One-Time Watch; else Skip
 
 // ── Evidence gate on Must Watch (release-day honesty) ──────────────────────
 // On the Wed→Fri window the evidence base is THIN: a couple of raves can push
@@ -93,28 +98,6 @@ export const WORTH_TRY_STAR_CEIL = 3.9;
 
 /** Credible critics that make a read 'firm' (also the override's 2-critic anchor). */
 export const MIN_CRITICS_FOR_FIRM = 2;
-
-// ── Dispersion / DIVISIVE tier ─────────────────────────────────────────────
-// A 4th tier for films critics genuinely SPLIT on (a real love/pan divide, not a
-// mediocre consensus). It only applies to a mid-band star with enough critics
-// AND a fired dispersion signal — so a flat 3/5 consensus never becomes Divisive.
-/** Star band a Divisive verdict may occupy (inclusive). Outside it, tier as usual. */
-export const DIVISIVE_STAR_MIN = 2.3;
-export const DIVISIVE_STAR_MAX = 3.7;
-/** Credible critics required before a split is trustworthy enough to call Divisive. */
-export const DIVISIVE_MIN_CRITICS = 3;
-/** Camp thresholds on the /10 scale: a "love" score is ≥ this, a "pan" is ≤ this. */
-export const DIV_LOVE_MIN = 7.0;
-export const DIV_PAN_MAX = 4.5;
-/** tailSplit = 4·love·pan over EXPLICIT scores fires at this (needs ≥4 explicit). */
-export const DIV_TAILSPLIT_MIN = 0.5;
-/** range (max−min of explicit /10) fires at this (needs ≥3 explicit). */
-export const DIV_RANGE_MIN = 4.0;
-/** sentSplit = 4·love·pan over SENTIMENT scores fires at this (needs ≥6 reviews). */
-export const DIV_SENTSPLIT_MIN = 0.5;
-/** critic-vs-audience gap fires at this, and only counts audience above the vote/LB floor. */
-export const DIV_GAP_MIN = 2.0;
-export const DIV_GAP_MIN_IMDB_VOTES = 300;
 
 // ──────────────────────────────────────────────────────────────────────────
 // SOURCE REGISTRY — outlet → credibility tier. Editorially maintained.
@@ -167,7 +150,7 @@ export const TIER_C_SOURCES: { domains: string[]; names: string[] } = {
 // ──────────────────────────────────────────────────────────────────────────
 
 export type Confidence = "high" | "medium" | "low" | "none";
-export type GroundedVerdict = "Must Watch" | "Worth a Try" | "Skip" | "Divisive";
+export type GroundedVerdict = "Must Watch" | "Worth a Try" | "One-Time Watch" | "Skip";
 
 export interface CriticRating {
   source: string;
@@ -452,22 +435,21 @@ export function computeVerdictScore(
     (credibleCriticCount >= MIN_CRITICS_FOR_FIRM && imdbVotes >= MUST_WATCH_AUDIENCE_VOTES);
   const star = meetsMustWatchEvidence ? rawStar : Math.min(rawStar, WORTH_TRY_STAR_CEIL);
 
-  // Dispersion signals over the CREDIBLE critics (Tier C already dropped). Feeds
-  // ONLY the DIVISIVE gate below — never the Must Watch check or the evidence cap.
-  const dispersion = computeDispersion(credible, audience, criticConsensus);
-
   // Verdict derives from the FINAL (capped) star — never the raw tbsiScore — so
-  // the ★ and the verdict stamp can never split at a tier boundary. Precedence:
-  //   1. Must Watch (unchanged, evidence-capped above)
-  //   2. DIVISIVE — a mid-band star, enough critics, AND a fired split signal
-  //   3. Worth a Try / Skip (unchanged)
+  // the ★ and the verdict stamp can never split at a tier boundary. A simple
+  // 4-band ladder (>= fires at each cut):
+  //   ★ ≥ 4.0 → Must Watch (evidence-capped above)
+  //   ★ ≥ 3.0 → Worth a Try
+  //   ★ ≥ 2.3 → One-Time Watch
+  //   ★ < 2.3 → Skip
   const verdict: GroundedVerdict =
     star >= MUST_WATCH_STAR_MIN
       ? "Must Watch"
-      : (star >= DIVISIVE_STAR_MIN && star <= DIVISIVE_STAR_MAX &&
-         credibleCriticCount >= DIVISIVE_MIN_CRITICS && dispersion.fired)
-        ? "Divisive"
-        : star >= WORTH_TRY_STAR_MIN ? "Worth a Try" : "Skip";
+      : star >= WORTH_TRY_STAR_MIN
+        ? "Worth a Try"
+        : star >= ONE_TIME_WATCH_STAR_MIN
+          ? "One-Time Watch"
+          : "Skip";
 
   // Confidence from COUNTABLE evidence (not a vibe) — drives the seal's EARLY vs
   // TBSI badge. 'low' (a single credible critic) ⊆ the cap-firing set, so an
@@ -480,84 +462,6 @@ export function computeVerdictScore(
       : "low";
 
   return { tbsiScore, star, verdict, confidence, credibleCriticCount };
-}
-
-// ── Dispersion (DIVISIVE) — PURE, exported, unit- and fixture-testable ──────
-
-export interface DispersionSignal {
-  /** Computed value (share-product, /10 range, or gap magnitude). */
-  value: number;
-  /** Whether enough data existed for this signal to be meaningful. */
-  valid: boolean;
-  /** valid AND value ≥ its threshold (>= semantics — the boundary fires). */
-  fired: boolean;
-}
-
-export interface Dispersion {
-  fired: boolean;
-  signals: { tailSplit: DispersionSignal; range: DispersionSignal; sentSplit: DispersionSignal; gap: DispersionSignal };
-}
-
-/** Aggregator audience blend on the /10 scale — the SAME components (and TMDb
- *  vote floor) the AUDIENCE axis uses, minus the per-film roundup reviews the
- *  dispersion call doesn't receive. null when no aggregator signal is present. */
-function aggregatorBlend10(a: AudienceSignal): number | null {
-  const parts: number[] = [];
-  if (a.imdbRating !== null) parts.push(a.imdbRating);
-  if (a.letterboxd !== null) parts.push(a.letterboxd * 2);
-  if (a.tmdbVoteAverage !== null && (a.tmdbVoteCount ?? 0) >= TMDB_FALLBACK_MIN_VOTES) parts.push(a.tmdbVoteAverage);
-  return parts.length ? mean(parts) : null;
-}
-
-/**
- * Critic-dispersion signals for the DIVISIVE gate. PURE. Pass the CREDIBLE
- * critics (Tier C already dropped). All axes on the /10 scale (scores ×2):
- *   - tailSplit: 4·share(love)·share(pan) over EXPLICIT scores  (valid ≥4 explicit)
- *   - range:     max−min of EXPLICIT scores                     (valid ≥3 explicit)
- *   - sentSplit: 4·share(love)·share(pan) over SENTIMENT scores (valid ≥6 reviews)
- *   - gap:       |criticMedian10 − audienceBlend10|             (valid only with
- *                real audience: imdbVotes ≥ DIV_GAP_MIN_IMDB_VOTES or letterboxd
- *                present — dormant at release-week, by design)
- * fired = ANY valid signal ≥ its threshold (>= semantics — the boundary fires).
- */
-export function computeDispersion(
-  criticRatings: CriticRating[],
-  audience: AudienceSignal,
-  criticMedian10: number
-): Dispersion {
-  const explicit10 = criticRatings
-    .filter(r => r.explicitScore !== null)
-    .map(r => (r.explicitScore as number) * 2);
-  const sent10 = criticRatings.map(r => r.sentimentScore * 2);
-
-  const share = (xs: number[], pred: (x: number) => boolean): number =>
-    xs.length ? xs.filter(pred).length / xs.length : 0;
-  const splitProduct = (xs: number[]): number =>
-    4 * share(xs, x => x >= DIV_LOVE_MIN) * share(xs, x => x <= DIV_PAN_MAX);
-
-  const tailValid = explicit10.length >= 4;
-  const tailValue = tailValid ? splitProduct(explicit10) : 0;
-
-  const rangeValid = explicit10.length >= 3;
-  const rangeValue = rangeValid ? Math.max(...explicit10) - Math.min(...explicit10) : 0;
-
-  const sentValid = sent10.length >= 6;
-  const sentValue = sentValid ? splitProduct(sent10) : 0;
-
-  const blend = aggregatorBlend10(audience);
-  const gapValid = blend !== null &&
-    ((audience.imdbVotes ?? 0) >= DIV_GAP_MIN_IMDB_VOTES || audience.letterboxd !== null);
-  const gapValue = gapValid ? Math.abs(criticMedian10 - (blend as number)) : 0;
-
-  const tailSplit: DispersionSignal = { value: tailValue, valid: tailValid, fired: tailValid && tailValue >= DIV_TAILSPLIT_MIN };
-  const range: DispersionSignal = { value: rangeValue, valid: rangeValid, fired: rangeValid && rangeValue >= DIV_RANGE_MIN };
-  const sentSplit: DispersionSignal = { value: sentValue, valid: sentValid, fired: sentValid && sentValue >= DIV_SENTSPLIT_MIN };
-  const gap: DispersionSignal = { value: gapValue, valid: gapValid, fired: gapValid && gapValue >= DIV_GAP_MIN };
-
-  return {
-    fired: tailSplit.fired || range.fired || sentSplit.fired || gap.fired,
-    signals: { tailSplit, range, sentSplit, gap },
-  };
 }
 
 // ──────────────────────────────────────────────────────────────────────────

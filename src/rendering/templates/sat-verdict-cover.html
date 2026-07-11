@@ -46,7 +46,7 @@
      Thick (7px) + bright so each ruling reads at a glance. */
   .tile.skip      { border-color: var(--vermillion); }  /* SKIP */
   .tile.mustwatch { border-color: var(--bottle);     }  /* MUST WATCH (green) */
-  .tile.watchit   { border-color: var(--bottle);     }  /* WATCH IT — divisive tier renders green */
+  .tile.onetime   { border-color: var(--brass);      }  /* ONE-TIME WATCH — brass border */
   .tile.try       { border-color: var(--cream);      }  /* WORTH A TRY — light border, reads on the scrim */
 
   .tile-img {
@@ -184,7 +184,7 @@
   }
   .chip .dot.skip      { background: var(--vermillion); }
   .chip .dot.mustwatch { background: var(--bottle); }
-  .chip .dot.watchit   { background: var(--bottle); }
+  .chip .dot.onetime   { background: var(--brass); }
   .chip .dot.try       { background: var(--cream); }
   .chip .lbl {
     font-family: 'Inter', sans-serif;
@@ -286,7 +286,7 @@
   <div class="legend">
     <span class="chip"><span class="dot mustwatch"></span><span class="lbl">Must Watch</span></span>
     <span class="chip"><span class="dot try"></span><span class="lbl">Worth a Try</span></span>
-    <span class="chip"><span class="dot watchit"></span><span class="lbl">Watch It</span></span>
+    <span class="chip"><span class="dot onetime"></span><span class="lbl">One-Time Watch</span></span>
     <span class="chip"><span class="dot skip"></span><span class="lbl">Skip</span></span>
   </div>
 

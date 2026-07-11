@@ -17,7 +17,7 @@ export type FamilyFilter =
   | "Solo" | "Date Night" | "Family with Kids" 
   | "With Parents" | "Avoid with Family";
 
-export type Verdict = "🔥 Must Watch" | "👀 Worth a Try" | "⚖️ Divisive" | "⏭️ Skip" | "Pending";
+export type Verdict = "🔥 Must Watch" | "👀 Worth a Try" | "🎟️ One-Time Watch" | "⏭️ Skip" | "Pending";
 
 /** A normalized OTT release across all sources */
 export interface Release {

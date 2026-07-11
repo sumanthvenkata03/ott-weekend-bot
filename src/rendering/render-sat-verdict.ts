@@ -58,20 +58,20 @@ const LANGUAGE_FALLBACK_COLORS: Record<string, string> = {
   "Other":     "#1A1614",
 };
 
-function verdictKind(v: Verdict): "must-watch" | "worth-a-try" | "divisive" | "skip" {
+function verdictKind(v: Verdict): "must-watch" | "worth-a-try" | "one-time-watch" | "skip" {
   if (v.includes("Must Watch")) return "must-watch";
   if (v.includes("Worth a Try")) return "worth-a-try";
-  if (v.includes("Divisive")) return "divisive";
+  if (v.includes("One-Time Watch")) return "one-time-watch";
   return "skip";
 }
 
-/** Cover verdict-border class per verdict tier. Divisive renders as the "WATCH
- *  IT" green tier; the four classes map to two colors (green/vermillion/cream). */
+/** Cover verdict-border class per verdict tier. One-Time Watch renders as the
+ *  brass tier; the four classes map to four colors (green/vermillion/cream/brass). */
 const VERDICT_BORDER_CLASS: Record<SatVerdictCard["verdictKind"], SatVerdictCoverTile["verdictClass"]> = {
-  "must-watch":  "mustwatch",
-  "worth-a-try": "try",
-  "divisive":    "watchit",
-  "skip":        "skip",
+  "must-watch":     "mustwatch",
+  "worth-a-try":    "try",
+  "one-time-watch": "onetime",
+  "skip":           "skip",
 };
 
 /**
@@ -177,7 +177,7 @@ export async function renderSatVerdict(
   await cleanOldRenders(outputDir, baseCtx.date);
 
   // 1. Cover slide — the Verdict Grid: a poster wall of EVERY verdict film, each
-  //    tile framed in its verdict color (SKIP vermillion, WATCH IT/Divisive green,
+  //    tile framed in its verdict color (SKIP vermillion, ONE-TIME WATCH brass,
   //    WORTH A TRY cream, MUST WATCH green). Prominence order → biggest film
   //    leads the wall. `alsoSkipping` is no longer surfaced on the cover (the grid
   //    shows all rulings); it stays a param for caller compatibility.
@@ -289,7 +289,7 @@ if (isMainModule) {
     // Verification-only: a Wed→Fri (3-day) range so the cover footer crop shows
     // the narrowed window. In the live job this string is window-derived.
     weekendDates: "Jun 17 — Jun 19, 2026",
-    caption: "Four verdicts, four different calls — including one the critics can't agree on.",
+    caption: "Four verdicts, four different calls — including one that's strictly a one-time watch.",
     hashtags: "#OTTReleases #Malayalam #WeekendWatch",
     hotTake: "A quiet Malayalam grief drama says more in 90 minutes than three loud Hindi releases manage all week.",
     verdicts: [
@@ -394,36 +394,36 @@ if (isMainModule) {
         filmTitle: "Kaalam",
         language: "Tamil",
         platform: ["Netflix"],
-        verdict: "⚖️ Divisive",
-        oneLineVerdict: "Critics are split down the middle — a bold, messy swing.",
-        watchIf: "Watch if you like ambitious films that don't fully land but stay with you.",
-        skipIf: "Skip if you want a clean consensus pick.",
-        whereItWins: "Its ambition and two standout set-pieces.",
-        whereItLoses: "A wildly uneven middle hour.",
-        watchSetup: "Go in ready to argue about it after.",
-        // Verification-only sample research crafted to look DIVISIVE: ★3.2 (in the
-        // 2.3–3.7 band), 4 credible critics, an explicit love/pan split (8.0 vs 4.0
-        // on /10 → range 4.0 fires). The verdict is set directly here to exercise
-        // the green stamp; the live job computes the tier from real reviews.
+        verdict: "🎟️ One-Time Watch",
+        oneLineVerdict: "Worth a single spin — good enough once, forgettable after.",
+        watchIf: "Watch if you want a solid weeknight watch you won't feel the need to revisit.",
+        skipIf: "Skip if you only make time for films you'll come back to.",
+        whereItWins: "A committed lead turn and one genuinely gripping act.",
+        whereItLoses: "A slack middle hour and an ending that undersells it.",
+        watchSetup: "A weeknight when nothing else is on.",
+        // Verification-only sample research crafted to land in the ONE-TIME WATCH
+        // band: ★2.6 (≥ 2.3, < 3.0), 2 credible critics, no vote floor → confidence
+        // MEDIUM. A firm-ish TBSI badge on a One-Time Watch card is correct: the
+        // read is grounded, the film is just middling. The live job computes the
+        // tier from real reviews; the verdict is set directly here to exercise the
+        // brass stamp.
         research: {
           found: true,
           criticRatings: [
-            { source: "The Hindu", url: "https://www.thehindu.com/reviews/kaalam", explicitScore: 4, sentimentScore: 4.5 },
-            { source: "Cinema Express", url: "https://www.cinemaexpress.com/reviews/kaalam", explicitScore: 3.75, sentimentScore: 4 },
-            { source: "Flickonclick", url: "https://www.flickonclick.com/kaalam-review", explicitScore: 2, sentimentScore: 1.5 },
-            { source: "The Hollywood Reporter India", url: "https://www.hollywoodreporterindia.com/reviews/kaalam", explicitScore: null, sentimentScore: 2.5 },
+            { source: "Cinema Express", url: "https://www.cinemaexpress.com/reviews/kaalam", explicitScore: 3.0, sentimentScore: 3.0 },
+            { source: "The Hindu", url: "https://www.thehindu.com/reviews/kaalam", explicitScore: 2.2, sentimentScore: 2.2 },
           ],
-          credibleCriticCount: 4,
+          credibleCriticCount: 2,
           audienceScore: null,
-          buzzNote: "polarizing reactions out of festival screenings",
-          tbsiScore: 6.4,
-          star: 3.2,
-          verdict: "Divisive",
-          confidence: "high",
-          summaryLine: "Critics are split down the middle — a bold, messy swing.",
-          theRead: "One camp calls it the year's most ambitious Tamil film; another says it collapses under its own ideas. No middle ground.",
-          watchIf: "Watch if you like ambitious films that divide the room.",
-          sources: ["The Hindu", "Cinema Express", "Flickonclick"],
+          buzzNote: "modest reactions out of its streaming premiere",
+          tbsiScore: 5.2,
+          star: 2.6,
+          verdict: "One-Time Watch",
+          confidence: "medium",
+          summaryLine: "Worth a single spin — good enough once, forgettable after.",
+          theRead: "Critics land in the same place: an ambitious swing with a strong lead, dragged down by a baggy middle. Fine for one watch, not a keeper.",
+          watchIf: "Watch if you want a decent one-and-done weeknight film.",
+          sources: ["Cinema Express", "The Hindu"],
         },
       },
     ],
@@ -513,10 +513,10 @@ if (isMainModule) {
         runtime: 156,
         director: "Vetri Maaran",
         cast: ["Dhanush", "Aishwarya Rajesh"],
-        synopsis: "An ambitious, polarizing epic critics can't agree on.",
+        synopsis: "An ambitious epic that lands as a solid one-time watch.",
         posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
-        // Sample ratings — mid, DIVISIVE (a real love/pan critic split, see the verdict above).
-        tbsiScore: 6.4, tbsiSourceCount: 4,
+        // Sample ratings — mid, ONE-TIME WATCH (a grounded but middling read, see the verdict above).
+        tbsiScore: 5.2, tbsiSourceCount: 2,
         imdbRating: 6.5,
         // Prominence: card 2 (between Pati Patni 900 and Pennum Porattum 400).
         tmdbPopularity: 500,

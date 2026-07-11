@@ -72,7 +72,7 @@ export function pickVerdictWindow(now: Date): { startDate: string; endDate: stri
 function toEmojiVerdict(v: GroundedVerdict): VerdictSlide["verdict"] {
   return v === "Must Watch" ? "🔥 Must Watch"
     : v === "Worth a Try" ? "👀 Worth a Try"
-    : v === "Divisive" ? "⚖️ Divisive"
+    : v === "One-Time Watch" ? "🎟️ One-Time Watch"
     : "⏭️ Skip";
 }
 

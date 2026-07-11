@@ -102,7 +102,7 @@ export interface VerdictSlide {
   filmTitle: string;
   language: string;
   platform: string[];
-  verdict: "🔥 Must Watch" | "👀 Worth a Try" | "⚖️ Divisive" | "⏭️ Skip";
+  verdict: "🔥 Must Watch" | "👀 Worth a Try" | "🎟️ One-Time Watch" | "⏭️ Skip";
   /** Grounded one-line verdict (research.summaryLine in the job path). */
   oneLineVerdict: string;
   watchIf: string;
@@ -911,7 +911,7 @@ export async function writeSaturdayVerdictToNotion(
     : null;
 
   // Pick the strongest verdict for the row-level Verdict select
-  const verdictPriority: VerdictSlide["verdict"][] = ["🔥 Must Watch", "👀 Worth a Try", "⚖️ Divisive", "⏭️ Skip"];
+  const verdictPriority: VerdictSlide["verdict"][] = ["🔥 Must Watch", "👀 Worth a Try", "🎟️ One-Time Watch", "⏭️ Skip"];
   const rowVerdict = verdictPriority.find(v => draft.verdicts.some(d => d.verdict === v))
     ?? "🔥 Must Watch";
 

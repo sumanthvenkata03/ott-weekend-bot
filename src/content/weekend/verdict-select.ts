@@ -23,10 +23,10 @@ export interface VerdictEntry {
   research: VerdictResearch;
 }
 
-export function verdictKind(v: VerdictSlide["verdict"]): "must-watch" | "worth-a-try" | "divisive" | "skip" {
+export function verdictKind(v: VerdictSlide["verdict"]): "must-watch" | "worth-a-try" | "one-time-watch" | "skip" {
   if (v.includes("Must Watch")) return "must-watch";
   if (v.includes("Worth a Try")) return "worth-a-try";
-  if (v.includes("Divisive")) return "divisive";
+  if (v.includes("One-Time Watch")) return "one-time-watch";
   return "skip";
 }
 
@@ -46,35 +46,37 @@ function compareImportanceDesc(a: VerdictEntry, b: VerdictEntry): number {
 /**
  * Deterministic card selection — the JOB decides the count, not the LLM.
  *
- * Every judged film gets a card, ordered Must Watch → Worth a Try → Divisive →
- * Skip, each importance-desc. A soft ceiling of MAX_VERDICT_CARDS caps the carousel:
+ * Every judged film gets a card, ordered Must Watch → Worth a Try → One-Time
+ * Watch → Skip, each importance-desc. A soft ceiling of MAX_VERDICT_CARDS caps the carousel:
  *   - ≤ ceiling scored films → all carded, `trimmedSkips` empty (common case).
  *   - > ceiling → keep the first MAX_VERDICT_CARDS in the tier/importance order
  *     above; the overflow (which, because Skips sort last, is Skips) goes to
  *     `trimmedSkips`, feeding the cover's "ALSO SKIPPING" footer.
  *
  * INVARIANT: only ⏭️ Skip films may ever enter `trimmedSkips` — the footer is
- * literally labeled ALSO SKIPPING. Must Watch / Worth a Try are never trimmed:
- * if the non-Skip tiers ALONE exceed the ceiling, it yields (card them all) and
- * we log a warning rather than drop a positive verdict.
+ * literally labeled ALSO SKIPPING. Must Watch / Worth a Try / One-Time Watch are
+ * never trimmed: if the non-Skip tiers ALONE exceed the ceiling, it yields (card
+ * them all) and we log a warning rather than drop a positive verdict.
  *
  * Returns the cards in carousel order — hero first (top Must Watch, else top
- * Worth a Try, else top Skip) — plus the trimmed Skips (empty at ≤ ceiling).
+ * Worth a Try, else top One-Time Watch, else top Skip) — plus the trimmed Skips
+ * (empty at ≤ ceiling).
  */
 export function selectVerdictCards(
   entries: VerdictEntry[]
 ): { selected: VerdictEntry[]; trimmedSkips: VerdictEntry[] } {
   const must     = entries.filter(e => verdictKind(e.slide.verdict) === "must-watch").sort(compareImportanceDesc);
   const worth    = entries.filter(e => verdictKind(e.slide.verdict) === "worth-a-try").sort(compareImportanceDesc);
-  const divisive = entries.filter(e => verdictKind(e.slide.verdict) === "divisive").sort(compareImportanceDesc);
+  const oneTime  = entries.filter(e => verdictKind(e.slide.verdict) === "one-time-watch").sort(compareImportanceDesc);
   const skip     = entries.filter(e => verdictKind(e.slide.verdict) === "skip").sort(compareImportanceDesc);
 
-  // Tier order: must-watch → worth-a-try → divisive → skip. Non-Skip tiers (now
-  // including divisive) are NEVER trimmed — only Skips may overflow to ALSO SKIPPING.
-  const nonSkip = [...must, ...worth, ...divisive];
+  // Tier order: must-watch → worth-a-try → one-time-watch → skip. Non-Skip tiers
+  // (now including one-time-watch) are NEVER trimmed — only Skips may overflow to
+  // ALSO SKIPPING.
+  const nonSkip = [...must, ...worth, ...oneTime];
   if (nonSkip.length > MAX_VERDICT_CARDS) {
     log.warn(
-      `Sat Verdict: ${nonSkip.length} non-Skip (Must Watch / Worth a Try / Divisive) films exceed the ` +
+      `Sat Verdict: ${nonSkip.length} non-Skip (Must Watch / Worth a Try / One-Time Watch) films exceed the ` +
       `${MAX_VERDICT_CARDS}-card ceiling — carding all (ceiling yields; non-Skip verdicts are never trimmed).`
     );
   }

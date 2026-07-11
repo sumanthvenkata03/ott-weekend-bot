@@ -170,7 +170,7 @@
   }
 
   /* Row 4 — verdict stamp (in-flow, centered). Per-tier colors preserved:
-     SKIP vermillion outline · WATCH IT (divisive) green · WORTH A TRY ink/brass ·
+     SKIP vermillion outline · ONE-TIME WATCH brass/ink · WORTH A TRY ink/brass ·
      MUST WATCH vermillion. Unknown kind falls to an unstyled loud marker. */
   .verdict-stamp {
     display: inline-flex; flex-direction: column;
@@ -186,7 +186,12 @@
   .verdict-must-watch { background: var(--vermillion); color: var(--cream); border: 3px solid var(--cream); box-shadow: inset 0 0 0 5px var(--vermillion); }
   .verdict-worth-a-try { background: var(--ink); color: var(--brass); border: 3px solid var(--brass); }
   .verdict-skip { background: transparent; color: var(--vermillion); border: 6px solid var(--vermillion); }
-  .verdict-divisive { background: var(--bottle); color: var(--cream); border: 3px solid var(--cream); box-shadow: inset 0 0 0 5px var(--bottle); }
+  .verdict-one-time-watch { background: var(--brass); color: var(--ink); border: 3px solid var(--ink); }
+  /* One-Time Watch label is the longest phrase — forced to two lines (ONE‑TIME /
+     WATCH via a non-breaking hyphen + <br>) and stepped down from 70px to the
+     largest size that keeps the box inside card bounds with margin parity vs the
+     MUST WATCH stamp. Other tiers stay at 70px. */
+  .verdict-one-time-watch .label { font-size: 60px; letter-spacing: -0.02em; }
 </style>
 </head>
 <body class="{{ card.verdictKind }}">
@@ -241,8 +246,8 @@
           <div class="label">MUST WATCH</div>
         {% elif card.verdictKind == "worth-a-try" %}
           <div class="label">WORTH A TRY</div>
-        {% elif card.verdictKind == "divisive" %}
-          <div class="label">WATCH IT</div>
+        {% elif card.verdictKind == "one-time-watch" %}
+          <div class="label">ONE&#8209;TIME<br>WATCH</div>
         {% elif card.verdictKind == "skip" %}
           <div class="label">SKIP</div>
         {% else %}
