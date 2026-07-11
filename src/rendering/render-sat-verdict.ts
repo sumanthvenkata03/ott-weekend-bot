@@ -130,12 +130,13 @@ function buzzLabelFor(release: Release | undefined): SatVerdictCard["buzzLabel"]
 }
 
 /** Max characters of the " · "-joined, UPPERCASE cast line that fits on one line
- *  in the bottom strip. Trailing whole names are dropped until the line fits —
- *  names are NEVER cut mid-name. Finalized from the render: the 38-char worst-case
- *  line measures 464px in the 584px usable width (≈12.2px/char), so the true
- *  single-line ceiling is ~47 chars; 44 leaves ~1 name-char of safety for
- *  wide-glyph (M/W-heavy) names before a trailing name is dropped. */
-const CAST_FIT_CHARS = 44;
+ *  in the bottom band. Trailing whole names are dropped until the line fits —
+ *  names are NEVER cut mid-name. Re-measured for the 26px band type (Inter 600,
+ *  letter-spacing 0.04em, uppercase): advance ≈ 17.4px/char against 584px usable
+ *  → floor(584 / 17.4) = 33, minus one name-char of safety = 32. At 26px a 3-name
+ *  line like "DHANUSH · AISHWARYA RAJESH · SASIKUMAR" (38ch) drops to 2; the first
+ *  name always survives (count floor 1), so receipts are preserved by construction. */
+const CAST_FIT_CHARS = 32;
 
 /** Cast receipts for the bottom strip: leadCast when present, else the first 3 of
  *  cast, else undefined (hairline only). UPPERCASE, " · "-joined, ≤3 names, with
@@ -577,10 +578,16 @@ if (isMainModule) {
         // exercises the 3-name at-threshold case.
         cast: ["Dhanush", "Aishwarya Rajesh", "Sasikumar"],
         // CAST SOURCE: explicit 3-name leadCast → "DHANUSH · AISHWARYA RAJESH ·
-        // SASIKUMAR" = 38 chars, at/near the fit threshold (all 3 kept).
+        // SASIKUMAR" = 38 chars > 32-char fit → DROPS the trailing name to
+        // "DHANUSH · AISHWARYA RAJESH" (exercises the 3→2 drop branch every render).
         leadCast: ["Dhanush", "Aishwarya Rajesh", "Sasikumar"],
         synopsis: "An ambitious epic that lands as a solid one-time watch.",
-        posterUrl: "https://image.tmdb.org/t/p/w500/snQLwRrfQAl5YFKVefZq9Lbscki.jpg",
+        // SYNTHETIC bright-poster legibility regression: flat high-key #cfe4ee 2:3
+        // SVG as an inline base64 data URI (base64 so Nunjucks autoescape leaves it
+        // intact; verified to load in the Puppeteer render context). This is the
+        // maximal-collision card — bright poster + MEDIUM BUZZ chip + 3→2 cast drop
+        // + long title + OTW stamp. Swap back to a real posterUrl anytime.
+        posterUrl: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MDAiIGhlaWdodD0iNzUwIj48cmVjdCB3aWR0aD0iNTAwIiBoZWlnaHQ9Ijc1MCIgZmlsbD0iI2NmZTRlZSIvPjwvc3ZnPg==",
         // Sample ratings — mid, ONE-TIME WATCH (a grounded but middling read, see the verdict above).
         tbsiScore: 5.2, tbsiSourceCount: 2,
         imdbRating: 6.5,

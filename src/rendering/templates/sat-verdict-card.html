@@ -33,55 +33,53 @@
     grid-template-rows: minmax(0, 1fr);
   }
 
-  /* ── LEFT 60% — three FIXED zones stacked in a flex column, identical on every
-     card regardless of poster aspect:
-       TOP STRIP (112px)    — ★ wordmark (left) + buzz chip (right)
-       POSTER MIDDLE (rest) — poster in FULL (object-fit:contain, never cropped);
-                              the letterbox gap is filled by the blurred-copy
-                              mechanic UNCHANGED, now clipped to this zone
-       BOTTOM STRIP (96px)  — cast receipts, brass hairline above
-     The old per-poster blurred bands are gone: the strips are solid near-ink and
-     the same height on every card. Vermillion border treatment kept. ── */
+  /* ── LEFT 60% — FULL-COLUMN poster stage with two absolute VEIL OVERLAYS.
+     The poster (blur bg + scrim + contain img) fills the WHOLE column exactly as
+     before the zone-restructure; the top (112px) and bottom (96px) strips are
+     position:absolute gradient-ink veils laid OVER the poster. No solid band —
+     the blur reads continuously beneath the veils, killing the double-band seam.
+     Vermillion border treatment kept. ── */
   .poster-col {
     position: relative;
     overflow: hidden;
     background-color: var(--ink);
     border: 4px solid var(--vermillion);
-    display: flex;
-    flex-direction: column;
   }
-  /* TOP STRIP — solid near-ink; wordmark left-anchored, buzz chip right-anchored. */
+  /* TOP VEIL OVERLAY — absolute, above the poster (z-index:3); wordmark left,
+     buzz chip right, both V-centered in the 195px band (the natural 2:3 letterbox
+     gap). Ink gradient (opaque top → transparent) does ALL the darkening so the
+     poster/blur glows through the lower part of the veil — no solid band. */
   .strip-top {
-    flex: 0 0 112px;
-    background: #14100e;
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 195px;
+    z-index: 3;
+    background: linear-gradient(180deg, rgba(20,16,14,.85), rgba(20,16,14,.60) 52%, rgba(20,16,14,0));
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0 30px;
   }
+  /* Wordmark 21px: stepped down from spec's 23px per the crowding guard — at 23px
+     it overlapped the MEDIUM BUZZ chip by 8px; 21px gives 25px clearance. */
   .strip-top .wordmark {
     font-family: 'Inter', sans-serif;
-    font-size: 15px;
+    font-size: 21px;
     font-weight: 700;
     letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--cream);
     white-space: nowrap;
   }
-  /* POSTER MIDDLE — the letterbox zone. position:relative + overflow:hidden so the
-     absolutely-positioned blur/scrim/poster layers clip to THIS zone (not the
-     whole column), keeping the strips clean. */
-  .poster-mid {
-    position: relative;
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow: hidden;
-  }
-  /* BOTTOM STRIP — solid near-ink; brass hairline above centered cast receipts.
-     Empty castLine → the hairline renders alone (empty-receipts state). */
+  /* BOTTOM VEIL OVERLAY — absolute, mirrored gradient (opaque bottom → transparent
+     up), above the poster (z-index:3). Brass hairline above centered cast receipts,
+     H+V centered in the 195px band. */
   .strip-bottom {
-    flex: 0 0 96px;
-    background: #14100e;
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 195px;
+    z-index: 3;
+    background: linear-gradient(0deg, rgba(20,16,14,.85), rgba(20,16,14,.60) 52%, rgba(20,16,14,0));
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -89,20 +87,25 @@
     padding: 0 28px;
   }
   .strip-bottom .cast-hairline {
-    width: 140px;
+    width: 190px;
     height: 0.75px;
     background: var(--brass);
-    margin-bottom: 14px;
+    margin-bottom: 18px;
   }
+  /* Cast line is ALWAYS in the DOM (min-height reserves its box even when the text
+     is empty), so the hairline + cast block is a constant height → the hairline
+     sits at a FIXED Y whether or not receipts are present. The old empty-state
+     hairline drift (lone hairline re-centering ~12px lower) is gone by construction. */
   .strip-bottom .cast-line {
     font-family: 'Inter', sans-serif;
-    font-size: 19px;
+    font-size: 26px;
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--cream);
     white-space: nowrap;
     text-align: center;
+    min-height: 31px;
   }
   /* Ambient fill: same poster, object-fit:cover (allowed to crop — pure fill),
      heavily blurred + darkened. scale(1.15) overfills so the blur has no
@@ -114,7 +117,7 @@
     width: 100%; height: 100%;
     object-fit: cover;
     transform: scale(1.15);
-    filter: blur(28px) brightness(0.5);
+    filter: blur(28px) brightness(0.72);
     z-index: 0;
   }
   /* Subtle ink tint over the blurred fill — keeps the heat chip + poster edges
@@ -122,7 +125,7 @@
   .poster-scrim {
     position: absolute;
     inset: 0;
-    background: rgba(20, 16, 14, 0.25);
+    background: rgba(20, 16, 14, 0.10);
     z-index: 1;
   }
   /* Foreground poster — unchanged: full, sharp, never cropped, on top. */
@@ -168,18 +171,18 @@
      Rendered ONLY when `card.buzzLabel` is present. Inline SVG flame because
      headless Chromium has no colour-emoji font (a literal 🔥 would be tofu). */
   .heat-sticker {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: center; gap: 9px;
     flex-shrink: 0;
-    padding: 11px 16px 11px 13px;
+    padding: 12px 18px 12px 15px;
     background: var(--vermillion);
     color: var(--cream);
     font-family: 'Inter', sans-serif;
-    font-size: 16px; font-weight: 800;
+    font-size: 18px; font-weight: 800;
     letter-spacing: 1.5px; text-transform: uppercase;
     border-radius: 6px;
     box-shadow: 2px 3px 0 rgba(20, 16, 14, 0.4);
   }
-  .heat-sticker .flame { width: 16px; height: 19px; display: block; flex-shrink: 0; }
+  .heat-sticker .flame { width: 18px; height: 21px; display: block; flex-shrink: 0; }
   .heat-sticker .flame path { fill: var(--cream); }
 
   /* ── RIGHT 40% — cream content column, 4 equal rows ── */
@@ -274,10 +277,22 @@
 <body class="{{ card.verdictKind }}">
 <div class="card">
 
-  <!-- LEFT 60% — three fixed zones: top strip / poster middle / bottom strip -->
+  <!-- LEFT 60% — full-column poster stage + two absolute veil overlays -->
   <div class="poster-col">
 
-    <!-- TOP STRIP — ★ wordmark (left) + buzz chip (right). Chip omitted entirely
+    <!-- POSTER STAGE — fills the whole column; blur bg + scrim + contain img
+         (mechanic byte-equivalent to the pre-restructure full-column behavior). -->
+    {% if card.posterUrl %}
+      <img src="{{ card.posterUrl }}" class="poster-bg" alt="" aria-hidden="true" onerror="this.style.display='none'" />
+      <div class="poster-scrim"></div>
+      <img src="{{ card.posterUrl }}" class="poster-img" alt="" onerror="this.style.display='none'" />
+    {% endif %}
+    <div class="poster-fallback {% if card.posterUrl %}poster-fallback-hidden{% endif %}">
+      <div class="lang">{{ card.language | upper }}</div>
+      <div class="title-stack">{{ card.filmTitle }}</div>
+    </div>
+
+    <!-- TOP VEIL — ★ wordmark (left) + buzz chip (right). Chip omitted entirely
          when card.buzzLabel is absent (null heat → wordmark only; absence ≠ low). -->
     <div class="strip-top">
       <div class="wordmark">&#9733; THE BIG SCREEN INDEX</div>
@@ -289,24 +304,11 @@
       {% endif %}
     </div>
 
-    <!-- POSTER MIDDLE — blur-fill letterbox mechanic UNCHANGED, clipped to this zone -->
-    <div class="poster-mid">
-      {% if card.posterUrl %}
-        <img src="{{ card.posterUrl }}" class="poster-bg" alt="" aria-hidden="true" onerror="this.style.display='none'" />
-        <div class="poster-scrim"></div>
-        <img src="{{ card.posterUrl }}" class="poster-img" alt="" onerror="this.style.display='none'" />
-      {% endif %}
-      <div class="poster-fallback {% if card.posterUrl %}poster-fallback-hidden{% endif %}">
-        <div class="lang">{{ card.language | upper }}</div>
-        <div class="title-stack">{{ card.filmTitle }}</div>
-      </div>
-    </div>
-
-    <!-- BOTTOM STRIP — CAST RECEIPTS. Brass hairline above; centered cast line.
+    <!-- BOTTOM VEIL — CAST RECEIPTS. Brass hairline above; centered cast line.
          Empty castLine → hairline only (empty-receipts state). -->
     <div class="strip-bottom">
       <div class="cast-hairline"></div>
-      {% if card.castLine %}<div class="cast-line">{{ card.castLine }}</div>{% endif %}
+      <div class="cast-line">{{ card.castLine }}</div>
     </div>
 
   </div>
