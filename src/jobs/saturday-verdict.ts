@@ -26,6 +26,7 @@ import { buildHashtags } from "../shared/hashtags.js";
 import { renderSatVerdict } from "../rendering/render-sat-verdict.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
+import { buildAndUploadDeckZip, writeCaptionFile } from "../delivery/deliver-deck-zip.js";
 import { getIssueNumberForToday } from "../shared/issue-number.js";
 import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
 import { selectVerdictCards, type VerdictEntry } from "../content/weekend/verdict-select.js";
@@ -348,6 +349,24 @@ async function main(deliver = true) {
     throw err;
   }
 
+  // Build the IG-ready deck zip (convenience deliverable). This NEVER aborts
+  // delivery: the deck PNGs uploaded above are the product; the zip is a
+  // convenience. Write the caption to a file first (so the zip includes it AND a
+  // later standalone re-deliver can pick it up), then zip + upload; any failure
+  // degrades the Slack line instead of throwing.
+  let deckZipLine: string;
+  try {
+    await writeCaptionFile("output/posts", dateStr, draft.caption);
+    const deck = await buildAndUploadDeckZip({ outputDir: "output/posts", date: dateStr });
+    const mb = (deck.sizeBytes / 1_048_576).toFixed(1);
+    deckZipLine = `📦 IG-ready deck (${deck.slideCount} slides, ${mb} MB): ${deck.url}`;
+    log.success(`   Deck zip: ${deck.url}`);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    log.warn(`Deck zip step failed (non-fatal) — ${reason}`);
+    deckZipLine = `📦 deck zip failed: ${reason}`;
+  }
+
   log.info("Sending Slack notification...");
   await notifyDraftReady({
     pillar: "Sat Verdict",
@@ -364,6 +383,7 @@ async function main(deliver = true) {
     bodyCardImageUrls: cardUploads.map(u => u.publicUrl),
     hashtags: enrichedHashtags,
     validation: manifestToSlack(manifest),
+    deckZip: deckZipLine,
   });
 
   log.success(`\n✅ Sat Verdict PREVIEW delivered — Notion page: ${url}`);

@@ -17,6 +17,7 @@ export interface DraftNotification {
   bodyCardImageUrls?: string[];       // body card images — link buttons
   hashtags?: string;                  // space-separated #tags — rendered copy-paste-ready
   validation?: { metaValue: string; issuesBlock?: string };  // landing-verifier summary + flagged rows
+  deckZip?: string;                   // one-line IG-deck-zip cue, e.g. "📦 IG-ready deck (11 slides, 2.3 MB): <url>" (or a degraded "📦 deck zip failed: …")
 }
 
 /**
@@ -62,6 +63,12 @@ export async function notifyDraftReady(payload: DraftNotification): Promise<void
     if (payload.validation.issuesBlock) {
       blocks.push({ type: "section", text: { type: "mrkdwn", text: payload.validation.issuesBlock } });
     }
+  }
+
+  // IG-ready deck zip — one context line (convenience deliverable; degrades to a
+  // "failed: <reason>" line when the zip step couldn't complete).
+  if (payload.deckZip) {
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: payload.deckZip }] });
   }
 
   if (payload.coverImageUrl) {
