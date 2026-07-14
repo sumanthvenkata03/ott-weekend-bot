@@ -12,6 +12,7 @@ import type {
   SatVerdictCoverContext,
   SatVerdictCoverTile,
   SatVerdictCardContext,
+  SatVerdictTally,
 } from "./types.js";
 import {
   getPlatformStyle,
@@ -65,14 +66,15 @@ function verdictKind(v: Verdict): "must-watch" | "worth-a-try" | "one-time-watch
   return "skip";
 }
 
-/** Cover verdict-border class per verdict tier. One-Time Watch renders as the
- *  brass tier; the four classes map to four colors (green/vermillion/cream/brass). */
-const VERDICT_BORDER_CLASS: Record<SatVerdictCard["verdictKind"], SatVerdictCoverTile["verdictClass"]> = {
-  "must-watch":     "mustwatch",
-  "worth-a-try":    "try",
-  "one-time-watch": "onetime",
-  "skip":           "skip",
-};
+/** Masthead tally ladder — the four verdict tiers in display order. Each carries
+ *  the CSS dot-color key (template keys the dot colour off it) and the shown label.
+ *  The cover tally lists only tiers PRESENT in the deck (zero-count omitted). */
+const TALLY_LADDER: { kind: SatVerdictCard["verdictKind"]; key: SatVerdictTally["key"]; label: string }[] = [
+  { kind: "must-watch",     key: "mustwatch", label: "MUST WATCH" },
+  { kind: "worth-a-try",    key: "try",       label: "WORTH A TRY" },
+  { kind: "one-time-watch", key: "onetime",   label: "ONE-TIME WATCH" },
+  { kind: "skip",           key: "skip",      label: "SKIP" },
+];
 
 /**
  * Split N films into poster-wall rows for the 4:5 Verdict Grid cover.
@@ -225,22 +227,28 @@ export async function renderSatVerdict(
 
   await cleanOldRenders(outputDir, baseCtx.date);
 
-  // 1. Cover slide — the Verdict Grid: a poster wall of EVERY verdict film, each
-  //    tile framed in its verdict color (SKIP vermillion, ONE-TIME WATCH brass,
-  //    WORTH A TRY cream, MUST WATCH green). Prominence order → biggest film
-  //    leads the wall. `alsoSkipping` is no longer surfaced on the cover (the grid
-  //    shows all rulings); it stays a param for caller compatibility.
+  // 1. Cover slide — a full-bleed poster mosaic (neutral, borderless tiles) under
+  //    an ink-veil masthead (eyebrow / WATCH OR SKIP / sub-line / date / tally) with
+  //    a raised bottom swipe cue. Prominence order → biggest film leads the wall.
+  //    The verdict is teased as a per-tier tally, never shown per-tile. `alsoSkipping`
+  //    stays a param for caller compatibility.
   const coverPath = `${outputDir}/sat-verdict-${baseCtx.date}-cover.png`;
   const coverTiles: SatVerdictCoverTile[] = cards.map(c => ({
     ...(c.posterUrl ? { posterUrl: c.posterUrl } : {}),
     fallbackColor: c.fallbackColor,
     filmTitle: c.filmTitle,
     language: c.language,
-    verdictClass: VERDICT_BORDER_CLASS[c.verdictKind],
   }));
+  // Tally: count each tier over the deck, keep only present tiers, ladder order.
+  const tally: SatVerdictTally[] = TALLY_LADDER
+    .map(t => ({ key: t.key, label: t.label, count: cards.filter(c => c.verdictKind === t.kind).length }))
+    .filter(t => t.count > 0);
   const coverCtx: SatVerdictCoverContext = {
     ...baseCtx,
     gridRows: distributeGridRows(coverTiles),
+    tally,
+    filmCount: cards.length,
+    coverDate: format(today, "MMM d '·' yyyy").toUpperCase(),
   };
   await renderToPNG({
     templateName: "sat-verdict-cover",

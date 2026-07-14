@@ -31,23 +31,22 @@
     inset: 0;
     display: flex;
     flex-direction: column;
+    gap: 3px;                 /* 3px ink seam between rows */
+    background: var(--ink);   /* shows through the gaps */
     z-index: 1;
   }
-  .row { display: flex; flex: 1 1 0; min-height: 0; }
+  .row { display: flex; flex: 1 1 0; min-height: 0; gap: 3px; }  /* 3px ink seam between tiles */
+  /* Tiles are NEUTRAL + borderless — the verdict is no longer surfaced per-tile
+     (it moved to the masthead tally). The 3px flex `gap` above lets the grid's ink
+     background show between tiles, so the mosaic reads as a wall of separate stills
+     rather than one merged image. */
   .tile {
     position: relative;
     flex: 1 1 0;
     min-width: 0;
     overflow: hidden;
-    border: 7px solid var(--cream);
     background-color: var(--ink);
   }
-  /* Verdict-color borders (mapped from each film's actual verdict).
-     Thick (7px) + bright so each ruling reads at a glance. */
-  .tile.skip      { border-color: var(--vermillion); }  /* SKIP */
-  .tile.mustwatch { border-color: var(--bottle);     }  /* MUST WATCH (green) */
-  .tile.onetime   { border-color: var(--brass);      }  /* ONE-TIME WATCH — brass border */
-  .tile.try       { border-color: var(--cream);      }  /* WORTH A TRY — light border, reads on the scrim */
 
   .tile-img {
     position: absolute;
@@ -86,163 +85,131 @@
     line-height: 1.02;
   }
 
-  /* ── Top scrim: LIGHT + short so the two top posters stay recognizable.
-     Legibility for the title/legend comes from text-shadow + the chips' own
-     pill backgrounds, not from darkening the whole top row. ── */
-  .top-scrim {
+  /* ── TOP INK-VEIL MASTHEAD — gradient family matching the card veils. Strong
+     over the content, fading to 0 by ~44% of canvas so it never reads as a hard
+     band. Sits above the mosaic (z5); content at z10. The synthetic bright tile
+     is top-right, directly under the veil's right half — the legibility stress
+     case the stops are tuned against. ── */
+  .masthead-veil {
     position: absolute;
     top: 0; left: 0; right: 0;
-    height: 300px;
+    height: 600px;
     z-index: 5;
-    background: linear-gradient(to bottom,
-      rgba(20, 16, 14, 0.72) 0%,
-      rgba(20, 16, 14, 0.40) 48%,
+    background: linear-gradient(180deg,
+      rgba(20, 16, 14, 0.94) 0%,
+      rgba(20, 16, 14, 0.90) 38%,
+      rgba(20, 16, 14, 0.66) 56%,
       rgba(20, 16, 14, 0.0) 100%);
     pointer-events: none;
   }
-
-  /* Tiny brand mark (masthead shrunk to a mark) — top-left */
-  .mark {
+  .masthead {
     position: absolute;
-    top: 46px;
-    left: 56px;
+    top: 56px; left: 56px; right: 56px;
     z-index: 10;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 15px;
-    font-weight: 700;
-    letter-spacing: 0.22em;
-    color: var(--brass);
-    text-shadow: 0 2px 6px rgba(20, 16, 14, 0.9);
+    text-align: left;
   }
-
-  /* Hero title — bold + prominent, cleared left of the top-right poster's key art */
-  .title {
-    position: absolute;
-    top: 34px;
-    right: 300px;
-    z-index: 10;
-    width: 640px;
-    text-align: right;
-  }
-  .title .kicker {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 15px;
+  .masthead .eyebrow {
+    font-family: 'Inter', sans-serif;
+    font-size: 19px;
     font-weight: 700;
-    letter-spacing: 0.34em;
-    color: var(--brass);
+    letter-spacing: 0.30em;
     text-transform: uppercase;
-    margin-bottom: 14px;
-    text-shadow: 0 2px 6px rgba(20, 16, 14, 0.9);
+    color: var(--brass);
+    margin-bottom: 20px;
   }
-  .title .line {
+  .masthead .headline {
     font-family: 'Playfair Display', serif;
+    font-size: 112px;
     font-weight: 900;
-    font-size: 58px;
-    line-height: 0.94;
+    line-height: 0.92;
     letter-spacing: 1px;
-    color: var(--cream);
     text-transform: uppercase;
-    text-shadow:
-      0 2px 5px rgba(20, 16, 14, 0.98),
-      0 4px 14px rgba(20, 16, 14, 0.95),
-      0 10px 34px rgba(20, 16, 14, 0.85);
+    color: var(--cream);
+    white-space: nowrap;
+    text-shadow: 0 4px 18px rgba(20, 16, 14, 0.55);
   }
-  .title .rule {
-    margin-top: 18px;
-    margin-left: auto;
-    width: 200px;
-    height: 3px;
-    background: var(--brass);
+  .masthead .subline {
+    font-family: 'Inter', sans-serif;
+    font-size: 25px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--cream);
+    margin-top: 22px;
   }
-
-  /* ── Verdict legend (key) — decodes the poster borders ── */
-  .legend {
-    position: absolute;
-    top: 372px;
-    left: 56px;
-    right: 56px;
-    z-index: 10;
+  .masthead .date {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--brass);
+    margin-top: 16px;
+  }
+  /* Tally strip — INSIDE the veil, never bare on tiles. Dot + count + label per
+     tier present in the deck, ladder order (renderer omits zero-count tiers). */
+  .masthead .tally {
     display: flex;
     flex-wrap: wrap;
-    gap: 12px;
     align-items: center;
+    gap: 8px 14px;
+    margin-top: 26px;
   }
-  .chip {
+  .masthead .tally-item {
     display: inline-flex;
     align-items: center;
     gap: 9px;
-    padding: 8px 14px;
-    background: rgba(20, 16, 14, 0.62);
-    border: 1px solid rgba(244, 236, 220, 0.16);
-    border-radius: 999px;
-  }
-  .chip .dot {
-    width: 13px;
-    height: 13px;
-    border-radius: 50%;
-    flex: 0 0 auto;
-  }
-  .chip .dot.skip      { background: var(--vermillion); }
-  .chip .dot.mustwatch { background: var(--bottle); }
-  .chip .dot.onetime   { background: var(--brass); }
-  .chip .dot.try       { background: var(--cream); }
-  .chip .lbl {
     font-family: 'Inter', sans-serif;
-    font-size: 14px;
+    font-size: 17px;
     font-weight: 700;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.10em;
     text-transform: uppercase;
     color: var(--cream);
   }
+  .masthead .tally .dot {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+  }
+  /* Dot COLOURS keyed by tier class — presentation stays in the template. */
+  .masthead .tally .dot.mustwatch { background: var(--bottle); box-shadow: 0 0 0 2px var(--brass); }  /* brass ring — the gild extended to the dot, separating it from the sage WaT dot at feed scale (RD) */
+  .masthead .tally .dot.try       { background: #4a6b58;           }  /* Sage — 6th token, pending registration */
+  .masthead .tally .dot.onetime   { background: var(--brass);      }
+  .masthead .tally .dot.skip      { background: var(--vermillion); }
+  .masthead .tally-sep {
+    font-family: 'Inter', sans-serif;
+    font-weight: 700;
+    color: rgba(244, 236, 220, 0.38);
+  }
 
-  /* ── Bottom swipe cue ── */
-  /* Scrim band: the cue now sits ~25% up from the bottom (clear space beneath it
-     so it can't be clipped/covered in-feed), so the scrim is a soft horizontal
-     band centered on the cue's new position rather than a bottom-edge gradient.
-     Fades at both edges (no hard line) and, with the cue's own text-shadow, keeps
-     "SWIPE FOR MORE" legible over ANY bottom-row posters. */
-  .bottom-scrim {
+  /* ── BOTTOM SWIPE CUE — raised into the safe zone (text bottom edge ~96px above
+     the canvas bottom) so IG's bottom-edge UI can't cover it, while the ink veil
+     still ANCHORS to the canvas edge (0 at its top → .82 at the bottom). The veil
+     is sized (440px) so the raised text sits on ≥.55 ink — the text lifts, the
+     veil doesn't float. Right-anchored; right inset = the masthead's left padding. ── */
+  .swipe-veil {
     position: absolute;
-    bottom: 288px; left: 0; right: 0;
-    height: 150px;
+    bottom: 0; left: 0; right: 0;
+    height: 440px;
     z-index: 5;
-    background: linear-gradient(to top,
+    background: linear-gradient(180deg,
       rgba(20, 16, 14, 0.0) 0%,
-      rgba(20, 16, 14, 0.68) 34%,
-      rgba(20, 16, 14, 0.68) 66%,
-      rgba(20, 16, 14, 0.0) 100%);
+      rgba(20, 16, 14, 0.82) 100%);
     pointer-events: none;
   }
   .swipe {
     position: absolute;
-    bottom: 338px;
-    left: 0; right: 0;
+    bottom: 96px;
+    right: 56px;
     z-index: 10;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
-  }
-  .swipe .txt {
     font-family: 'Inter', sans-serif;
-    font-size: 24px;
+    font-size: 27px;
     font-weight: 800;
-    letter-spacing: 0.28em;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--cream);
-    text-shadow: 0 2px 8px rgba(20, 16, 14, 0.95);
+    text-shadow: 0 2px 10px rgba(20, 16, 14, 0.9);
   }
-  .swipe .chev {
-    font-family: 'Inter', sans-serif;
-    font-size: 30px;
-    font-weight: 900;
-    line-height: 1;
-    color: var(--brass);
-    text-shadow: 0 2px 8px rgba(20, 16, 14, 0.95);
-  }
-  .swipe .chev .c1 { opacity: 0.45; }
-  .swipe .chev .c2 { opacity: 0.72; }
-  .swipe .chev .c3 { opacity: 1.0; }
+  .swipe .arrow { color: var(--brass); font-weight: 900; }
 </style>
 </head>
 <body>
@@ -253,7 +220,7 @@
     {% for row in gridRows %}
     <div class="row">
       {% for tile in row %}
-      <div class="tile {{ tile.verdictClass }}" style="background-color: {{ tile.fallbackColor }};">
+      <div class="tile" style="background-color: {{ tile.fallbackColor }};">
         {% if tile.posterUrl %}
           <img class="tile-img" src="{{ tile.posterUrl }}" alt="" onerror="this.style.display='none'" />
         {% endif %}
@@ -267,35 +234,24 @@
     {% endfor %}
   </div>
 
-  <!-- TOP SCRIM -->
-  <div class="top-scrim"></div>
-
-  <!-- TINY BRAND MARK -->
-  <div class="mark">&#9733; TBSI</div>
-
-  <!-- HERO TITLE -->
-  <div class="title">
-    <div class="kicker">&#9733; THE WEEK&#8217;S RULING</div>
-    <div class="line">Saturday</div>
-    <div class="line">Theatrical</div>
-    <div class="line">Verdict</div>
-    <div class="rule"></div>
+  <!-- TOP INK-VEIL MASTHEAD -->
+  <div class="masthead-veil"></div>
+  <div class="masthead">
+    <div class="eyebrow">&#9733; THE BIG SCREEN INDEX</div>
+    <div class="headline">WATCH OR SKIP</div>
+    <div class="subline">THIS WEEK IN THEATERS &mdash; OUR REVIEW</div>
+    <div class="date">{{ coverDate }}</div>
+    <div class="tally">
+      {% for t in tally %}
+      <span class="tally-item"><span class="dot {{ t.key }}"></span>{{ t.count }} {{ t.label }}</span>
+      {% if not loop.last %}<span class="tally-sep">&middot;</span>{% endif %}
+      {% endfor %}
+    </div>
   </div>
 
-  <!-- VERDICT LEGEND -->
-  <div class="legend">
-    <span class="chip"><span class="dot mustwatch"></span><span class="lbl">Must Watch</span></span>
-    <span class="chip"><span class="dot try"></span><span class="lbl">Worth a Try</span></span>
-    <span class="chip"><span class="dot onetime"></span><span class="lbl">One-Time Watch</span></span>
-    <span class="chip"><span class="dot skip"></span><span class="lbl">Skip</span></span>
-  </div>
-
-  <!-- BOTTOM SWIPE CUE -->
-  <div class="bottom-scrim"></div>
-  <div class="swipe">
-    <span class="txt">Swipe for More</span>
-    <span class="chev"><span class="c1">&#8250;</span><span class="c2">&#8250;</span><span class="c3">&#8594;</span></span>
-  </div>
+  <!-- BOTTOM SWIPE CUE (raised into the safe zone) -->
+  <div class="swipe-veil"></div>
+  <div class="swipe">{{ filmCount }} FILMS JUDGED &middot; SWIPE <span class="arrow">&#10230;</span></div>
 
 </div>
 </body>

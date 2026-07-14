@@ -108,27 +108,41 @@ export interface SatVerdictCard extends CardEnrichment {
   cast: string[];
 }
 
-/** One poster tile on the Sat Verdict cover's Verdict Grid poster wall. */
+/** One poster tile on the Sat Verdict cover mosaic. Neutral + borderless — the
+ *  verdict is no longer surfaced per-tile (moved to the masthead tally). */
 export interface SatVerdictCoverTile {
   posterUrl?: string;
   fallbackColor: string;
   filmTitle: string;
   language: string;
-  /** Border-color class derived from the film's verdict:
-   *  "skip" (vermillion) | "onetime" (one-time-watch→brass) | "try" (worth-a-try→cream) | "mustwatch" (green) */
-  verdictClass: "skip" | "onetime" | "try" | "mustwatch";
+}
+
+/** One tier row in the masthead tally. The dot COLOR is chosen in the template
+ *  CSS keyed off `key` (presentation stays in the template — same precedent as
+ *  the buzz display map). Zero-count tiers are omitted upstream, so count ≥ 1. */
+export interface SatVerdictTally {
+  key: "mustwatch" | "try" | "onetime" | "skip";
+  label: string;    // e.g. "MUST WATCH"
+  count: number;    // films in the deck on this tier (≥ 1)
 }
 
 /**
- * Full context for the Sat Verdict cover slide (1080x1350) — the Verdict Grid:
- * a poster wall of every verdict film, each tile framed in its verdict color,
- * under a fixed title + verdict legend. Chrome (issue №, VOL, date range,
- * masthead, TURN) is stripped; the cover is pure ruling-at-a-glance.
+ * Full context for the Sat Verdict cover slide (1080x1350) — a full-bleed poster
+ * mosaic under an ink-veil masthead (eyebrow / WATCH OR SKIP / sub-line / date /
+ * tally) with a raised bottom swipe cue. Per-tile verdict borders, the legend, the
+ * old title block, and the issue № are gone; the cover teases the tally, not the
+ * per-film answer.
  */
 export interface SatVerdictCoverContext extends RenderBase {
   pillarLabel: "SAT VERDICT";
-  /** Films split into poster-wall rows by the renderer (e.g. 2/3/2 for 7). */
+  /** Films split into mosaic rows by the renderer (e.g. 2/3/2 for 7). */
   gridRows: SatVerdictCoverTile[][];
+  /** Per-tier counts (present tiers only, ladder order) for the masthead tally. */
+  tally: SatVerdictTally[];
+  /** N — number of films judged (= draft.verdicts.length), for the swipe cue. */
+  filmCount: number;
+  /** Run date formatted "JUL 11 · 2026" (no zero-padded day). */
+  coverDate: string;
 }
 
 /** Full context for a Sat Verdict body card slide (1080x1080) */
