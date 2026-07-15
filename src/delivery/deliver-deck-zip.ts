@@ -8,13 +8,13 @@
 
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { format } from "date-fns";
 import sharp from "sharp";
 import AdmZip from "adm-zip";
 import { ofetch } from "ofetch";
 import { uploadBufferToR2 } from "./r2-upload.js";
 import { config } from "../shared/config.js";
 import { log } from "../shared/logger.js";
+import { editorialTodayStamp } from "../shared/editorial-clock.js";
 
 // IG portrait, the size the deck ships at. Sources are exact multiples (cover 2x,
 // cards 3x) so a fill-resize neither crops nor distorts — it only downscales.
@@ -154,7 +154,9 @@ if (isMainModule) {
   const wantSlack = rawArgs.includes("--slack");
   const [dirArg, dateArg, captionFile] = rawArgs.filter(a => a !== "--slack");
   const outputDir = dirArg ?? "output/posts";
-  const date = dateArg ?? format(new Date(), "yyyy-MM-dd");
+  // IST editorial stamp (not local format) so a standalone re-deliver after local
+  // midnight but before IST rollover no longer hunts the previous day's deck dir.
+  const date = dateArg ?? editorialTodayStamp();
   const keyPrefix = process.env.DECK_KEY_PREFIX;   // verify sets deliverables/_test
 
   buildAndUploadDeckZip({ outputDir, date, ...(captionFile ? { captionFile } : {}), ...(keyPrefix ? { keyPrefix } : {}) })

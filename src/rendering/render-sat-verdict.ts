@@ -3,7 +3,7 @@
 
 import { promises as fs } from "node:fs";
 import { renderToPNG, closeBrowser } from "./renderer.js";
-import { format } from "date-fns";
+import { editorialTodayStamp, editorialDisplayDate, editorialCoverDate } from "../shared/editorial-clock.js";
 import { log } from "../shared/logger.js";
 import type { SaturdayVerdictDraft } from "../delivery/notion.js";
 import type { Release, Verdict } from "../shared/types.js";
@@ -216,12 +216,14 @@ export async function renderSatVerdict(
 
   log.info(`  Cards: ${cards.length}  |  Hero: ${hero.filmTitle} (${hero.verdict})`);
 
-  const today = new Date();
+  // One IST-anchored instant drives every date string below (see editorial-clock:
+  // THE TRAP) — never date-fns format() on a Date, which renders in local time.
+  const now = new Date();
   const baseCtx = {
     vol: "01",
     issue: String(issueNumber).padStart(3, "0"),
-    date: format(today, "yyyy-MM-dd"),
-    displayDate: format(today, "dd·MM·yy"),
+    date: editorialTodayStamp(now),
+    displayDate: editorialDisplayDate(now),
     pillarLabel: "SAT VERDICT" as const,
   };
 
@@ -248,7 +250,7 @@ export async function renderSatVerdict(
     gridRows: distributeGridRows(coverTiles),
     tally,
     filmCount: cards.length,
-    coverDate: format(today, "MMM d '·' yyyy").toUpperCase(),
+    coverDate: editorialCoverDate(now),
   };
   await renderToPNG({
     templateName: "sat-verdict-cover",

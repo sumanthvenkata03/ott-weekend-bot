@@ -9,6 +9,7 @@
 // Posts BEFORE the launch anchor → "PREVIEW".
 
 import { log } from "./logger.js";
+import { editorialDateUTC } from "./editorial-clock.js";
 
 const LAUNCH = new Date("2026-06-16T00:00:00Z");
 
@@ -28,7 +29,9 @@ export function getIssueNumber(postDate: Date): string {
 }
 
 export function getIssueNumberForToday(): string {
-  return getIssueNumber(new Date());
+  // Anchor to the IST calendar date (see editorial-clock.ts) — NOT the raw UTC
+  // instant, which lags IST by up to 5:30 and would mis-number near IST midnight.
+  return getIssueNumber(editorialDateUTC());
 }
 
 // Cross-platform main-module check (matches the pattern used in

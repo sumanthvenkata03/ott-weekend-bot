@@ -1,5 +1,4 @@
 // src/jobs/sunday-spotlight.ts
-import { addDays, format, startOfDay } from "date-fns";
 import { ingestReleases } from "../ingestion/releases/index.js";
 import { pickSpotlight } from "../content/weekend/spotlight-picker.js";
 import { generateSundaySpotlight } from "../content/weekend/sunday-spotlight.js";
@@ -12,6 +11,7 @@ import { renderSunSpotlight } from "../rendering/render-sun-spotlight.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
 import { getIssueNumberForToday } from "../shared/issue-number.js";
+import { editorialDateUTC, editorialTodayStamp, utcStamp, warnIfNotPostingDay } from "../shared/editorial-clock.js";
 import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
 
 /**
@@ -19,18 +19,22 @@ import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFl
  * If run any other day, targets the most recent Fri-Sun.
  */
 function pickWeekend(now: Date): { startDate: string; endDate: string } {
-  const today = startOfDay(now);
-  const dow = today.getDay();   // 0=Sun
+  // Anchor to the IST calendar date; find the target Sunday via UTC arithmetic
+  // (setUTCDate) — NOT date-fns startOfDay/getDay/addDays (local time), which
+  // would target the wrong weekend near IST midnight on a UTC/EDT runner.
+  const anchor = editorialDateUTC(now);
+  const dow = anchor.getUTCDay();   // 0=Sun (IST)
 
-  let sunday: Date;
-  if (dow === 0) sunday = today;                // It's Sunday — target today
-  else if (dow >= 1 && dow <= 4) sunday = addDays(today, -dow);   // Mon-Thu → most recent Sun
-  else sunday = addDays(today, dow === 5 ? 2 : 1);                // Fri/Sat → upcoming Sun
+  const sunday = new Date(anchor);
+  if (dow === 0) { /* It's Sunday — target today */ }
+  else if (dow >= 1 && dow <= 4) sunday.setUTCDate(anchor.getUTCDate() - dow);          // Mon-Thu → most recent Sun
+  else sunday.setUTCDate(anchor.getUTCDate() + (dow === 5 ? 2 : 1));                     // Fri/Sat → upcoming Sun
 
-  const friday = addDays(sunday, -2);
+  const friday = new Date(sunday);
+  friday.setUTCDate(sunday.getUTCDate() - 2);
   return {
-    startDate: format(friday, "yyyy-MM-dd"),
-    endDate: format(sunday, "yyyy-MM-dd"),
+    startDate: utcStamp(friday),
+    endDate: utcStamp(sunday),
   };
 }
 
@@ -38,6 +42,8 @@ async function main() {
   log.info("🎬 Sunday Spotlight job — starting");
 
   purgeExpired();
+
+  warnIfNotPostingDay(0, "Sun Spotlight"); // 0 = Sunday (IST)
 
   const { startDate, endDate } = pickWeekend(new Date());
   log.info(`Target weekend: ${startDate} → ${endDate}`);
@@ -62,9 +68,12 @@ async function main() {
   log.info(`Caption (${draft.caption.length} chars): ${draft.caption.slice(0, 100)}...`);
   log.info(`Reel hook: "${draft.reelScript.hook}"`);
 
-  const today = new Date();
+  // The editorial anchor (00:00Z of the IST date) drives BOTH the R2/dateStr
+  // stamp here and the render's issueDate/dateStr — passed through so the render
+  // reads it with getUTC* accessors (see render-sun-spotlight), never locally.
+  const editorialToday = editorialDateUTC();
   const issueNumber = getIssueNumberForToday();
-  const dateStr = format(today, "yyyy-MM-dd");
+  const dateStr = editorialTodayStamp();
 
   // Landing verifier: the spotlight pick is chosen ONLY from the weekend-window
   // pool (no out-of-window catalog reach), so this is a HARD window — a pick
@@ -78,7 +87,7 @@ async function main() {
   assertOrFlag(manifest);
 
   log.info(`Rendering PNGs (Issue ${issueNumber})...`);
-  const renderResult = await renderSunSpotlight(draft, today, issueNumber, "output/posts");
+  const renderResult = await renderSunSpotlight(draft, editorialToday, issueNumber, "output/posts");
 
   log.info("Uploading to R2...");
   const [coverFeed, coverReel, card1, card2] = await uploadPngsToR2([

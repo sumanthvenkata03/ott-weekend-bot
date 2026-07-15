@@ -3,7 +3,7 @@
 
 import { promises as fs } from "node:fs";
 import { renderToPNG, closeBrowser } from "./renderer.js";
-import { format } from "date-fns";
+import { editorialTodayStamp, editorialDisplayDate } from "../shared/editorial-clock.js";
 import { log } from "../shared/logger.js";
 import type { MovementDraft } from "../delivery/notion.js";
 import type { Release } from "../shared/types.js";
@@ -94,12 +94,13 @@ export async function renderMonMovement(
     `  Arrivals: ${draft.newArrivals.length} | Gems: ${draft.hiddenGems.length} | Body slides: ${bodySlides.length}`
   );
 
-  const today = new Date();
+  // IST-anchored stamps (see editorial-clock: THE TRAP) — never date-fns format().
+  const now = new Date();
   const baseCtx = {
     vol: "01",
     issue: String(issueNumber).padStart(3, "0"),
-    date: format(today, "yyyy-MM-dd"),
-    displayDate: format(today, "dd·MM·yy"),
+    date: editorialTodayStamp(now),
+    displayDate: editorialDisplayDate(now),
     pillarLabel: "MON MOVEMENT" as const,
   };
 

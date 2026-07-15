@@ -11,14 +11,16 @@
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { log } from "../../shared/logger.js";
+import { editorialTodayStamp } from "../../shared/editorial-clock.js";
 import type { RawResearch, GroundedVerdict, Confidence } from "./verdict-research.js";
 
 const ARCHIVE_ROOT = join("data", "research-archive");
 const RAW_DIR = join(ARCHIVE_ROOT, "raw");
 
-/** YYYY-MM-DD (UTC) for dated filenames. */
+/** YYYY-MM-DD of the IST editorial date for dated filenames — was UTC-only, so a
+ *  run in the 18:30–24:00Z window used to file under the previous IST day. */
 function todayStamp(): string {
-  return new Date().toISOString().slice(0, 10);
+  return editorialTodayStamp();
 }
 
 /** Make a cache key safe for a Windows filename — the "title|date" keys contain

@@ -6,7 +6,7 @@
 //   - card-case-against (1080x1080)
 
 import { renderToPNG, closeBrowser } from "./renderer.js";
-import { format } from "date-fns";
+import { utcStamp } from "../shared/editorial-clock.js";
 import { log } from "../shared/logger.js";
 import type { SundaySpotlightDraft } from "../delivery/notion.js";
 import type { SunSpotlightRenderContext } from "./types.js";
@@ -45,10 +45,13 @@ function platformLogoStem(platform: string): string {
     .replace(/jio-?hotstar/g, "jiohotstar");
 }
 
+// `d` is the editorial anchor (00:00Z of the IST date), passed in by the job.
+// Read it with getUTC* accessors ONLY — local getters (getDate/getMonth/…) would
+// re-introduce the timezone drift the editorial clock exists to kill (THE TRAP).
 function formatIssueDate(d: Date): string {
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yy = String(d.getFullYear() % 100).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const yy = String(d.getUTCFullYear() % 100).padStart(2, "0");
   return `${dd}·${mm}·${yy}`;
 }
 
@@ -114,7 +117,9 @@ export async function renderSunSpotlight(
   log.info(`Rendering Sun Spotlight — Issue №${issueNumber}`);
 
   const ctx = buildContext(draft, date, issueNumber);
-  const dateStr = format(date, "yyyy-MM-dd");
+  // `date` is the editorial anchor (00:00Z of the IST date) — stamp it from its
+  // UTC fields, never date-fns format() (local time). See editorial-clock.
+  const dateStr = utcStamp(date);
   const data = ctx as unknown as Record<string, unknown>;
 
   const feedCoverPath = `${outputDir}/sun-spotlight-${dateStr}-cover-feed.png`;
@@ -197,9 +202,10 @@ if (isMainModule) {
     caseAgainstSkepticism: "If you skip a film because the actors don't share your language, you're letting Hindi cinema's marketing budget pick what counts as Indian. Manjummel Boys runs 135 minutes with subtitles you'll forget after twenty.",
   };
 
-  // Fixed date — issueDate "31·05·26" per spec. Using year/month/day form
-  // to avoid the new Date("2026-05-31") UTC-vs-local timezone quirk.
-  const fixedDate = new Date(2026, 4, 31);
+  // Fixed sample date — issueDate "31·05·26" per spec. UTC-anchored (Date.UTC)
+  // so the render's getUTC*/utcStamp accessors read May 31 regardless of the
+  // machine's local zone (the render now consumes the editorial anchor by UTC).
+  const fixedDate = new Date(Date.UTC(2026, 4, 31));
 
   try {
     const result = await renderSunSpotlight(sampleDraft, fixedDate, 44);

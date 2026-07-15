@@ -1,5 +1,4 @@
 // src/jobs/saturday-verdict.ts
-import { addDays, format, startOfDay, previousFriday, isFriday } from "date-fns";
 import { ingestReleases } from "../ingestion/releases/index.js";
 import type { Release } from "../shared/types.js";
 import type { SaturdayVerdictDraft, VerdictSlide } from "../delivery/notion.js";
@@ -28,6 +27,7 @@ import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
 import { buildAndUploadDeckZip, writeCaptionFile } from "../delivery/deliver-deck-zip.js";
 import { getIssueNumberForToday } from "../shared/issue-number.js";
+import { editorialDateUTC, editorialTodayStamp, utcStamp, warnIfNotPostingDay } from "../shared/editorial-clock.js";
 import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
 import { selectVerdictCards, type VerdictEntry } from "../content/weekend/verdict-select.js";
 import { archiveRawResearch, appendVerdictLog } from "../content/weekend/research-archive.js";
@@ -53,19 +53,25 @@ const RESEARCH_CONCURRENCY = 3;
  * Wednesday that just passed through today (Friday).
  */
 export function pickVerdictWindow(now: Date): { startDate: string; endDate: string } {
-  const today = startOfDay(now);
-  const dow = today.getDay();   // 0=Sun, 5=Fri, 6=Sat
+  // Anchor to the IST calendar date and do the Friday math in UTC (setUTCDate) —
+  // NOT date-fns startOfDay/getDay/addDays, which run in local time and would
+  // pick the wrong Friday near IST midnight on a UTC/EDT runner.
+  const anchor = editorialDateUTC(now);
+  const dow = anchor.getUTCDay();   // 0=Sun, 5=Fri, 6=Sat (IST)
 
-  let friday: Date;
-  if (dow === 5) friday = today;                              // It's Friday
-  else if (dow === 6) friday = addDays(today, -1);            // Saturday → yesterday
-  else if (dow === 0) friday = addDays(today, -2);            // Sunday → two days ago
-  else friday = isFriday(today) ? today : previousFriday(addDays(today, 7));  // Mon-Thu → upcoming Fri
+  let deltaToFriday: number;
+  if (dow === 5) deltaToFriday = 0;         // It's Friday
+  else if (dow === 6) deltaToFriday = -1;   // Saturday → yesterday
+  else if (dow === 0) deltaToFriday = -2;   // Sunday → two days ago
+  else deltaToFriday = 5 - dow;             // Mon-Thu → upcoming Fri
 
-  const wednesday = addDays(friday, -2);   // open the window on Wednesday
+  const friday = new Date(anchor);
+  friday.setUTCDate(anchor.getUTCDate() + deltaToFriday);
+  const wednesday = new Date(friday);
+  wednesday.setUTCDate(friday.getUTCDate() - 2);   // open the window on Wednesday
   return {
-    startDate: format(wednesday, "yyyy-MM-dd"),
-    endDate: format(friday, "yyyy-MM-dd"),   // close on Friday itself (the anchor)
+    startDate: utcStamp(wednesday),
+    endDate: utcStamp(friday),   // close on Friday itself (the anchor)
   };
 }
 
@@ -133,6 +139,8 @@ async function main(deliver = true) {
   }
 
   purgeExpired();
+
+  warnIfNotPostingDay(6, "Sat Verdict"); // 6 = Saturday (IST)
 
   const { startDate, endDate } = pickVerdictWindow(new Date());
   log.info(`Target window (Wed → Fri): ${startDate} → ${endDate}`);
@@ -274,9 +282,8 @@ async function main(deliver = true) {
   }, {});
   log.info(`Verdict tally (selected): ${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join("  ")}`);
 
-  const today = new Date();
   const issueNumber = getIssueNumberForToday();
-  const dateStr = format(today, "yyyy-MM-dd");
+  const dateStr = editorialTodayStamp();
 
   // Landing verifier: every carded verdict film must show a release date inside
   // the Wed→Fri verdict window. Flags drift loudly (log + Slack); the carded set

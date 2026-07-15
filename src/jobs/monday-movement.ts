@@ -1,5 +1,4 @@
 // src/jobs/monday-movement.ts
-import { addDays, format, startOfDay } from "date-fns";
 import { ingestReleases } from "../ingestion/releases/index.js";
 import { pickHiddenGems } from "../content/weekend/spotlight-picker.js";
 import { generateMondayMovement, type DeckFacts } from "../content/weekend/monday-movement.js";
@@ -12,6 +11,7 @@ import { renderMonMovement } from "../rendering/render-mon-movement.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
 import { getIssueNumberForToday } from "../shared/issue-number.js";
+import { editorialDateUTC, editorialTodayStamp, utcStamp, warnIfNotPostingDay } from "../shared/editorial-clock.js";
 import { excludedKeysFor, recordFeatured, filmKey } from "../shared/featured-ledger.js";
 import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
 import type { Release } from "../shared/types.js";
@@ -43,17 +43,24 @@ async function main() {
 
   purgeExpired();
 
+  warnIfNotPostingDay(1, "Mon Movement"); // 1 = Monday (IST)
+
   // Issue number is a pure function of today's date — compute once and reuse for
   // the ledger's same-issue self-exclusion AND for rendering/Slack below.
   const issueNumber = getIssueNumberForToday();
 
-  const today = startOfDay(new Date());
-  const endStr = format(today, "yyyy-MM-dd");
+  // Anchor to the IST calendar date; the 90-day pool edge is UTC arithmetic
+  // (setUTCDate) on that anchor, stamped with utcStamp — NOT date-fns
+  // startOfDay/addDays/format (local time), which would drift near IST midnight.
+  const anchor = editorialDateUTC();
+  const endStr = utcStamp(anchor);
 
   // Mon Movement is the CATCH-UP pillar: no this-week arrivals anymore (Wed Drop
   // owns ALL new OTT). Monday owns the catalog — pull a wide 90-day pool and
   // surface the hidden gems worth pulling up now.
-  const gemPoolStart = format(addDays(today, -90), "yyyy-MM-dd");
+  const gemPoolStartDate = new Date(anchor);
+  gemPoolStartDate.setUTCDate(anchor.getUTCDate() - 90);
+  const gemPoolStart = utcStamp(gemPoolStartDate);
   log.info(`Fetching gem pool: ${gemPoolStart} → ${endStr}`);
   const gemPool = await ingestReleases(gemPoolStart, endStr);
   log.info(`Gem pool: ${gemPool.length} candidates`);
@@ -125,7 +132,7 @@ async function main() {
   log.info(`Caption (${draft.caption.length} chars): ${draft.caption.slice(0, 100)}...`);
 
   // Render PNGs
-  const dateStr = format(new Date(), "yyyy-MM-dd");
+  const dateStr = editorialTodayStamp();
   log.info(`Rendering PNGs (Issue ${issueNumber})...`);
   const renderResult = await renderMonMovement(draft, issueNumber, "output/posts");
 

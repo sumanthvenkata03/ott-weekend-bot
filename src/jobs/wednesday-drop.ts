@@ -1,5 +1,4 @@
 // src/jobs/wednesday-drop.ts
-import { addDays, endOfWeek, format, startOfDay, startOfWeek } from "date-fns";
 import { getCandidates } from "../discovery/candidates.js";
 import type { Release, Platform } from "../shared/types.js";
 import { generateWednesdayDrop, MAX_WED_DROP_FILMS, parseLangOverrides, applyLangOverrides } from "../content/weekend/wednesday-drop.js";
@@ -12,6 +11,7 @@ import { renderWedDrop } from "../rendering/render-wed-drop.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
 import { getIssueNumberForToday } from "../shared/issue-number.js";
+import { editorialDateUTC, editorialTodayStamp, utcStamp, warnIfNotPostingDay } from "../shared/editorial-clock.js";
 import { EDITION_META, type WedDropEdition } from "../shared/wed-drop-edition.js";
 import { excludedKeysFor, recordFeatured, filmKey, type PillarKey } from "../shared/featured-ledger.js";
 import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
@@ -157,7 +157,7 @@ async function produceEdition(
   log.info(`  LLM picked: ${draft.releases.map(r => `${r.title} (${r.language})`).join(", ")}`);
 
   // Render PNGs (edition-scoped filenames: wed-drop-{slug}-{date}-…).
-  const dateStr = format(new Date(), "yyyy-MM-dd");
+  const dateStr = editorialTodayStamp();
 
   // Landing verifier: every carded film must show the right kind of date inside
   // this edition's window — OTT date for "Now Streaming", theatrical date for
@@ -287,22 +287,30 @@ async function main() {
   // Gate resume token (binds approval to the exact reviewed list).
   const approveHash = parseApproveArg(process.argv.slice(2));
 
-  // Two deliberately different windows, both anchored on the CURRENT calendar
-  // week (Mon..Sun, weekStartsOn: 1):
+  warnIfNotPostingDay(3, "Wed Drop"); // 3 = Wednesday (IST)
+
+  // Two deliberately different windows, both anchored on the CURRENT IST calendar
+  // week (Mon..Sun). Derived by UTC arithmetic on the editorial anchor (00:00Z of
+  // the IST date) and stamped with utcStamp — NEVER date-fns startOfWeek/format,
+  // which run in local time and would drift the window off IST near midnight:
   //  - THEATRICAL = this weekend's cinema openings → Wed→Sun. Users check
   //    midweek for the weekend's theatrical releases, so the window opens on
   //    Wednesday. Mon/Tue theatrical is intentionally Mon Movement's domain and
   //    is left out here.
   //  - OTT = this week's digital drops → Mon→Sun. Streaming stays watchable all
   //    weekend, so this week's earlier OTT arrivals still belong in the post.
-  const today = startOfDay(new Date());
-  const weekStartMon = startOfWeek(today, { weekStartsOn: 1 }); // Monday
-  const wednesday = addDays(weekStartMon, 2);                   // Wednesday
-  const sunday = endOfWeek(today, { weekStartsOn: 1 });         // Sunday (end-of-day; discover funcs format to YYYY-MM-DD, so it's fine)
+  const anchor = editorialDateUTC();
+  const dow = anchor.getUTCDay();                     // 0=Sun … 6=Sat (IST)
+  const weekStartMon = new Date(anchor);
+  weekStartMon.setUTCDate(anchor.getUTCDate() - ((dow + 6) % 7)); // back to Monday
+  const wednesday = new Date(weekStartMon);
+  wednesday.setUTCDate(weekStartMon.getUTCDate() + 2);
+  const sunday = new Date(weekStartMon);
+  sunday.setUTCDate(weekStartMon.getUTCDate() + 6);
 
-  const startDate = format(wednesday, "yyyy-MM-dd");
-  const endDate = format(sunday, "yyyy-MM-dd");
-  const ottStartDate = format(weekStartMon, "yyyy-MM-dd");
+  const startDate = utcStamp(wednesday);
+  const endDate = utcStamp(sunday);
+  const ottStartDate = utcStamp(weekStartMon);
 
   log.info(`Theatrical window: ${startDate} → ${endDate}  |  OTT window: ${ottStartDate} → ${endDate}`);
 
