@@ -18,6 +18,7 @@ export interface DraftNotification {
   hashtags?: string;                  // space-separated #tags — rendered copy-paste-ready
   validation?: { metaValue: string; issuesBlock?: string };  // landing-verifier summary + flagged rows
   deckZip?: string;                   // one-line IG-deck-zip cue, e.g. "📦 IG-ready deck (11 slides, 2.3 MB): <url>" (or a degraded "📦 deck zip failed: …")
+  primaryButtonLabel?: string;        // primary action button label — defaults to "Open in Notion"; a Notion-less pillar (Archives) passes its own (e.g. "Open cover")
 }
 
 /**
@@ -95,7 +96,7 @@ export async function notifyDraftReady(payload: DraftNotification): Promise<void
     elements: [
       {
         type: "button",
-        text: { type: "plain_text", text: "Open in Notion", emoji: true },
+        text: { type: "plain_text", text: payload.primaryButtonLabel ?? "Open in Notion", emoji: true },
         url: payload.notionUrl,
         style: "primary",
       },

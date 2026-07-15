@@ -16,7 +16,7 @@
 import { execSync } from "node:child_process";
 
 const BASELINE_TSC = 44;
-const BASELINE_TESTS = 200;
+const BASELINE_TESTS = 219;
 
 interface Check { name: string; pass: boolean; detail: string; }
 const results: Check[] = [];

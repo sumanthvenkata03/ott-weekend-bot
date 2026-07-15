@@ -44,7 +44,7 @@ export interface DeckZipResult {
 }
 
 export interface DeckZipOptions {
-  /** Directory holding sat-verdict-<date>-cover.png + -card-NN.png. */
+  /** Directory holding <slug>-<date>-cover.png + -card-NN.png. */
   outputDir: string;
   /** ISO date the deck is stamped with, e.g. "2026-07-11". */
   date: string;
@@ -52,6 +52,9 @@ export interface DeckZipOptions {
   captionFile?: string;
   /** R2 key prefix. Default "deliverables"; verify uses "deliverables/_test". */
   keyPrefix?: string;
+  /** Filename/key slug. Default "sat-verdict" (backward-compatible); Archives
+   *  passes "tbsi-archives" so the same builder finds its PNGs + names its zip. */
+  slug?: string;
 }
 
 /** Resize one rendered image to exactly 1080x1350 (lanczos) in the ship format. */
@@ -75,7 +78,8 @@ async function resolveCaption(opts: DeckZipOptions): Promise<{ text: string; sou
     if (t != null) return { text: t.trim(), source: "arg" };
     log.warn(`Caption file not readable: ${opts.captionFile} — falling back`);
   }
-  const dirCaption = join(opts.outputDir, `sat-verdict-${opts.date}-caption.txt`);
+  const slug = opts.slug ?? "sat-verdict";
+  const dirCaption = join(opts.outputDir, `${slug}-${opts.date}-caption.txt`);
   const t = await tryRead(dirCaption);
   if (t != null) return { text: t.trim(), source: "dir-file" };
   return { text: CAPTION_PLACEHOLDER, source: "placeholder" };
@@ -90,9 +94,10 @@ async function resolveCaption(opts: DeckZipOptions): Promise<{ text: string; sou
 export async function buildAndUploadDeckZip(opts: DeckZipOptions): Promise<DeckZipResult> {
   const { outputDir, date } = opts;
   const keyPrefix = (opts.keyPrefix ?? "deliverables").replace(/\/+$/, "");
+  const slug = opts.slug ?? "sat-verdict";
 
   // Discover this date's deck: one cover + card-NN.png, numeric order.
-  const prefix = `sat-verdict-${date}-`;
+  const prefix = `${slug}-${date}-`;
   const entries = await readdir(outputDir);
   const coverName = `${prefix}cover.png`;
   if (!entries.includes(coverName)) {
@@ -119,7 +124,7 @@ export async function buildAndUploadDeckZip(opts: DeckZipOptions): Promise<DeckZ
 
   const slideCount = 1 + cardNames.length;   // cover + body cards
   const zipBuf = zip.toBuffer();
-  const key = `${keyPrefix}/sat-verdict-${date}.zip`;
+  const key = `${keyPrefix}/${slug}-${date}.zip`;
 
   // deliverables/ = one-shot convenience downloads → short cache, NOT 1-year immutable.
   const { publicUrl } = await uploadBufferToR2(zipBuf, key, {
@@ -135,8 +140,13 @@ export async function buildAndUploadDeckZip(opts: DeckZipOptions): Promise<DeckZ
  * Write the caption to the deck dir so the zip (and any later standalone re-deliver)
  * can pick it up. Called by the job at deliver time before building the zip.
  */
-export async function writeCaptionFile(outputDir: string, date: string, caption: string): Promise<void> {
-  await writeFile(join(outputDir, `sat-verdict-${date}-caption.txt`), caption, "utf-8");
+export async function writeCaptionFile(
+  outputDir: string,
+  date: string,
+  caption: string,
+  slug = "sat-verdict"
+): Promise<void> {
+  await writeFile(join(outputDir, `${slug}-${date}-caption.txt`), caption, "utf-8");
 }
 
 // ── Standalone entry (guarded — importing this module must NOT run main) ──────
@@ -158,8 +168,9 @@ if (isMainModule) {
   // midnight but before IST rollover no longer hunts the previous day's deck dir.
   const date = dateArg ?? editorialTodayStamp();
   const keyPrefix = process.env.DECK_KEY_PREFIX;   // verify sets deliverables/_test
+  const slug = process.env.DECK_SLUG;              // Archives re-deliver sets tbsi-archives
 
-  buildAndUploadDeckZip({ outputDir, date, ...(captionFile ? { captionFile } : {}), ...(keyPrefix ? { keyPrefix } : {}) })
+  buildAndUploadDeckZip({ outputDir, date, ...(captionFile ? { captionFile } : {}), ...(keyPrefix ? { keyPrefix } : {}), ...(slug ? { slug } : {}) })
     .then(async r => {
       const mb = (r.sizeBytes / 1_048_576).toFixed(1);
       log.success(`✅ Deck zip uploaded (${r.slideCount} slides, ${mb} MB, caption:${r.captionSource})`);
