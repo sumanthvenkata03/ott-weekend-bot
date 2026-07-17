@@ -2,104 +2,105 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;0,800;1,400;1,700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;0,800;0,900;1,400;1,700&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 {% include "_design-tokens.html" %}
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
     width: 1080px; height: 1080px; overflow: hidden;
     font-family: 'Playfair Display', Georgia, serif;
-    background: var(--cream); color: var(--ink);
+    background: var(--ink); color: var(--cream);
   }
-  .canvas { position: relative; width: 100%; height: 100%; }
+  .canvas { position: relative; width: 100%; height: 100%; overflow: hidden; }
 
-  /* Masthead */
-  .masthead {
-    position: absolute; top: 50px; left: 48px; right: 48px;
+  /* Per-letter ink HALO — invisible on dark, decisive on bright (same as cover). */
+  .halo { text-shadow: 0 2px 18px rgba(20,16,14,0.9), 0 0 6px rgba(20,16,14,0.75); }
+
+  /* ── FULL-BLEED POSTER = the whole canvas. Fallback: solid language-color. ── */
+  .poster { position: absolute; inset: 0; z-index: 1; background: {{ fallbackColor }}; }
+  .poster-img {
+    position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2;
+    object-fit: cover; object-position: center 22%; /* faces high — Wednesday convention */
+  }
+  .poster-lang {
+    position: absolute; inset: 0; z-index: 1; display: flex;
+    align-items: center; justify-content: center;
+    color: var(--cream); font-family: 'Playfair Display', serif;
+    font-size: 120px; font-weight: 900; letter-spacing: 8px; opacity: 0.16;
+  }
+
+  /* ── ADAPTIVE INK boosts — per-poster, inside the veil zones only (z3, above
+       poster, below veils). Opacity inlined from sampleStripInk (fail-toward-ink). */
+  .boost { position: absolute; left: 0; right: 0; z-index: 3; pointer-events: none; }
+
+  /* ── TOP VEIL — masthead + date. px stops (box top = canvas top). ── */
+  .veil-top {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 5;
+    padding: 44px 60px 0; height: 240px;
     display: flex; justify-content: space-between; align-items: baseline;
+    background: linear-gradient(180deg,
+      rgba(20,16,14,0.85) 0px, rgba(20,16,14,0.5) 130px, rgba(20,16,14,0) 240px);
   }
-  .masthead .label {
-    font-family: 'Playfair Display', serif; font-size: 22px; font-weight: 700;
-    letter-spacing: 4px; color: var(--ink);
+  .mast-label {
+    font-family: 'Playfair Display', serif; font-size: 24px; font-weight: 700;
+    letter-spacing: 4px; color: var(--cream);
   }
-  .masthead .date {
-    font-family: 'JetBrains Mono', monospace; font-size: 18px; color: var(--ink);
-  }
-  .masthead-rule {
-    position: absolute; top: 96px; left: 48px; right: 48px;
-    border-top: 2px solid var(--ink); border-bottom: 0.5px solid var(--ink); height: 4px;
+  .mast-date {
+    font-family: 'JetBrains Mono', monospace; font-size: 19px; color: var(--cream);
   }
 
-  /* Body: poster left, copy right */
-  .body {
-    position: absolute; top: 150px; left: 48px; right: 48px; bottom: 150px;
-    display: grid; grid-template-columns: 460px 1fr; gap: 34px;
+  /* ── BOTTOM VEIL — deep (≥.85 through the whole text band), holds everything. ── */
+  .veil-bottom {
+    position: absolute; bottom: 0; left: 0; right: 0; z-index: 5;
+    height: 660px; padding: 92px 60px 46px;
+    display: flex; flex-direction: column;
+    background: linear-gradient(0deg,
+      rgba(20,16,14,0.95) 0px, rgba(20,16,14,0.90) 560px,
+      rgba(20,16,14,0.45) 620px, rgba(20,16,14,0) 660px);
   }
 
-  .poster-window {
-    background-color: {{ fallbackColor }};
-    border: 4px solid var(--vermillion); position: relative; overflow: hidden;
-  }
-  .poster-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 2; }
-  .poster-fallback {
-    position: absolute; inset: 0; z-index: 1; display: flex; align-items: center;
-    justify-content: center; color: var(--cream); text-align: center; padding: 30px;
-  }
-  .poster-fallback-hidden { display: none; }
-  .poster-fallback .lang {
-    font-family: 'Playfair Display', serif; font-size: 26px; letter-spacing: 6px; opacity: 0.85;
-  }
-
-  /* Treasure stamp — vermillion, rotated, over the poster top */
-  .treasure-stamp {
-    position: absolute; top: 22px; left: -6px; z-index: 4;
-    transform: rotate(-8deg); transform-origin: left center;
-    background: var(--vermillion); color: var(--cream);
-    font-family: 'Playfair Display', serif; font-weight: 700; font-size: 18px;
-    letter-spacing: 3px; padding: 10px 18px; white-space: nowrap;
-    box-shadow: 0 3px 0 rgba(26,22,20,0.35);
-  }
-
-  /* Copy column. min-width:0 is load-bearing: a CSS-grid item defaults to
-     min-width:auto, which lets long copy overflow the 1fr track (clipping the
-     why-line and shoving the seal off-canvas). 0 forces it to wrap in-track. */
-  .copy { display: flex; flex-direction: column; position: relative; min-width: 0; }
   .kicker {
-    font-family: 'JetBrains Mono', monospace; font-size: 30px; font-weight: 700;
-    letter-spacing: 4px; color: var(--vermillion); text-transform: uppercase;
-    line-height: 1.1; margin-bottom: 18px;
+    font-family: 'JetBrains Mono', monospace; font-size: 40px; font-weight: 700;
+    letter-spacing: 4px; color: var(--brass); text-transform: uppercase;
+    line-height: 1.05; margin-bottom: 16px;
   }
-  .film-title {
-    font-family: 'Playfair Display', serif; font-size: 60px; font-weight: 800;
-    line-height: 0.98; color: var(--ink); letter-spacing: -1.4px; margin-bottom: 24px;
+  /* Title step-down ladder (keyed on title length): ≤14 → 76 · 15–22 → 58 · ≥23 → 44. */
+  .title {
+    font-family: 'Playfair Display', serif; font-weight: 900; font-size: 76px;
+    line-height: 0.98; letter-spacing: -1.5px; color: var(--cream); margin-bottom: 20px;
   }
-  .film-title.title-sm { font-size: 46px; }
-  .why-block { border-top: 1.5px solid var(--ink); padding-top: 18px; margin-bottom: 24px; }
-  .why-label {
-    font-family: 'Playfair Display', serif; font-size: 14px; letter-spacing: 3px;
-    color: var(--vermillion); margin-bottom: 12px;
-  }
-  .why-body {
-    font-family: 'Playfair Display', serif; font-size: 32px; line-height: 1.3;
-    color: var(--ink); font-weight: 500;
+  .title.title-md { font-size: 58px; }
+  .title.title-sm { font-size: 44px; letter-spacing: -1px; }
+
+  .mid { display: flex; align-items: flex-end; gap: 40px; margin-top: auto; }
+  .mid-left { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+
+  .why {
+    font-family: 'Playfair Display', serif; font-size: 30px; line-height: 1.3;
+    color: var(--cream); font-weight: 500; margin-bottom: 22px;
+    /* max 2 lines */
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
   }
 
-  /* Bottom of copy column, in NORMAL FLOW (no absolute/side-by-side): the seal
-     sits in its own right-aligned row ABOVE a full-width platform line, so a long
-     "TONIGHT ON <PLATFORM>" can never run under the seal. Flow layout ⇒ these
-     blocks stack and can shrink whitespace but never overlap. */
-  .copy-bottom { margin-top: auto; }
-  .seal-row { display: flex; justify-content: flex-end; margin-bottom: 20px; padding-right: 10px; }
+  /* Platform row: shrinkable TEXT group + RESERVED logo-chip slot (ported from the
+     cream card). chip flex-shrink:0, text min-width:0 → chip never pushed out of
+     the mid-left column; font ladder keeps long names from crowding the chip. */
   .platform-line {
     display: flex; align-items: center; gap: 14px;
-    font-family: 'Inter', sans-serif; font-size: 30px; font-weight: 800;
-    letter-spacing: 3px; text-transform: uppercase; white-space: nowrap;
     padding-bottom: 8px; border-bottom: 3px solid currentColor; margin-bottom: 18px;
   }
-  .platform-line.is-gradient {
+  .platform-text {
+    display: flex; align-items: baseline; gap: 12px; min-width: 0; flex: 1 1 auto;
+    font-family: 'Inter', sans-serif; font-size: 30px; font-weight: 800;
+    letter-spacing: 3px; text-transform: uppercase; white-space: nowrap; overflow: hidden;
+    text-shadow: 0 2px 14px rgba(20,16,14,0.9); /* brand colors get an ink backing on the veil */
+  }
+  .platform-text.plat-md { font-size: 26px; }   /* 7–9 chars: SONYLIV, NETFLIX, APPLE TV */
+  .platform-text.plat-sm { font-size: 23px; }   /* ≥10 chars: JIOHOTSTAR, PRIME VIDEO */
+  .platform-text.is-gradient {
     background-image: linear-gradient(90deg, var(--platform-jiohotstar-start) 0%, var(--platform-jiohotstar-end) 100%);
     background-clip: text; -webkit-background-clip: text; color: transparent;
-    -webkit-text-fill-color: transparent; border-bottom-color: var(--platform-jiohotstar-end);
+    -webkit-text-fill-color: transparent;
   }
   .logo-stamp {
     display: inline-flex; align-items: center; justify-content: center;
@@ -110,96 +111,110 @@
   .checked-chip {
     display: inline-flex; align-items: center; gap: 8px; align-self: flex-start;
     font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 700;
-    letter-spacing: 2px; text-transform: uppercase; color: var(--bottle);
-    border: 1.5px solid var(--bottle); border-radius: 6px; padding: 7px 14px;
+    letter-spacing: 2px; text-transform: uppercase;
+    color: #9DBBA9; border: 1.5px solid #9DBBA9; border-radius: 6px; padding: 7px 14px;
   }
 
-  /* Retro seal — ink circle + brass ring, in the right-aligned seal-row */
-  .seal-wrap {
-    width: 158px; display: flex; flex-direction: column; align-items: center;
-    transform: rotate(-5deg);
+  /* ── TBSI consolidated seal — right-anchored. Same circle geometry, brass on
+       ink; receipts (blend inputs only) + votes beneath. ── */
+  .seal-col {
+    flex-shrink: 0; width: 178px; display: flex; flex-direction: column; align-items: center;
   }
-  .seal { width: 150px; height: 150px; display: block; }
+  .seal { width: 158px; height: 158px; display: block; }
   .seal-fill { fill: var(--ink); }
   .seal-ring-outer { fill: none; stroke: var(--brass); stroke-width: 4; }
   .seal-ring-inner { fill: none; stroke: var(--brass); stroke-width: 1.25; }
-  /* Sans face so the capital I reads as "IMDb", never the serifed-I "TMDb". */
-  .seal-src { font-family: 'Inter', sans-serif; font-size: 18px; font-weight: 800; fill: var(--brass); letter-spacing: 0.5px; }
-  .seal-score { font-family: 'Playfair Display', serif; font-size: 52px; font-weight: 800; fill: var(--brass); }
-  .seal-votes {
+  .seal-brand { font-family: 'Inter', sans-serif; font-size: 17px; font-weight: 800; fill: var(--brass); letter-spacing: 1px; }
+  .seal-score { font-family: 'Playfair Display', serif; font-size: 46px; font-weight: 800; fill: var(--brass); }
+  .receipts {
     font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700;
-    letter-spacing: 0.5px; color: var(--ink); margin-top: 10px; text-align: center; white-space: nowrap;
+    letter-spacing: 0.5px; color: var(--brass); margin-top: 12px; text-align: center;
+    line-height: 1.35; max-width: 178px;
+  }
+  .votes {
+    font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700;
+    letter-spacing: 0.5px; color: var(--cream); margin-top: 6px; text-align: center; white-space: nowrap;
   }
 
-  /* Footer */
-  .footer {
-    position: absolute; bottom: 50px; left: 48px; right: 48px;
-    border-top: 2px solid var(--ink); padding-top: 14px;
-    display: flex; justify-content: space-between;
-    font-family: 'Playfair Display', serif; font-size: 16px; letter-spacing: 4px; color: var(--ink);
+  .veil-footer {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-top: 22px; padding-top: 14px; border-top: 1.5px solid rgba(244,236,220,0.35);
+    font-family: 'Playfair Display', serif; font-size: 16px; letter-spacing: 4px; color: var(--cream);
   }
-  .footer .meta { font-family: 'JetBrains Mono', monospace; font-size: 14px; letter-spacing: 1px; }
+  .veil-footer .meta { font-family: 'JetBrains Mono', monospace; font-size: 14px; letter-spacing: 1px; }
+
+  /* Treasure ribbon — vermillion, rotated, self-contained (own bg), above veils. */
+  .treasure-stamp {
+    position: absolute; top: 118px; left: -6px; z-index: 6;
+    transform: rotate(-8deg); transform-origin: left center;
+    background: var(--vermillion); color: var(--cream);
+    font-family: 'Playfair Display', serif; font-weight: 700; font-size: 20px;
+    letter-spacing: 3px; padding: 11px 20px; white-space: nowrap;
+    box-shadow: 0 3px 0 rgba(26,22,20,0.35);
+  }
 </style>
 </head>
 <body>
 <div class="canvas">
 
-  <div class="masthead">
-    <span class="label">★ TBSI ARCHIVES</span>
-    <span class="date">{{ issueDate }}</span>
+  <div class="poster">
+    {% if posterUrl %}
+      <img src="{{ posterUrl }}" class="poster-img" alt="" onerror="this.style.display='none'" />
+    {% else %}
+      <div class="poster-lang">{{ language | upper }}</div>
+    {% endif %}
   </div>
-  <div class="masthead-rule"></div>
 
-  <div class="body">
+  {% if boostTop %}
+    <div class="boost" style="top: 0; height: 240px; background: linear-gradient(180deg, rgba(20,16,14,{{ boostTop }}) 0px, rgba(20,16,14,{{ boostTop }}) 150px, rgba(20,16,14,0) 240px);"></div>
+  {% endif %}
+  {% if boostBottom %}
+    <div class="boost" style="bottom: 0; height: 660px; background: linear-gradient(0deg, rgba(20,16,14,{{ boostBottom }}) 0px, rgba(20,16,14,{{ boostBottom }}) 560px, rgba(20,16,14,0) 660px);"></div>
+  {% endif %}
 
-    <div class="poster-window">
-      {% if posterUrl %}
-        <img src="{{ posterUrl }}" class="poster-img" alt="" onerror="this.style.display='none'" />
-      {% endif %}
-      <div class="poster-fallback {% if posterUrl %}poster-fallback-hidden{% endif %}">
-        <div class="lang">{{ language | upper }}</div>
-      </div>
-      {% if isTreasure %}
-        <div class="treasure-stamp">★ THE ONE YOU MISSED ★</div>
-      {% endif %}
-    </div>
+  <div class="veil-top">
+    <span class="mast-label halo">★ THE EVERGREENS</span>
+    <span class="mast-date halo">{{ issueDate }}</span>
+  </div>
 
-    <div class="copy">
-      <div class="kicker">{{ kicker }}</div>
-      <div class="film-title{% if title.length > 22 %} title-sm{% endif %}">{{ title }}</div>
+  {% if isTreasure %}
+    <div class="treasure-stamp">★ THE ONE YOU MISSED ★</div>
+  {% endif %}
 
-      <div class="why-block">
-        <div class="why-label">★ WHY TONIGHT</div>
-        <div class="why-body">{{ whyLine }}</div>
-      </div>
+  <div class="veil-bottom">
+    <div class="kicker halo">{{ kicker }}</div>
+    <div class="title halo{% if title.length >= 23 %} title-sm{% elif title.length >= 15 %} title-md{% endif %}">{{ title }}</div>
 
-      <div class="copy-bottom">
-        <div class="seal-row">
-          <div class="seal-wrap">
-            <svg class="seal" viewBox="0 0 100 100">
-              <circle class="seal-fill" cx="50" cy="50" r="48" />
-              <circle class="seal-ring-outer" cx="50" cy="50" r="46" />
-              <circle class="seal-ring-inner" cx="50" cy="50" r="39" />
-              <text class="seal-src" x="50" y="34" text-anchor="middle">IMDb</text>
-              <text class="seal-score" x="50" y="70" text-anchor="middle">{{ imdbRating }}</text>
-            </svg>
-            {% if votesLine %}<div class="seal-votes">{{ votesLine }}</div>{% endif %}
-          </div>
-        </div>
-        <div class="platform-line{% if platformIsGradient %} is-gradient{% endif %}" style="color: {{ platformColor }};">
-          <span>▶ TONIGHT ON</span>
-          {% if platform %}<span>{{ platform }}</span>{% endif %}
+    <div class="mid">
+      <div class="mid-left">
+        <div class="why halo">{{ whyLine }}</div>
+        <div class="platform-line" style="color: {{ platformColor }};">
+          <span class="platform-text{% if platformIsGradient %} is-gradient{% endif %}{% if platform.length >= 10 %} plat-sm{% elif platform.length >= 7 %} plat-md{% endif %}">
+            <span>▶ TONIGHT ON</span>
+            {% if platform %}<span>{{ platform }}</span>{% endif %}
+          </span>
           {% if platformLogo %}<span class="logo-stamp">{{ platformLogo | platformLogoSvg | safe }}</span>{% endif %}
         </div>
         <div class="checked-chip">✓ CHECKED {{ checkedDate }}</div>
       </div>
+
+      <div class="seal-col">
+        <svg class="seal" viewBox="0 0 100 100">
+          <circle class="seal-fill" cx="50" cy="50" r="48" />
+          <circle class="seal-ring-outer" cx="50" cy="50" r="46" />
+          <circle class="seal-ring-inner" cx="50" cy="50" r="39" />
+          <text class="seal-brand" x="50" y="34" text-anchor="middle">TBSI</text>
+          <text class="seal-score" x="50" y="70" text-anchor="middle">{{ sealScore }}</text>
+        </svg>
+        {% if receipts %}<div class="receipts halo">{{ receipts }}</div>{% endif %}
+        {% if votesLine %}<div class="votes halo">{{ votesLine }}</div>{% endif %}
+      </div>
     </div>
 
-  </div>
-
-  <div class="footer">
-    <span>★ THE BIG SCREEN INDEX</span>
-    <span class="meta">VOL. {{ vol }}</span>
+    <div class="veil-footer halo">
+      <span>★ THE BIG SCREEN INDEX</span>
+      <span class="meta">VOL. {{ vol }}</span>
+    </div>
   </div>
 
 </div>

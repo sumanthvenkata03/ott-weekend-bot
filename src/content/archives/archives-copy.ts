@@ -74,7 +74,7 @@ function buildPrompt(cards: ArchivesCopyInput[]): string {
 
 TASK: For EACH film, write ONE why-line — a single sentence (max ~18 words) that makes someone want to press play tonight. A reason to watch, an angle, a hook — NOT a plot summary, NOT a synopsis, NOT a rating claim.
 
-VOICE: confident, editorial, warm. English-first with light natural Hinglish allowed. No AI-cliches ("dive into", "delve", "look no further", "buckle up"). Never generic.
+VOICE: like recommending a film to your family — warm, plain, everyday words, the way you'd tell someone at home why tonight is the night for this one. NO critic-speak or review jargon ("tour de force", "taut", "masterclass", "searing", "riveting", "a gem", "cinema"). No AI-cliches ("dive into", "delve", "look no further", "buckle up"). English-first with light natural Hinglish allowed. Never generic.
 
 NAME DISCIPLINE (hard rule): NEVER name a person (actor, director, composer) who is NOT in that film's provided "Director" or "Lead cast". Do not recall a star from memory. If unsure who is in it, describe it WITHOUT naming anyone. Spell any name you DO use EXACTLY as provided.
 

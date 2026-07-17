@@ -242,7 +242,7 @@ async function main(deliver = true) {
 
   log.info("Sending Slack notification…");
   await notifyDraftReady({
-    pillar: "TBSI Archives",
+    pillar: "The Evergreens",
     emoji: "🎞️",
     title: `Archives VOL. ${formatVolume(vol)} — ${picks.length} films`,
     ...(deck.cards[0]?.whyLine ? { subtitle: deck.cards[0].whyLine } : {}),
