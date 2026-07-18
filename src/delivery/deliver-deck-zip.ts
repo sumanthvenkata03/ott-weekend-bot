@@ -10,8 +10,8 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
 import AdmZip from "adm-zip";
-import { ofetch } from "ofetch";
 import { uploadBufferToR2 } from "./r2-upload.js";
+import { postToWebhook } from "./slack.js";
 import { config } from "../shared/config.js";
 import { log } from "../shared/logger.js";
 import { editorialTodayStamp } from "../shared/editorial-clock.js";
@@ -182,11 +182,7 @@ if (isMainModule) {
         if (!config.SLACK_WEBHOOK_URL) {
           log.info("Slack webhook not configured — skipping --slack post");
         } else {
-          await ofetch(config.SLACK_WEBHOOK_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: { text: line, blocks: [{ type: "context", elements: [{ type: "mrkdwn", text: line }] }] },
-          });
+          await postToWebhook([{ type: "context", elements: [{ type: "mrkdwn", text: line }] }], line);
           log.success("   Slack: deck link posted");
         }
       }

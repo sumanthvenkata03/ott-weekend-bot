@@ -346,6 +346,16 @@ async function main() {
   ];
   for (const r of results) log.info(reconcileSummary(r));
 
+  // 3b. SHADOW Reddit discovery net — env REDDIT_NET=1, default OFF. Reports only
+  //     (console + one Slack context block); touches NO tier/card/ledger/reconcile
+  //     (L2). Pools-only: ReconciledFilm exposes no release.platform[] to score
+  //     against, so the net sweeps the raw candidate pools of both editions.
+  //     Dynamic import keeps it off the hot path and the dependency one-directional.
+  if (process.env.REDDIT_NET === "1") {
+    const { runRedditNet } = await import("../ingestion/reddit-net.js");
+    await runRedditNet([...theatrical, ...ott]);
+  }
+
   // 4. AI-REVIEW (advisory verdict + actionable auto-demote) — runs BEFORE the
   //    gate now, on BOTH the review run AND the --approve re-run, so a SOURCED 🛑
   //    reject auto-removes its film from the renderable pool and the gate hash

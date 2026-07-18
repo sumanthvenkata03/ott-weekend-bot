@@ -4,6 +4,21 @@ import { config } from "../shared/config.js";
 import { log } from "../shared/logger.js";
 
 /**
+ * The ONE Slack webhook POST — the single source of the request shape. No-op
+ * (silent) when SLACK_WEBHOOK_URL is unconfigured; THROWS on network error so
+ * each caller keeps its own success/failure logging (byte-equivalent to the
+ * three inlined POSTs it replaces).
+ */
+export async function postToWebhook(blocks: unknown[], text: string): Promise<void> {
+  if (!config.SLACK_WEBHOOK_URL) return;
+  await ofetch(config.SLACK_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { blocks, text },
+  });
+}
+
+/**
  * Payload for a "draft ready" notification.
  */
 export interface DraftNotification {
@@ -115,11 +130,7 @@ export async function notifyDraftReady(payload: DraftNotification): Promise<void
   }
 
   try {
-    await ofetch(config.SLACK_WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: { blocks, text: `${payload.emoji} ${payload.pillar} draft is ready` },
-    });
+    await postToWebhook(blocks, `${payload.emoji} ${payload.pillar} draft is ready`);
     log.success("Slack notification sent");
   } catch (err) {
     // Notification failure shouldn't abort the job — log and continue
@@ -133,24 +144,13 @@ export async function notifyDraftReady(payload: DraftNotification): Promise<void
 export async function notifyJobFailure(jobName: string, errorMessage: string): Promise<void> {
   if (!config.SLACK_WEBHOOK_URL) return;
 
+  const text = `🚨 ${jobName} failed`;
+  const blocks = [
+    { type: "header", text: { type: "plain_text", text, emoji: true } },
+    { type: "section", text: { type: "mrkdwn", text: `\`\`\`${errorMessage.slice(0, 1500)}\`\`\`` } },
+  ];
   try {
-    await ofetch(config.SLACK_WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: {
-        text: `🚨 ${jobName} failed`,
-        blocks: [
-          {
-            type: "header",
-            text: { type: "plain_text", text: `🚨 ${jobName} failed`, emoji: true },
-          },
-          {
-            type: "section",
-            text: { type: "mrkdwn", text: `\`\`\`${errorMessage.slice(0, 1500)}\`\`\`` },
-          },
-        ],
-      },
-    });
+    await postToWebhook(blocks, text);
   } catch {
     // Last-resort failure — nothing we can do, the user will see the GH Actions email
   }

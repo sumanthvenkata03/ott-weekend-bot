@@ -23,6 +23,7 @@
     "research:consolidate": "tsx src/research/consolidate-cli.ts",
     "discover": "tsx src/discovery/cli.ts",
     "archives:reset": "tsx scripts/archives-reset.ts",
+    "radar": "tsx src/jobs/reddit-radar.ts",
     "test": "vitest run --dir src/discovery",
     "test:discovery": "vitest run --dir src/discovery"
   },
