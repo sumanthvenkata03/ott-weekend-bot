@@ -5,13 +5,21 @@ import { log } from "../shared/logger.js";
 
 /**
  * The ONE Slack webhook POST — the single source of the request shape. No-op
- * (silent) when SLACK_WEBHOOK_URL is unconfigured; THROWS on network error so
+ * (silent) when the target webhook is unconfigured; THROWS on network error so
  * each caller keeps its own success/failure logging (byte-equivalent to the
  * three inlined POSTs it replaces).
+ *
+ * `webhookUrl` routes a post to a non-default channel (the News Desk uses it for
+ * #tbsi-news-desk). It DEFAULTS to config.SLACK_WEBHOOK_URL, so every existing
+ * call site keeps byte-identical behaviour — including the unconfigured no-op.
  */
-export async function postToWebhook(blocks: unknown[], text: string): Promise<void> {
-  if (!config.SLACK_WEBHOOK_URL) return;
-  await ofetch(config.SLACK_WEBHOOK_URL, {
+export async function postToWebhook(
+  blocks: unknown[],
+  text: string,
+  webhookUrl: string | undefined = config.SLACK_WEBHOOK_URL
+): Promise<void> {
+  if (!webhookUrl) return;
+  await ofetch(webhookUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: { blocks, text },
