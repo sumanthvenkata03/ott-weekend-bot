@@ -100,3 +100,75 @@ describe("buildNewsNameAllowlist", () => {
     expect(sweepNames("Kartik Aaryan wins.", allow)).toContain("Kartik Aaryan");
   });
 });
+
+// ── RULING A: sentence-case card copy is swept strictly ────────────────────
+//
+// The four phrases below are the REAL false positives from the 2026-07-19 live
+// run. In Title Case they were flagged as names and held a valid caption; in
+// sentence case they must pass cleanly, while a genuinely fabricated name in
+// the same copy must still fail.
+describe("card copy sweep — sentence case (ruling A)", () => {
+  const stories = [
+    mk(
+      "Malayalam's answer to Pushpa? Why Rs 35 cr actioner Kattalan met shocking fate at box office",
+      "The Indian Express reports Kattalan underperformed against its budget",
+      ["The Indian Express", "Koimoi"]
+    ),
+    mk(
+      "Telugu Cinema Shines At 72nd National Film Awards",
+      "The Federal confirms wins for Kalki 2898 AD, Pushpa 2 and Committee Kurrollu",
+      ["Business Standard", "Gulte"]
+    ),
+  ];
+
+  it("PASSES the four live false positives in sentence case", () => {
+    for (const phrase of [
+      "A box-office fall for the Malayalam actioner.",
+      "Telugu cinema featured across the national awards.",
+      "The Malayalam action film missed its mark.",
+      "Kattalan underperforms at the box office.",
+    ]) {
+      expect(sweepCaption(phrase, stories), `should pass: ${phrase}`).toEqual([]);
+    }
+  });
+
+  it("still FAILS a seeded unbacked name in the same copy", () => {
+    const hits = sweepCaption(
+      "A box-office fall for the Malayalam actioner, starring Rajinikanth.",
+      stories
+    );
+    expect(hits.join(" ")).toContain("Rajinikanth");
+  });
+
+  it("passes a name the sources DID print", () => {
+    expect(sweepCaption("Kattalan met a hard week at the box office.", stories)).toEqual([]);
+  });
+
+  it("Title Case is what broke it — the same line Title-Cased trips the sweep", () => {
+    // Kept as documentation of WHY cardLine is sentence case: this is not a
+    // preference, it is the difference between a working guard and noise.
+    expect(sweepCaption("A Box-Office Fall For The Malayalam Actioner", stories).length)
+      .toBeGreaterThan(0);
+  });
+});
+
+describe("name candidates never span a line break", () => {
+  // Caught by the FIRST --no-slack dry run: a caption ending one paragraph with
+  // "…per Variety." and opening the next with "Oh..! Sukumari …" produced the
+  // phantom name "Variety.\nOh..". Two paragraphs are not a person.
+  const stories = [mk("Oh..! Sukumari box office collection", "Per Koimoi, day-wise figures", ["Koimoi"])];
+
+  it("does not fuse the last word of a line with the first of the next", () => {
+    expect(sweepCaption("Numbers were reported by Koimoi.\nOh..! Sukumari held its screens.", stories))
+      .toEqual([]);
+  });
+
+  it("still catches a real two-word name on ONE line", () => {
+    expect(sweepCaption("Reported by Koimoi.\nA turn from Ram Charan followed.", stories).join(" "))
+      .toContain("Ram Charan");
+  });
+
+  it("handles CRLF as well as LF", () => {
+    expect(sweepCaption("Reported by Koimoi.\r\nOh..! Sukumari held its screens.", stories)).toEqual([]);
+  });
+});

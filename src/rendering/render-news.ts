@@ -19,6 +19,10 @@ import { renderToPNG } from "./renderer.js";
 import { computeCropPosition } from "./poster-crop.js";
 import { log } from "../shared/logger.js";
 import type { ComposedEdition, SelectedStory } from "../content/news/news-compose.js";
+import { CARD_LINE_MAX, clampWords, stripHeadlineTail, type CardCopy } from "../content/news/news-caption.js";
+
+/** cluster id → editorial card copy, from the package step. */
+export type CardCopyMap = Record<string, CardCopy>;
 
 /** File slug — matches the deck-zip slug so delivery finds these PNGs. */
 export const NEWS_SLUG = "tbsi-news";
@@ -58,22 +62,60 @@ async function pillDataUri(): Promise<string | undefined> {
 
 /** Uppercase mono fact lines for a quadrant, from the story's verified fields. */
 function factsFor(s: SelectedStory): string[] {
-  const c = s.resolved.story.cluster;
-  const out: string[] = [`${s.segment.badge} · ${c.storyClass.toUpperCase()}`];
-  // Outlets are a verified field; cap at two so the mono strip stays legible.
-  const outlets = c.outlets.slice(0, 2).join(" · ");
-  if (outlets) out.push(outlets.toUpperCase());
-  return out;
+  // SEGMENT · CLASS only. Outlets used to print here AND again in `credit`,
+  // so the first outlet appeared twice on one quadrant (the double-TOI card).
+  // Outlets are a credit, and a credit belongs on the credit line — once.
+  return [`${s.segment.badge} · ${s.resolved.story.cluster.storyClass.toUpperCase()}`];
+}
+
+/** The credit line — the ONLY place outlets print. Deduped, capped at two. */
+function creditFor(s: SelectedStory): string {
+  const seen = new Set<string>();
+  const outlets: string[] = [];
+  for (const o of s.resolved.story.cluster.outlets) {
+    const k = o.trim().toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    outlets.push(o.trim());
+    if (outlets.length === 2) break;
+  }
+  return outlets.join(" · ").toUpperCase();
+}
+
+/**
+ * DETERMINISTIC card-line fallback. If the caption LLM call failed or returned
+ * no entry for this story, the card must still be readable — a blank quadrant
+ * is worse than a plainly-set one. The raw headline is tail-stripped and
+ * word-clamped by the same rules the editorial copy obeys, so even the fallback
+ * can never carry "| Etimes" or a mid-word clip.
+ *
+ * EXEMPT FROM THE NAME SWEEP, by ruling and by construction: this is the
+ * outlet's OWN published headline, quoted, not text a model generated. There is
+ * no fabrication surface to guard — a name here is a name a real outlet printed.
+ * The sweep exists to catch invention, and nothing here is invented.
+ */
+export function fallbackCardLine(headline: string): string {
+  return clampWords(stripHeadlineTail(headline), CARD_LINE_MAX);
+}
+
+/** cardLine for a story: editorial copy when we have it, deterministic when not. */
+function lineFor(s: SelectedStory, copy: CardCopyMap): string {
+  return copy[s.resolved.story.cluster.id]?.cardLine
+    ?? fallbackCardLine(s.resolved.story.cluster.headline);
 }
 
 /** The quadrant payload for one story. */
-async function quadFor(s: SelectedStory): Promise<Record<string, unknown>> {
+async function quadFor(s: SelectedStory, copy: CardCopyMap): Promise<Record<string, unknown>> {
   const film = s.resolved.film;
   const poster = film?.posterUrl;
+  // A resolved film has a real title; otherwise the EDITORIAL cardLine carries
+  // the quadrant. The raw cluster headline never reaches a template unstripped.
+  const c = copy[s.resolved.story.cluster.id];
   const quad: Record<string, unknown> = {
-    film: film?.title ?? s.resolved.story.cluster.headline,
+    film: film?.title ?? lineFor(s, copy),
+    dek: c?.cardDek ?? "",
     facts: factsFor(s),
-    credit: s.resolved.story.cluster.outlets[0]?.toUpperCase() ?? "",
+    credit: creditFor(s),
   };
   if (poster) {
     quad.posterUrl = poster;
@@ -87,7 +129,8 @@ async function quadFor(s: SelectedStory): Promise<Record<string, unknown>> {
 /** Pad a slide's quadrants to exactly 4 so the 2×2 never leaves a hole. */
 function padQuads(
   quads: Record<string, unknown>[],
-  overflow: SelectedStory[]
+  overflow: SelectedStory[],
+  copy: CardCopyMap = {}
 ): Record<string, unknown>[] {
   const out = [...quads];
   if (out.length < QUADS_PER_SLIDE && overflow.length > 0) {
@@ -95,7 +138,7 @@ function padQuads(
       alsoHonoured: [
         {
           label: "ALSO TODAY",
-          lines: overflow.slice(0, 6).map((s) => s.resolved.story.cluster.headline.slice(0, 46)),
+          lines: overflow.slice(0, 6).map((s) => s.resolved.film?.title ?? lineFor(s, copy)),
         },
       ],
     });
@@ -112,6 +155,7 @@ function padQuads(
 export async function renderNews(
   edition: ComposedEdition,
   istDate: string,
+  cardCopy: CardCopyMap = {},
   outputDir = "output/posts"
 ): Promise<NewsRenderResult> {
   if (edition.format === "none") return { cardPaths: [], notes: ["no edition — nothing rendered"] };
@@ -142,9 +186,10 @@ export async function renderNews(
         eyebrow: `${s.segment.badge} · ${c.storyClass.toUpperCase()}`,
         title: film.title,
         numeral: numeralFor(s),
-        facts: c.outlets.slice(0, 3).join("  ·  ").toUpperCase(),
-        statement: c.headline,
-        footer: `${c.outlets[0] ?? ""} · ${istDate}`.toUpperCase(),
+        facts: creditFor(s),
+        // The DEK is the statement — an editorial clause, not the feed headline.
+        statement: cardCopy[c.id]?.cardDek ?? lineFor(s, cardCopy),
+        footer: `${creditFor(s)} · ${istDate}`,
       },
     });
     cardPaths.push(path);
@@ -155,14 +200,14 @@ export async function renderNews(
 
   // ── register-single: ONE 2×2 card ─────────────────────────────────────────
   if (edition.format === "register-single") {
-    const quads = await Promise.all(edition.cards.map(quadFor));
+    const quads = await Promise.all(edition.cards.map((s) => quadFor(s, cardCopy)));
     const path = `${outputDir}/${NEWS_SLUG}-${istDate}-card-01.png`;
     await renderToPNG({
       templateName: "news-register-card",
       width: CARD_W,
       height: CARD_H,
       outputPath: path,
-      data: { quads: padQuads(quads, []), pillPng: pill },
+      data: { quads: padQuads(quads, [], cardCopy), pillPng: pill },
     });
     cardPaths.push(path);
     const withArt = quads.filter((q) => q.posterUrl).length;
@@ -198,7 +243,7 @@ export async function renderNews(
       pillPng: pill,
       eyebrow: `${lead.segment.badge} · ${istDate}`,
       numeral: String(all.length),
-      title: lead.resolved.story.cluster.headline,
+      title: lineFor(lead, cardCopy),
       factLine: all
         .flatMap((s) => s.resolved.story.cluster.outlets.slice(0, 1))
         .slice(0, 4)
@@ -212,7 +257,7 @@ export async function renderNews(
 
   for (let i = 0; i < all.length; i += QUADS_PER_SLIDE) {
     const slice = all.slice(i, i + QUADS_PER_SLIDE);
-    const quads = await Promise.all(slice.map(quadFor));
+    const quads = await Promise.all(slice.map((s) => quadFor(s, cardCopy)));
     const n = String(i / QUADS_PER_SLIDE + 1).padStart(2, "0");
     const path = `${outputDir}/${NEWS_SLUG}-${istDate}-card-${n}.png`;
     await renderToPNG({
@@ -220,7 +265,7 @@ export async function renderNews(
       width: CARD_W,
       height: CARD_H,
       outputPath: path,
-      data: { quads: padQuads(quads, all.slice(i + QUADS_PER_SLIDE)), pillPng: pill },
+      data: { quads: padQuads(quads, all.slice(i + QUADS_PER_SLIDE), cardCopy), pillPng: pill },
     });
     cardPaths.push(path);
     const withArt = quads.filter((q) => q.posterUrl).length;

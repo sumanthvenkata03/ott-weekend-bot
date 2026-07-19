@@ -130,6 +130,75 @@ export const TIER_FLOOR_BROAD_OUTLETS = 3;
 /** A confirmed story at/above this score makes the edition a CAROUSEL. */
 export const BIG_SCORE_THRESHOLD = 9;
 
+// ── INDIA-SCOPE GATE (Mastul's lesson, news edition) ────────────────────────
+//
+// The Mastul case: a Bangladeshi film was admitted on a Bengali-language ticket
+// and reached a published deck. Language is not nationality. The feeds are
+// India-shaped but not India-only — a Google News query for "Bengali cinema"
+// returns Dhaka, and an OTT query returns K-drama listicles.
+//
+// This runs BEFORE verification, deterministically, so an out-of-scope story
+// never spends a verification slot (that call is the expensive step).
+//
+// FAIL-OPEN BY DESIGN: in-scope requires an Indian marker, but a borderline
+// story with no foreign marker stays IN. A false hold is invisible — the story
+// silently never appears. A false admit is caught by the editor, who is the
+// final gate. Wrong-and-visible beats wrong-and-silent.
+
+/** Indian-cinema markers — EDITABLE. Any one admits the story. */
+export const INDIA_SCOPE_MARKERS: readonly string[] = [
+  // The seven editorial languages
+  "telugu", "tamil", "malayalam", "kannada", "hindi", "bengali", "marathi",
+  // Industry names
+  "tollywood", "kollywood", "bollywood", "mollywood", "pollywood", "sandalwood",
+  // Nation / region
+  "india", "indian", "desi", "punjabi", "bhojpuri", "south indian",
+  // Indian platform + trade context
+  "zee5", "aha", "sunnxt", "sun nxt", "jiohotstar", "hotstar", "sonyliv",
+  "hoichoi", "manoramamax", "chaupal", "etv win", "nizam", "ott india",
+  "crore", "lakh", "box office india",
+];
+
+/**
+ * EXCLUSIVE foreign markers — EDITABLE. Present AND no Indian marker ⇒ out of
+ * scope. Kept tight: these are cues that a story is about a NON-Indian
+ * industry, not merely that a foreign name appears.
+ */
+export const FOREIGN_SCOPE_MARKERS: readonly string[] = [
+  "k-drama", "kdrama", "korean drama", "korean film", "korean movie",
+  "j-drama", "jdrama", "japanese drama", "anime series",
+  "c-drama", "chinese drama", "thai drama", "turkish drama",
+  "hollywood", "marvel", "dc studios", "netflix original series us",
+  "bangladeshi", "dhaka", "pakistani", "lollywood",
+  "hallyu", "bts", "blackpink", "squid game",
+];
+
+export interface ScopeVerdict {
+  inScope: boolean;
+  /** Printable — which marker decided it. */
+  reason: string;
+}
+
+/**
+ * Decide whether a story is Indian-cinema news. PURE. `text` should be the
+ * headline plus its outlet names (an outlet like "Varnam Malaysia" is not a
+ * scope signal, but "123telugu" is).
+ */
+export function indiaScope(text: string): ScopeVerdict {
+  const t = text.toLowerCase();
+  const indian = INDIA_SCOPE_MARKERS.filter((m) => t.includes(m));
+  const foreign = FOREIGN_SCOPE_MARKERS.filter((m) => t.includes(m));
+
+  if (indian.length > 0) {
+    return { inScope: true, reason: `Indian marker: ${indian.slice(0, 2).join(", ")}` };
+  }
+  if (foreign.length > 0) {
+    return { inScope: false, reason: `foreign marker with no Indian marker: ${foreign.slice(0, 2).join(", ")}` };
+  }
+  // Fail open — no marker either way is not evidence of foreignness.
+  return { inScope: true, reason: "no scope marker either way — fail-open, editor decides" };
+}
+
 // ── Outlet tiering (local matcher over the EXPORTED registry data) ───────────
 
 function hostOf(url: string): string {
@@ -342,11 +411,19 @@ export function scoreClusters(
 
     // Eligibility floor (R2) — evaluated in order so holdReason names the FIRST
     // thing that disqualified it.
+    // Scope is checked against the headline PLUS the outlet names: "123telugu"
+    // carrying a story is itself an Indian-cinema signal.
+    const scope = indiaScope(`${c.headline} ${c.outlets.join(" ")}`);
+
     let eligible = true;
     let holdReason = "";
     if (cls.suppressed) {
       eligible = false;
       holdReason = `suppressed class: ${cls.name}`;
+    } else if (!scope.inScope) {
+      // Held BEFORE verification — an out-of-scope story never spends a slot.
+      eligible = false;
+      holdReason = `out of scope — not Indian cinema (${scope.reason})`;
     } else if (bestTier === "A") {
       eligible = true;
     } else if (outletCount >= TIER_FLOOR_BROAD_OUTLETS && !hasTierC) {

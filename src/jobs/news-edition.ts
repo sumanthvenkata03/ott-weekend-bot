@@ -117,6 +117,57 @@ const section = (text: string) => ({ type: "section", text: { type: "mrkdwn", te
 const context = (text: string) => ({ type: "context", elements: [{ type: "mrkdwn", text }] });
 const divider = () => ({ type: "divider" });
 
+/**
+ * EPHEMERAL RUNS — one internal mechanism, two user-facing modes.
+ *
+ *   --now          on-demand editorial run. A REAL surface: no TEST label, the
+ *                  owner is meant to act on it.
+ *   --test-banner  verification run. Labelled TEST.
+ *
+ * Both share exactly the same three deviations from the scheduled run:
+ *   (a) the seen-ledger is BYPASSED ON READ — you get the full current 26h
+ *       picture, so stories already reported this morning CAN repeat;
+ *   (b) markAllSeen is NEVER called;
+ *   (c) the Slack header says which mode it was.
+ *
+ * TRADEOFF, stated deliberately: because (b) writes nothing, an on-demand run
+ * does NOT consume the day's items, so the 7 AM scheduled cadence is completely
+ * untouched by it — but the same story may therefore appear in both an
+ * on-demand package and the next scheduled one. That is the right way round:
+ * the automated cadence is the thing that must stay predictable, and a human
+ * asking "what's happening right now" wants the full picture, not the
+ * remainder after the morning already took its share.
+ */
+// ── STANDING LAW: DRY-RUN BEFORE SEND ───────────────────────────────────────
+//
+//   npm run news -- --no-slack
+//
+// Builds the FULL package — gather, score, scope gate, verify, resolve, compose,
+// the caption call WITH schema validation and the name sweep, and every card
+// render — then prints it and sends NOTHING. No Slack post, no R2 upload, no
+// zip, no ledger write.
+//
+// This is now the required first step of any verification. It exists because
+// three live sends were burned on faults a dry run would have caught for free:
+// a caption schema mismatch, a sweep firing on false positives, and a broken
+// pill asset. Live sends are for proving delivery, not for finding bugs.
+export type RunMode = "scheduled" | "now" | "test";
+
+export const isEphemeral = (mode: RunMode): boolean => mode !== "scheduled";
+
+/** "HH:mm" of the IST wall clock — the on-demand header's timestamp. */
+export function istClockTime(now: Date = new Date()): string {
+  const ist = new Date(now.getTime() + (5 * 60 + 30) * 60 * 1000);
+  return `${String(ist.getUTCHours()).padStart(2, "0")}:${String(ist.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+/** The Slack header for a run. On-demand is a real editorial surface — no TEST. */
+export function headerFor(mode: RunMode, clock: string): string {
+  if (mode === "test") return "🧪 TEST · 🗞 TBSI NEWS DESK — today's suggestions";
+  if (mode === "now") return `🗞 TBSI NEWS DESK — on-demand · ${clock} IST`;
+  return "🗞 TBSI NEWS DESK — today's suggestions";
+}
+
 export interface PackageDelivery {
   previewUrls: string[];
   zipUrl?: string;
@@ -149,9 +200,10 @@ export function buildPackageMessage(
   verified: VerifiedStory[],
   ineligible: ScoredCluster[],
   stats: RunStats,
-  test: boolean
+  mode: RunMode,
+  clock = ""
 ): { blocks: unknown[]; text: string; plain: string } {
-  const head = `${test ? "🧪 TEST · " : ""}🗞 TBSI NEWS DESK — today's suggestions`;
+  const head = headerFor(mode, clock);
   const blocks: unknown[] = [
     { type: "header", text: { type: "plain_text", text: head, emoji: true } },
     context(`${istDate} · IST · _suggestions for manual posting — nothing is published automatically_`),
@@ -257,20 +309,22 @@ export function resolveNewsWebhook(
   return { url: mainUrl, fellBack: true };
 }
 
-async function main(opts: { slack: boolean; testBanner: boolean }): Promise<void> {
+async function main(opts: { slack: boolean; mode: RunMode }): Promise<void> {
   const nowMs = Date.now();
   const istDate = editorialTodayStamp(new Date(nowMs));
-  log.info(`🗞  TBSI News Desk — ${istDate} (IST) · slack=${opts.slack}${opts.testBanner ? " · 🧪 test" : ""}`);
+  const clock = istClockTime(new Date(nowMs));
+  const ephemeral = isEphemeral(opts.mode);
+  log.info(`🗞  TBSI News Desk — ${istDate} ${clock} IST · mode=${opts.mode} · slack=${opts.slack}`);
 
   // 1 — gather
   log.info("  Gathering across 7 languages…");
   const fresh: NewsItem[] = await gatherNews(nowMs);
 
   // 2 — dedupe (--test-banner bypasses on READ and writes nothing)
-  const unseen = opts.testBanner ? fresh : fresh.filter((i) => !alreadySeen(i.url));
+  const unseen = ephemeral ? fresh : fresh.filter((i) => !alreadySeen(i.url));
   log.info(
-    opts.testBanner
-      ? `  ${fresh.length} fresh · dedupe BYPASSED for --test-banner (nothing marked seen)`
+    ephemeral
+      ? `  ${fresh.length} fresh · dedupe BYPASSED (--${opts.mode}) · nothing will be marked seen`
       : `  ${fresh.length} fresh · ${unseen.length} new after dedupe`
   );
 
@@ -311,7 +365,7 @@ async function main(opts: { slack: boolean; testBanner: boolean }): Promise<void
   let render: NewsRenderResult = { cardPaths: [], notes: [] };
   const delivery: PackageDelivery = { previewUrls: [] };
   if (edition.format !== "none") {
-    render = await renderNews(edition, istDate);
+    render = await renderNews(edition, istDate, pkg.cardCopy);
     for (const n of render.notes) log.info(`  render · ${n}`);
     await closeBrowser();
 
@@ -348,7 +402,7 @@ async function main(opts: { slack: boolean; testBanner: boolean }): Promise<void
   };
 
   const { blocks, text, plain } = buildPackageMessage(
-    istDate, edition, pkg, delivery, verified, ineligible, stats, opts.testBanner
+    istDate, edition, pkg, delivery, verified, ineligible, stats, opts.mode, clock
   );
 
   // eslint-disable-next-line no-console
@@ -363,8 +417,8 @@ async function main(opts: { slack: boolean; testBanner: boolean }): Promise<void
   if (fellBack) log.info("  ℹ SLACK_NEWS_WEBHOOK_URL unset — posting to the main webhook instead.");
   await postToWebhook(blocks, text, url);
 
-  if (opts.testBanner) {
-    log.success("  🧪 test package sent · nothing marked seen (dedupe untouched).");
+  if (ephemeral) {
+    log.success(`  Package sent (--${opts.mode}) · nothing marked seen — the scheduled cadence is untouched.`);
     return;
   }
 
@@ -381,10 +435,12 @@ const isMainModule = argv1.length > 0 && import.meta.url.endsWith(argv1);
 
 if (isMainModule) {
   const args = process.argv.slice(2);
-  main({
-    slack: !args.includes("--no-slack"),
-    testBanner: args.includes("--test-banner"),
-  }).catch((err) => {
+  const mode: RunMode = args.includes("--test-banner")
+    ? "test"
+    : args.includes("--now")
+      ? "now"
+      : "scheduled";
+  main({ slack: !args.includes("--no-slack"), mode }).catch((err) => {
     log.error("News Desk failed", err);
     process.exit(1);
   });

@@ -2,7 +2,7 @@
 // The chunker cover is regression for a REAL failure: the first live Phase-1
 // send returned 400 because a ~6k-char draft went out as one section.
 import { describe, it, expect } from "vitest";
-import { buildPackageMessage, resolveNewsWebhook, toSectionBlocks, zipCaptionText, type PackageDelivery } from "../news-edition.js";
+import { buildPackageMessage, headerFor, isEphemeral, istClockTime, resolveNewsWebhook, toSectionBlocks, zipCaptionText, type PackageDelivery } from "../news-edition.js";
 import type { ComposedEdition, SelectedStory } from "../../content/news/news-compose.js";
 import type { NewsPackage } from "../../content/news/news-caption.js";
 import type { ScoredCluster } from "../../content/news/news-score.js";
@@ -95,6 +95,7 @@ const edition = (over: Partial<ComposedEdition> = {}): ComposedEdition => ({
 
 const pkg = (over: Partial<NewsPackage> = {}): NewsPackage => ({
   caption: "𝗕𝗼𝗹𝗱 headline\nBody per The Hindu.",
+  cardCopy: { c1: { cardLine: "Balan The Boy Locks Its Streaming Date", cardDek: "The thriller arrives on ZEE5." } },
   captionHashtags: ["#TBSI", "#IndianCinema"],
   commentHashtags: ["#OTT", "#MovieNews"],
   badgeCheckBoard: [{ name: "Chidambaram", candidateHandle: "@chidambaram" }],
@@ -112,7 +113,7 @@ const build = (
   e = edition(),
   p = pkg(),
   d: PackageDelivery = { previewUrls: ["https://r2/card-01.png"], zipUrl: "https://r2/deck.zip" }
-) => buildPackageMessage("2026-07-19", e, p, d, [], [], stats, true);
+) => buildPackageMessage("2026-07-19", e, p, d, [], [], stats, "test", "18:42");
 
 describe("buildPackageMessage", () => {
   it("opens with the NEWS DESK header — 'Evening Edition' is gone", () => {
@@ -239,5 +240,42 @@ describe("zipCaptionText — the deck zip is self-contained", () => {
   it("omits the first-comment block when there are no overflow hashtags", () => {
     const t = zipCaptionText(pkg({ commentHashtags: [] }));
     expect(t).not.toContain("— FIRST COMMENT —");
+  });
+});
+
+describe("run modes — scheduled / --now / --test-banner", () => {
+  it("only the scheduled run is non-ephemeral", () => {
+    expect(isEphemeral("scheduled")).toBe(false);
+    expect(isEphemeral("now")).toBe(true);
+    expect(isEphemeral("test")).toBe(true);
+  });
+
+  it("--now header is a REAL surface — no TEST label, carries the IST clock", () => {
+    const h = headerFor("now", "18:42");
+    expect(h).toBe("🗞 TBSI NEWS DESK — on-demand · 18:42 IST");
+    expect(h).not.toContain("TEST");
+  });
+
+  it("--test-banner header keeps the TEST label", () => {
+    expect(headerFor("test", "18:42")).toContain("🧪 TEST");
+  });
+
+  it("the scheduled header is unchanged", () => {
+    expect(headerFor("scheduled", "07:00")).toBe("🗞 TBSI NEWS DESK — today's suggestions");
+  });
+
+  it("istClockTime renders IST (UTC+5:30) as zero-padded HH:mm", () => {
+    expect(istClockTime(new Date("2026-07-19T13:12:00Z"))).toBe("18:42");
+    expect(istClockTime(new Date("2026-07-19T01:00:00Z"))).toBe("06:30");
+    // Crosses midnight IST correctly.
+    expect(istClockTime(new Date("2026-07-19T19:00:00Z"))).toBe("00:30");
+  });
+
+  it("an on-demand package banner shows the on-demand header", () => {
+    const { blocks } = buildPackageMessage(
+      "2026-07-19", edition(), pkg(),
+      { previewUrls: [] }, [], [], stats, "now", "18:42"
+    );
+    expect(asBlocks(blocks)[0]!.text!.text).toContain("on-demand · 18:42 IST");
   });
 });

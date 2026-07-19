@@ -117,16 +117,76 @@ export function buildSourceLines(stories: { sourceUrl: string }[]): string[] {
   return out;
 }
 
+// ── EDITORIAL CARD COPY ─────────────────────────────────────────────────────
+//
+// A raw feed headline is written for search, not for a card: it carries outlet
+// tails ("| Etimes"), SEO stuffing, and a length no card can hold. The same LLM
+// call that writes the caption now also writes a cardLine and cardDek per story,
+// and BOTH are swept against the story corpus like the caption is. The raw
+// cluster headline never reaches a template.
+
+/** Outlet tails and SEO fragments a feed headline drags along. Backstop only —
+ *  the model is asked not to produce them; this catches it when it does. */
+const HEADLINE_TAIL_RE =
+  /\s*[|–—-]\s*(etimes|e-times|times of india|toi|hindustan times|ht city|pinkvilla|filmibeat|koimoi|news18|india today|ndtv|firstpost|indian express|the hindu|deccan herald|zoom|bollywood hungama|sacnilk|moneycontrol|business standard|dt next|republic world|outlook india|123telugu|gulte|tupaki|watch video|watch|photos?|pics?|exclusive|read more|full list|details inside)\s*$/i;
+
+/**
+ * WORD-BOUNDARY ELLIPSIS LAW. Truncate to `max` characters without ever cutting
+ * mid-word: back up to the last space and mark the cut. A card that reads
+ * "Chandu C" is worse than one that reads "Chandu…" — the first looks like a
+ * bug, the second like an edit. Shared by the copy layer and the templates'
+ * autoshrink fallback so both cut the same way.
+ */
+export function clampWords(s: string, max: number): string {
+  const t = s.trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max - 1);
+  const lastSpace = cut.lastIndexOf(" ");
+  // If there is no space in range the "word" is longer than the budget; a hard
+  // cut is the only option left, and it still gets the ellipsis.
+  const base = lastSpace > max * 0.5 ? cut.slice(0, lastSpace) : cut;
+  return `${base.replace(/[\s,;:–—-]+$/, "")}…`;
+}
+
+/** Strip repeated tails ("… | Etimes | Times of India") and tidy punctuation. */
+export function stripHeadlineTail(s: string): string {
+  let out = s.trim();
+  for (let i = 0; i < 3; i++) {
+    const next = out.replace(HEADLINE_TAIL_RE, "").trim();
+    if (next === out) break;
+    out = next;
+  }
+  return out.replace(/[\s|,;:–—-]+$/, "").trim();
+}
+
+const CardCopySchema = z.object({
+  id: z.string(),
+  cardLine: z.string(),
+  cardDek: z.string(),
+});
+
 const CaptionSchema = z.object({
   caption: z.string(),
+  /** Per-story editorial card copy, keyed by the cluster id. */
+  cards: z.array(CardCopySchema).default([]),
   /** Every person the model named — cross-checked against the sweep. */
   namesUsed: z.array(z.string()).default([]),
   /** Handles it believes exist. NEVER auto-tagged; they go to the badge board. */
   mentionCandidates: z.array(z.string()).default([]),
 });
 
+export interface CardCopy {
+  cardLine: string;
+  cardDek: string;
+}
+
+export const CARD_LINE_MAX = 90;
+export const CARD_DEK_MAX = 120;
+
 export interface NewsPackage {
   caption: string;
+  /** Editorial card copy per cluster id — what templates render, never the raw headline. */
+  cardCopy: Record<string, CardCopy>;
   captionHashtags: string[];
   commentHashtags: string[];
   /** §3 law 7 — for MANUAL verification. No tick, no tag. */
@@ -149,14 +209,52 @@ export function unicodeBold(s: string): string {
   return out;
 }
 
+/** The seven editorial languages, for content-derived language tags. */
+const TAG_LANGUAGES = ["Telugu", "Tamil", "Malayalam", "Kannada", "Hindi", "Bengali", "Marathi"] as const;
+
+/**
+ * Languages the PACKAGE is actually about, read from the story TEXT.
+ *
+ * `cluster.language` is the language of the GATHER QUERY that found the story,
+ * not the language of the film it is about — the 72nd NFA story was caught by
+ * the Hindi query while being about Telugu and Malayalam films, and the package
+ * went out tagged #HindiCinema. Tags now derive from language names appearing in
+ * the headline and the editorial card copy. Falls back to the query language
+ * only when the text names none, which is better than tagging nothing.
+ */
+export function packageLanguages(
+  edition: ComposedEdition,
+  cardCopy: Record<string, CardCopy> = {}
+): string[] {
+  const found = new Set<string>();
+  for (const c of edition.cards) {
+    const cl = c.resolved.story.cluster;
+    const copy = cardCopy[cl.id];
+    const text = `${cl.headline} ${copy?.cardLine ?? ""} ${copy?.cardDek ?? ""}`.toLowerCase();
+    for (const lang of TAG_LANGUAGES) {
+      if (text.includes(lang.toLowerCase())) found.add(lang);
+    }
+  }
+  if (found.size > 0) return [...found];
+  // Nothing named in the copy — fall back to the query languages.
+  const fallback = new Set<string>();
+  for (const c of edition.cards) {
+    const l = c.resolved.story.cluster.language;
+    if (l && (TAG_LANGUAGES as readonly string[]).includes(l)) fallback.add(l);
+  }
+  return [...fallback];
+}
+
 /** Base hashtags + per-story language/segment tags, deduped, capped at 30. */
-export function buildHashtags(edition: ComposedEdition): string[] {
+export function buildHashtags(
+  edition: ComposedEdition,
+  cardCopy: Record<string, CardCopy> = {}
+): string[] {
   const tags: string[] = ["#TBSI", "#TheBigScreenIndex", "#IndianCinema"];
   const seg = edition.cover?.segment ?? edition.cards[0]?.segment;
   if (seg) tags.push(`#${seg.badge.replace(/[^A-Za-z]/g, "")}`);
+  for (const lang of packageLanguages(edition, cardCopy)) tags.push(`#${lang}Cinema`);
   for (const c of edition.cards) {
-    const lang = c.resolved.story.cluster.language;
-    if (lang) tags.push(`#${lang}Cinema`);
     const film = c.resolved.film?.title;
     if (film) tags.push("#" + film.replace(/[^A-Za-z0-9]/g, ""));
   }
@@ -191,7 +289,9 @@ function buildPrompt(edition: ComposedEdition, istDate: string, retryFor?: strin
   const stories = edition.cover ? [edition.cover, ...edition.cards.filter((c) => c !== edition.cover)] : edition.cards;
   const seg = stories[0]!.segment;
 
-  let p = `Write an Instagram caption for @thebigscreenindex, an Indian cinema editorial page whose brand is ACCURACY.
+  const idList = stories.map((s) => s.resolved.story.cluster.id).join(", ");
+
+  let p = `Write an Instagram caption AND per-story card copy for @thebigscreenindex, an Indian cinema editorial page whose brand is ACCURACY.
 
 DATE: ${istDate}
 SEGMENT: ${seg.badge}
@@ -214,11 +314,21 @@ HARD RULES — these are editorial law, not style:
 - NO fact that is not in the list above. Do not add context you remember.
 - NAMES: prefer a person's FULL name. If a source printed only a short form, keep the source's form — do not expand it from memory, and do not invent a surname.
 - Do not speculate about what a story means or what comes next.
+- AWARDS ATTRIBUTION: a person-category award belongs to the PERSON, for the film — "Rajkumar Periasamy won Best Director for 'Amaran'", never "Amaran won Best Director". Film-category awards (Best Tamil Film, Best Feature Film) belong to the film. Getting this backwards misstates who was honoured.
 - Under 150 words total.
 
+CARD COPY — one entry per story id (${idList}), in "cards":
+- "cardLine": the story as an editor would set it on a card. SENTENCE CASE — capitalise only the first word and genuine proper nouns (film titles, people, places, platforms). Do NOT Title Case It Like This. ≤${CARD_LINE_MAX} characters. NO outlet name, NO "| Etimes"-style tail, no SEO stuffing, no clickbait. It must read as a finished line, not a truncated one.
+- Name the film's LANGUAGE or industry in the cardLine or cardDek when the sources state it ("the Malayalam thriller", "the Telugu drama") — the package's hashtags are derived from it, and a Telugu package must never go out tagged for another industry.
+- "cardDek": one supporting clause, ≤${CARD_DEK_MAX} characters, adding a verified detail the cardLine omits. No source name (the card credits the outlet separately).
+- Both obey every rule above — same facts, same names, same awards attribution, no superlatives.
+
 Also return:
-- "namesUsed": every person you named.
-- "mentionCandidates": @handles you believe exist for those people (these are NEVER auto-tagged — a human verifies each).`;
+- "namesUsed": every person you named, in the caption OR in any card copy.
+- "mentionCandidates": @handles you believe exist for those people (these are NEVER auto-tagged — a human verifies each).
+
+Return JSON in EXACTLY this shape — "caption" is ONE string containing the whole caption with newlines, and "cards" is an ARRAY:
+{"caption":"line one\\nline two\\n…","cards":[{"id":"c1","cardLine":"…","cardDek":"…"}],"namesUsed":["…"],"mentionCandidates":["@…"]}`;
 
   if (retryFor?.length) {
     p +=
@@ -242,6 +352,7 @@ export async function buildPackage(
   const hashtags = buildHashtags(edition);
   const empty: NewsPackage = {
     caption: "",
+    cardCopy: {},
     captionHashtags: hashtags.slice(0, CAPTION_HASHTAGS),
     commentHashtags: hashtags.slice(CAPTION_HASHTAGS),
     badgeCheckBoard: [],
@@ -273,7 +384,18 @@ export async function buildPackage(
       log.warn(`  Caption draft failed — ${msg}`);
       return { ...empty, caption: `(caption unavailable — ${msg})` };
     }
-    violations = sweepCaption(out.caption, stories);
+    // ── EVERYTHING GENERATED IS SWEPT (ruling A) ─────────────────────────────
+    // Caption, cardLine and cardDek are all sentence case, so a run of
+    // capitalised words really is a name and the sweep works as designed.
+    //
+    // This is why cardLine is sentence case rather than Title Case: under Title
+    // Case every 2–3 word phrase is name-shaped, and the first live run held a
+    // valid caption over "A Box-Office Fall" and "Malayalam Action Film" —
+    // neither a person. A guard that cries wolf gets switched off, so the copy
+    // style bent to keep the guard real. A fabricated name on a CARD is the
+    // worst kind: it is set in type on the image.
+    const cardText = out.cards.map((c) => `${c.cardLine}\n${c.cardDek}`).join("\n");
+    violations = sweepCaption(`${out.caption}\n${cardText}`, stories);
     if (violations.length === 0) break;
     log.warn(`  Caption name sweep flagged: ${violations.join(", ")}${attempt === 0 ? " — retrying once" : " — HELD"}`);
   }
@@ -287,6 +409,17 @@ export async function buildPackage(
   const lines = out.caption.trim().split("\n");
   const caption = [unicodeBold(lines[0] ?? ""), ...lines.slice(1)].join("\n");
 
+  // Card copy, tail-stripped and hard-capped. The cap is a truncation of LAST
+  // resort — the prompt asks for a finished line — so it cuts on a word
+  // boundary and marks the cut, never mid-word.
+  const cardCopy: Record<string, CardCopy> = {};
+  for (const c of out.cards) {
+    cardCopy[c.id] = {
+      cardLine: clampWords(stripHeadlineTail(c.cardLine), CARD_LINE_MAX),
+      cardDek: clampWords(stripHeadlineTail(c.cardDek), CARD_DEK_MAX),
+    };
+  }
+
   const board = out.namesUsed.map((name) => {
     const cand = out!.mentionCandidates.find((h) =>
       h.toLowerCase().replace(/[^a-z]/g, "").includes(name.toLowerCase().split(" ")[0] ?? "~")
@@ -299,10 +432,15 @@ export async function buildPackage(
     `Sources:\n${sourceLines.join("\n")}` +
     `\n\nFigures are estimates where stated. Corrections go here.`;
 
+  // Recomputed now that the editorial copy exists: language tags read the card
+  // copy, which names the film's real language more reliably than the headline.
+  const finalTags = buildHashtags(edition, cardCopy);
+
   return {
     caption,
-    captionHashtags: hashtags.slice(0, CAPTION_HASHTAGS),
-    commentHashtags: hashtags.slice(CAPTION_HASHTAGS),
+    cardCopy,
+    captionHashtags: finalTags.slice(0, CAPTION_HASHTAGS),
+    commentHashtags: finalTags.slice(CAPTION_HASHTAGS),
     badgeCheckBoard: board,
     pinnedComment: pinned,
     heldFor: [],

@@ -142,8 +142,31 @@
       px -= 1; el.style.fontSize = px + 'px';
     }
   }
-  document.querySelectorAll('[data-fit]').forEach(fitLine);
-  document.querySelectorAll('[data-fit-block]').forEach(fitBlock);
+  /* WORD-BOUNDARY ELLIPSIS LAW - the final fallback after autoshrink.
+     When a node is still overflowing at its data-min font size, trim WORDS off
+     the end and mark the cut. Never a mid-word clip: a card reading "Chandu C"
+     looks like a bug, "Chandu..." looks like an edit. Mirrors clampWords() in
+     news-caption.ts so copy and render cut the same way. */
+  function ellipsize(el, fits) {
+    var words = (el.textContent || '').trim().split(/\s+/);
+    while (words.length > 1 && !fits(el)) {
+      words.pop();
+      el.textContent = words.join(' ') + '…';
+    }
+    if (!fits(el) && words.length === 1) {
+      var t = el.textContent;
+      while (t.length > 2 && !fits(el)) { t = t.slice(0, -2) + '…'; el.textContent = t; }
+    }
+  }
+  document.querySelectorAll('[data-fit]').forEach(function (el) {
+    fitLine(el);
+    ellipsize(el, function (e) { return e.scrollWidth <= e.clientWidth; });
+  });
+  document.querySelectorAll('[data-fit-block]').forEach(function (el) {
+    fitBlock(el);
+    var maxH = el.dataset.maxh ? parseFloat(el.dataset.maxh) : 430;
+    ellipsize(el, function (e) { return e.scrollHeight <= maxH && e.scrollWidth <= e.clientWidth; });
+  });
   document.documentElement.setAttribute('data-fit-done', '1');
 })();
 </script>

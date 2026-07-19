@@ -87,8 +87,13 @@ export function isPersonBacked(toks: string[], persons: Set<string>[]): boolean 
 // A capitalized "name word": Unicode-uppercase start, allowing internal
 // apostrophes/hyphens and initials' periods ("S.", "A.R.", "D'Cruz", "Mr.").
 const CAP_WORD = String.raw`\p{Lu}[\p{L}'’.\-]*`;
+// Intra-line whitespace ONLY. A plain \s+ crosses newlines, so the last word of
+// one paragraph and the first word of the next fused into a phantom name: a live
+// dry run held a valid caption over "Variety.\nOh..", which is two paragraphs,
+// not a person. Names do not span line breaks.
+const GAP = String.raw`[^\S\r\n]+`;
 /** (a) A run of 2–3 consecutive capitalized words = a name-shaped N-gram. */
-export const NGRAM_RE = new RegExp(`(${CAP_WORD}(?:\\s+${CAP_WORD}){1,2})`, "gu");
+export const NGRAM_RE = new RegExp(`(${CAP_WORD}(?:${GAP}${CAP_WORD}){1,2})`, "gu");
 // (b) A join-trigger + a SINGLE capitalized token NOT followed by another capital
 //     (multi-word runs after a trigger are already the N-gram rule's job). Triggers
 //     are matched WITHOUT the /i flag, which would defeat \p{Lu}.
@@ -97,7 +102,7 @@ const TRIGGER = String.raw`(?:\b[Ww]ith|\b[Ss]tarring|\b[Aa]longside|\b[Ff]eatur
 // backtrack to a partial like "Ani" from "Anil"); the second keeps a multi-word
 // name (whose 2nd word is capitalized) as the N-gram rule's job, not a lone single.
 export const TRIGGER_SINGLE_RE = new RegExp(
-  `${TRIGGER}\\s+(${CAP_WORD})(?![\\p{L}'’.\\-])(?!\\s+\\p{Lu})`,
+  `${TRIGGER}${GAP}(${CAP_WORD})(?![\\p{L}'’.\\-])(?!${GAP}\\p{Lu})`,
   "gu"
 );
 

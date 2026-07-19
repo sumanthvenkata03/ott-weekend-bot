@@ -58,6 +58,12 @@
   /* Bottom of quadrant: GOLD MONO award/fact lines only — fb:60 29-30px track 6
      w700. §2.2: "No serif at bottom (it collides with posters' own title art)." */
   .quad-foot { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 30px 26px; }
+  /* Editorial dek — the supporting clause under the film name. Cream serif so it
+     reads as copy, not as a credit; sits ABOVE the gold mono fact line. */
+  .dek {
+    font-size: 21px; font-weight: 600; line-height: 1.24; color: var(--news-cream);
+    text-align: center; margin-bottom: 12px; text-shadow: 0 2px 10px rgba(0,0,0,0.9);
+  }
   .facts {
     font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700;
     letter-spacing: 3px; color: var(--gold); text-transform: uppercase;
@@ -143,7 +149,7 @@
         </div>
       {% else %}
         <div class="typo">
-          <div class="typo-name" data-fit-block data-min="30" data-maxh="330">{{ q.film }}</div>
+          <div class="typo-name" data-fit-block data-min="26" data-maxh="300">{{ q.film }}</div>
         </div>
       {% endif %}
 
@@ -156,6 +162,7 @@
 
       {% if not q.alsoHonoured %}
       <div class="quad-foot">
+        {% if q.dek %}<div class="dek" data-fit-block data-min="14" data-maxh="86">{{ q.dek }}</div>{% endif %}
         {% for f in q.facts %}<div class="facts" data-fit data-min="9">{{ f }}</div>{% endfor %}
         {% if q.credit %}<div class="credit" data-fit data-min="9">{{ q.credit }}</div>{% endif %}
       </div>
@@ -189,8 +196,31 @@
       px -= 1; el.style.fontSize = px + 'px';
     }
   }
-  document.querySelectorAll('[data-fit]').forEach(fitLine);
-  document.querySelectorAll('[data-fit-block]').forEach(fitBlock);
+  /* WORD-BOUNDARY ELLIPSIS LAW - the final fallback after autoshrink.
+     When a node is still overflowing at its data-min font size, trim WORDS off
+     the end and mark the cut. Never a mid-word clip: a card reading "Chandu C"
+     looks like a bug, "Chandu..." looks like an edit. Mirrors clampWords() in
+     news-caption.ts so copy and render cut the same way. */
+  function ellipsize(el, fits) {
+    var words = (el.textContent || '').trim().split(/\s+/);
+    while (words.length > 1 && !fits(el)) {
+      words.pop();
+      el.textContent = words.join(' ') + '…';
+    }
+    if (!fits(el) && words.length === 1) {
+      var t = el.textContent;
+      while (t.length > 2 && !fits(el)) { t = t.slice(0, -2) + '…'; el.textContent = t; }
+    }
+  }
+  document.querySelectorAll('[data-fit]').forEach(function (el) {
+    fitLine(el);
+    ellipsize(el, function (e) { return e.scrollWidth <= e.clientWidth; });
+  });
+  document.querySelectorAll('[data-fit-block]').forEach(function (el) {
+    fitBlock(el);
+    var maxH = el.dataset.maxh ? parseFloat(el.dataset.maxh) : 430;
+    ellipsize(el, function (e) { return e.scrollHeight <= maxH && e.scrollWidth <= e.clientWidth; });
+  });
   document.documentElement.setAttribute('data-fit-done', '1');
 })();
 </script>

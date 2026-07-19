@@ -64,8 +64,10 @@ async function main(): Promise<void> {
     data: {
       quads: [
         { posterUrl: P1, cropPosition: "center 28%", film: "Balan The Boy",
-          facts: ["TBSI RADAR · OTT-DATE"], credit: "REPUBLIC WORLD" },
-        { film: "Maa Inti Bangaaram", facts: ["THE BUZZ · BOXOFFICE"], credit: "KOIMOI" },
+          dek: "The Malayalam thriller arrives on ZEE5 across five languages.",
+          facts: ["TBSI RADAR · OTT-DATE"], credit: "REPUBLIC WORLD · 123TELUGU" },
+        { film: "Maa Inti Bangaaram", dek: "The action comedy closes an eight-week theatrical run.",
+          facts: ["THE BUZZ · BOXOFFICE"], credit: "KOIMOI" },
         { posterUrl: P2, cropPosition: "center 30%", film: "Raayan",
           facts: ["THE BUZZ · AWARDS"], credit: "THE HINDU" },
         { film: "Committee Kurrollu", facts: ["THE BUZZ · AWARDS"], credit: "123TELUGU" },
@@ -80,8 +82,12 @@ async function main(): Promise<void> {
       quads: [
         { film: "Feminichi Fathima", facts: ["TBSI RADAR · OTT-DATE"], credit: "THE HINDU" },
         { film: "Srikanth", facts: ["THE BUZZ · BOXOFFICE"], credit: "PINKVILLA" },
-        { film: "A Title Long Enough To Need The Block Autoshrink Here",
-          facts: ["THE BUZZ · CASTING"], credit: "GULTE" },
+        // ELLIPSIS-LAW STRESS: a raw SEO headline, far past any card budget.
+        // Autoshrink hits data-min, then words are trimmed on a boundary — the
+        // card must never read "...Chandu C".
+        { film: "Kartik Aaryan Shares The Best Actor Honour For Chandu Champion At The 72nd National Film Awards In New Delhi",
+          dek: "A supporting clause that is itself much too long for the quadrant and must be trimmed on a word boundary rather than clipped mid-word.",
+          facts: ["THE BUZZ · AWARDS"], credit: "THE HINDU" },
         { film: "35 – Chinna Katha Kaadu", facts: ["TBSI REGISTER · AWARDS"], credit: "SAKSHI POST" },
       ],
     },
