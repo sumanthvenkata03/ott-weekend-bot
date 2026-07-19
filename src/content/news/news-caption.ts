@@ -24,6 +24,99 @@ export const CAPTION_HASHTAGS = 6;
 /** Instagram's hard cap across caption + comments. */
 export const MAX_HASHTAGS = 30;
 
+// ── SOURCE ATTRIBUTION ──────────────────────────────────────────────────────
+//
+// The pinned comment credits the page we ACTUALLY CITE, so the outlet name must
+// be derived from the sourceUrl's own domain — never from the cluster's outlet
+// list. Those are different objects: the cluster records who ran the story in
+// the feed, while sourceUrl is whatever page verification retrieved to confirm
+// it. Pairing outlets[0] with sourceUrl printed "Business Standard —
+// https://outlookindia.com/…", crediting an outlet that had nothing to do with
+// that page. A wrong credit is a factual error on a page whose brand is accuracy.
+//
+// Display names reuse the Tier-A registry's own naming (TIER_A_SOURCES.names)
+// so one editorial vocabulary governs both tiering and attribution. The two
+// registry arrays are NOT 1:1 (a domain can have several name spellings), so
+// the mapping is explicit rather than zipped.
+
+/** domain → printed outlet name. Unknown domains print bare (see outletForUrl). */
+export const DOMAIN_OUTLET: Readonly<Record<string, string>> = {
+  // Tier-A registry domains
+  "123telugu.com": "123telugu",
+  "filmcompanion.in": "Film Companion",
+  "thehindu.com": "The Hindu",
+  "timesofindia.indiatimes.com": "The Times of India",
+  "indianexpress.com": "The Indian Express",
+  "cinemaexpress.com": "Cinema Express",
+  "newindianexpress.com": "The New Indian Express",
+  "ottplay.com": "OTTplay",
+  "hindustantimes.com": "Hindustan Times",
+  "gulte.com": "Gulte",
+  "greatandhra.com": "GreatAndhra",
+  "sify.com": "Sify",
+  "onlykollywood.com": "Only Kollywood",
+  "behindwoods.com": "Behindwoods",
+  "baradwajrangan.com": "Baradwaj Rangan",
+  // Outlets verification has actually cited in live runs
+  "outlookindia.com": "Outlook India",
+  "pinkvilla.com": "Pinkvilla",
+  "republicworld.com": "Republic World",
+  "dtnext.in": "DT Next",
+  "koimoi.com": "Koimoi",
+  "sacnilk.com": "Sacnilk",
+  "business-standard.com": "Business Standard",
+  "businesstoday.in": "Business Today",
+  "indiatoday.in": "India Today",
+  "news18.com": "News18",
+  "moneycontrol.com": "Moneycontrol",
+  "filmibeat.com": "Filmibeat",
+  "bollywoodhungama.com": "Bollywood Hungama",
+  "deccanchronicle.com": "Deccan Chronicle",
+  "economictimes.indiatimes.com": "The Economic Times",
+  "ndtv.com": "NDTV",
+  "zee5.com": "ZEE5",
+};
+
+/**
+ * Printed outlet name for a cited URL. Falls back to the bare registrable
+ * domain — an unknown outlet is printed honestly rather than guessed at or
+ * silently attributed to someone else. Returns "" for an unusable URL.
+ */
+export function outletForUrl(url: string): string {
+  let host: string;
+  try {
+    host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return "";
+  }
+  if (DOMAIN_OUTLET[host]) return DOMAIN_OUTLET[host]!;
+  // Suffix match so a regional subdomain still credits its parent masthead.
+  for (const [d, name] of Object.entries(DOMAIN_OUTLET)) {
+    if (host.endsWith(`.${d}`)) return name;
+  }
+  return host;
+}
+
+/**
+ * "Outlet — url" lines for the pinned comment, deduped. Two stories confirmed
+ * off the SAME page produce one line, not two.
+ */
+export function buildSourceLines(stories: { sourceUrl: string }[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of stories) {
+    if (!s.sourceUrl) continue;
+    const outlet = outletForUrl(s.sourceUrl);
+    if (!outlet) continue;
+    const line = `${outlet} — ${s.sourceUrl}`;
+    const key = line.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(line);
+  }
+  return out;
+}
+
 const CaptionSchema = z.object({
   caption: z.string(),
   /** Every person the model named — cross-checked against the sweep. */
@@ -201,10 +294,10 @@ export async function buildPackage(
     return { name, candidateHandle: cand ?? null };
   });
 
+  const sourceLines = buildSourceLines(stories);
   const pinned =
-    `Sources: ` +
-    stories.map((s) => `${s.cluster.outlets[0] ?? "source"} — ${s.sourceUrl}`).join(" · ") +
-    `\nFigures are estimates where stated. Corrections go here.`;
+    `Sources:\n${sourceLines.join("\n")}` +
+    `\n\nFigures are estimates where stated. Corrections go here.`;
 
   return {
     caption,

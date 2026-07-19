@@ -122,6 +122,24 @@ export interface PackageDelivery {
   zipUrl?: string;
 }
 
+/**
+ * The caption text embedded in the deck zip — everything needed to post without
+ * opening anything else: caption, the in-caption hashtag set, the first-comment
+ * set, and the pinned comment. A HELD caption says so in the file rather than
+ * shipping a blank the owner might paste by accident.
+ */
+export function zipCaptionText(pkg: NewsPackage): string {
+  if (pkg.heldFor.length > 0) {
+    return `CAPTION HELD — unbacked names: ${pkg.heldFor.join(", ")}\nDo not post this deck until the copy is rewritten.`;
+  }
+  const parts = [pkg.caption.trim(), "", pkg.captionHashtags.join(" ")];
+  if (pkg.commentHashtags.length > 0) {
+    parts.push("", "— FIRST COMMENT —", pkg.commentHashtags.join(" "));
+  }
+  if (pkg.pinnedComment) parts.push("", "— PINNED COMMENT —", pkg.pinnedComment);
+  return parts.join("\n");
+}
+
 /** Build the Slack package message. Exported so the suite can assert its shape. */
 export function buildPackageMessage(
   istDate: string,
@@ -282,7 +300,14 @@ async function main(opts: { slack: boolean; testBanner: boolean }): Promise<void
   log.info(`  WHY: ${edition.why}`);
   for (const d of edition.dropped) log.info(`  dropped · ${d.headline} — ${d.reason}`);
 
-  // 7 — render + 8 — caption/package (skipped entirely on a quiet day)
+  // 7 — caption + package. Built BEFORE delivery on purpose: the deck zip
+  // embeds the real swept caption, so the caption has to exist first. A zip
+  // that says "see Slack" is not grab-and-post — it forces the owner back to
+  // another window at the moment they are trying to publish.
+  const pkg = await buildPackage(edition, istDate);
+  if (pkg.heldFor.length) log.warn(`  Caption HELD — unbacked names: ${pkg.heldFor.join(", ")}`);
+
+  // 8 — render + deliver (skipped entirely on a quiet day)
   let render: NewsRenderResult = { cardPaths: [], notes: [] };
   const delivery: PackageDelivery = { previewUrls: [] };
   if (edition.format !== "none") {
@@ -301,7 +326,7 @@ async function main(opts: { slack: boolean; testBanner: boolean }): Promise<void
       // as a direct PNG link — zipping one image would be theatre.
       if (render.coverPath && render.cardPaths.length > 0) {
         try {
-          await writeCaptionFile("output/posts", istDate, "(see Slack package)", NEWS_SLUG);
+          await writeCaptionFile("output/posts", istDate, zipCaptionText(pkg), NEWS_SLUG);
           const zip = await buildAndUploadDeckZip({ outputDir: "output/posts", date: istDate, slug: NEWS_SLUG });
           delivery.zipUrl = zip.url;
         } catch (err) {
@@ -310,9 +335,6 @@ async function main(opts: { slack: boolean; testBanner: boolean }): Promise<void
       }
     }
   }
-
-  const pkg = await buildPackage(edition, istDate);
-  if (pkg.heldFor.length) log.warn(`  Caption HELD — unbacked names: ${pkg.heldFor.join(", ")}`);
 
   const stats: RunStats = {
     gathered: fresh.length,

@@ -2,7 +2,7 @@
 // The chunker cover is regression for a REAL failure: the first live Phase-1
 // send returned 400 because a ~6k-char draft went out as one section.
 import { describe, it, expect } from "vitest";
-import { buildPackageMessage, resolveNewsWebhook, toSectionBlocks, type PackageDelivery } from "../news-edition.js";
+import { buildPackageMessage, resolveNewsWebhook, toSectionBlocks, zipCaptionText, type PackageDelivery } from "../news-edition.js";
 import type { ComposedEdition, SelectedStory } from "../../content/news/news-compose.js";
 import type { NewsPackage } from "../../content/news/news-caption.js";
 import type { ScoredCluster } from "../../content/news/news-score.js";
@@ -205,5 +205,39 @@ describe("buildPackageMessage", () => {
     for (const b of asBlocks(blocks)) {
       if (b.text?.text) expect(b.text.text.length).toBeLessThanOrEqual(3000);
     }
+  });
+});
+
+describe("zipCaptionText — the deck zip is self-contained", () => {
+  it("embeds the REAL caption, not a pointer at Slack", () => {
+    const t = zipCaptionText(pkg());
+    expect(t).toContain("𝗕𝗼𝗹𝗱 headline");
+    expect(t).toContain("Body per The Hindu.");
+    expect(t.toLowerCase()).not.toContain("see slack");
+  });
+
+  it("carries both hashtag sets, labelled", () => {
+    const t = zipCaptionText(pkg());
+    expect(t).toContain("#TBSI #IndianCinema");
+    expect(t).toContain("— FIRST COMMENT —");
+    expect(t).toContain("#OTT #MovieNews");
+  });
+
+  it("carries the pinned comment", () => {
+    const t = zipCaptionText(pkg());
+    expect(t).toContain("— PINNED COMMENT —");
+    expect(t).toContain("https://thehindu.com/x");
+  });
+
+  it("a HELD caption ships a refusal, never a blank to paste by accident", () => {
+    const t = zipCaptionText(pkg({ heldFor: ["Rajinikanth"], caption: "" }));
+    expect(t).toContain("CAPTION HELD");
+    expect(t).toContain("Rajinikanth");
+    expect(t).toContain("Do not post this deck");
+  });
+
+  it("omits the first-comment block when there are no overflow hashtags", () => {
+    const t = zipCaptionText(pkg({ commentHashtags: [] }));
+    expect(t).not.toContain("— FIRST COMMENT —");
   });
 });

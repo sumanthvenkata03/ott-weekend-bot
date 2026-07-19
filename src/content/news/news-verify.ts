@@ -109,6 +109,7 @@ RULES — read them as hard constraints:
 3. "basis": ONE line, max 20 words, stating what you found — name the outlet. If unconfirmed, state what was missing (e.g. "only aggregator copies found, no primary outlet page").
 4. Do NOT confirm from your own prior knowledge. A fact you remember but could not retrieve is UNCONFIRMED.
 5. Return exactly one entry per id given. Do not invent ids.
+6. FIGURES. If the headline's CENTRAL claim is a number (a box-office total, a deal value, a percentage drop) and your sources disagree on that number, set "confirmed": false and say which sources conflict — the story IS the figure, so an unsettled figure is an unsettled story. If the figure is INCIDENTAL to an event that is itself confirmed, confirm the event and mark the figure as an estimate in "basis" ("an estimated ...").
 
 Return JSON: {"stories":[{"id":"...","confirmed":true,"sourceUrl":"...","basis":"..."}]}`;
 }
