@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900&family=JetBrains+Mono:wght@400;500;600;700;800&family=Baloo+2:wght@700;800&display=swap" rel="stylesheet">
+{% include "_design-tokens.html" %}
+<style>
+  /* ── NEWS · QUADRANT REGISTER (spec §2.2 v3) ───────────────────────────────
+     ZERO GUTTERS — posters ARE the layout. 2×2 of 540×675 CSS (1080×1350 @2x,
+     build_fullbleed.py QW/QH). No background is visible anywhere: any gap is a
+     shipping defect, and §4.3's seam check asserts it.
+     All builder constants HALVED for 1080×1350 CSS authoring. */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 1080px; height: 1350px; overflow: hidden;
+    background: var(--ink); color: var(--cream);
+    font-family: 'Playfair Display', Georgia, serif;
+  }
+  :root { --gold: #F2D48A; --news-cream: #F6F0E4; }
+  .canvas { position: relative; width: 100%; height: 100%; overflow: hidden; }
+
+  /* Exactly 2×2, no gap, no padding — butted edge to edge. */
+  .grid {
+    position: absolute; inset: 0; z-index: 0;
+    display: grid; grid-template-columns: 540px 540px; grid-template-rows: 675px 675px;
+    gap: 0;
+  }
+  .quad { position: relative; overflow: hidden; background: var(--ink); }
+  .quad img { width: 100%; height: 100%; object-fit: cover;
+              object-position: {{ defaultCrop | default('center 28%') }}; }
+
+  /* Bottom scrim — fb:31-37 strength 0.92 over span 0.52, eased **1.15. */
+  .scrim {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 52%;
+    background: linear-gradient(180deg,
+      rgba(0,0,0,0) 0%, rgba(0,0,0,0.30) 42%, rgba(0,0,0,0.68) 74%, rgba(0,0,0,0.92) 100%);
+  }
+  /* Top-right corner veil — §2.2, elliptical, ~0.62 at the corner. */
+  .veil {
+    position: absolute; top: 0; right: 0; width: 78%; height: 46%;
+    background: radial-gradient(ellipse 100% 100% at 100% 0%,
+      rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.34) 46%, rgba(0,0,0,0) 78%);
+  }
+  .grain { position: absolute; inset: 0; opacity: 0.05; mix-blend-mode: overlay; }
+
+  /* MAROON TYPOGRAPHIC QUADRANT — fb:66 gradient (64,22,16)→(30,10,7) + grain.
+     The designed fallback for a film with no available art. */
+  .typo {
+    position: absolute; inset: 0;
+    background: linear-gradient(180deg, #40160F 0%, #1E0A07 100%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 0 34px; text-align: center;
+  }
+  .typo-name {                                  /* fb:76 serif 150 w850 → 75 */
+    font-size: 66px; font-weight: 800; line-height: 1.06; color: var(--news-cream);
+  }
+
+  /* Bottom of quadrant: GOLD MONO award/fact lines only — fb:60 29-30px track 6
+     w700. §2.2: "No serif at bottom (it collides with posters' own title art)." */
+  .quad-foot { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 30px 26px; }
+  .facts {
+    font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700;
+    letter-spacing: 3px; color: var(--gold); text-transform: uppercase;
+    line-height: 1.62; text-align: center;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.85);
+  }
+  .credit {                                     /* fb:53 credit 31 track 4 cream */
+    margin-top: 8px; font-family: 'JetBrains Mono', monospace; font-size: 14px;
+    font-weight: 500; letter-spacing: 2px; color: var(--news-cream);
+    text-transform: uppercase; text-align: center; opacity: 0.94;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.85);
+  }
+
+  /* ── ×N SEAL — top-right, ONLY when the film won 2+ (§2.2). Singles get none.
+       Two gold rings + ×N Playfair 900 + tiny AWARDS mono inside. Radii halved. ── */
+  /* COLLISION RULE — §4.3 "pairwise collision assertions == NONE".
+     A top-row quadrant's top-right corner IS the canvas centre, which is where
+     the handle pill lives (y 32–80). A seal at top:22 there sits UNDER the pill:
+     the first render of this file hid a ×3 behind it. build_fullbleed.py never
+     implemented seals, so the reference does not solve this — top-row seals are
+     pushed below the pill band. Bottom-row corners are clear and keep top:22. */
+  .seal {
+    position: absolute; top: 22px; right: 22px; width: 92px; height: 92px;
+    border-radius: 50%; border: 2px solid var(--gold);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 4px rgba(0,0,0,0.30), inset 0 0 0 4px rgba(242,212,138,0.22);
+    background: rgba(0,0,0,0.26);
+  }
+  .seal-n { font-size: 38px; font-weight: 900; color: var(--gold); line-height: 1; }
+  .seal-l { margin-top: 2px; font-family: 'JetBrains Mono', monospace; font-size: 8px;
+            font-weight: 700; letter-spacing: 2px; color: var(--gold); opacity: 0.92; }
+  /* Film name in cream serif, right-aligned UNDER the seal — §2.2, maxw≈470 @2x. */
+  /* Top-row quadrants: clear the pill band (pill occupies y 32–80). */
+  .quad:nth-child(-n+2) .seal      { top: 98px; }
+  .quad:nth-child(-n+2) .seal-name { top: 198px; }
+  .seal-name {
+    position: absolute; top: 122px; right: 22px; width: 235px;
+    text-align: right; font-size: 26px; font-weight: 700; line-height: 1.14;
+    color: var(--news-cream); text-shadow: 0 2px 10px rgba(0,0,0,0.85);
+  }
+
+  /* "Also honoured." overflow quadrant — same maroon ground (§2.2). */
+  .also { position: absolute; inset: 0;
+    background: linear-gradient(180deg, #40160F 0%, #1E0A07 100%);
+    padding: 44px 34px; }
+  .also-h { font-size: 46px; font-weight: 800; color: var(--news-cream);
+            text-align: center; margin-bottom: 22px; }
+  .also-row { margin-bottom: 14px; }
+  .also-g { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700;
+            letter-spacing: 2.5px; color: var(--gold); text-transform: uppercase; }
+  .also-l { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 500;
+            letter-spacing: 2px; color: var(--news-cream); line-height: 1.62; }
+
+  /* Pill sits ABOVE the quadrants, centered (§1). */
+  .pill-wrap { position: absolute; top: 32px; left: 0; right: 0; z-index: 6; text-align: center; }
+  .pill-img { height: 48px; filter: drop-shadow(0 3px 12px rgba(0,0,0,0.6)); }
+  .pill-css {
+    display: inline-flex; align-items: center; gap: 7px; height: 48px; padding: 0 21px;
+    border-radius: 24px; background: #682D25; color: #FFEDDF;
+    font-family: 'Baloo 2', system-ui, sans-serif; font-weight: 800; font-size: 20px;
+    line-height: 1; box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="grid">
+    {% for q in quads %}
+    <div class="quad">
+      {% if q.posterUrl %}
+        <img src="{{ q.posterUrl }}" alt=""{% if q.cropPosition %} style="object-position:{{ q.cropPosition }}"{% endif %}>
+        <div class="veil"></div>
+        <div class="scrim"></div>
+      {% elif q.alsoHonoured %}
+        <div class="also">
+          <div class="also-h">Also honoured.</div>
+          {% for row in q.alsoHonoured %}
+          <div class="also-row">
+            <div class="also-g" data-fit data-min="9">{{ row.label }}</div>
+            {% for l in row.lines %}<div class="also-l" data-fit data-min="9">{{ l }}</div>{% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="typo">
+          <div class="typo-name" data-fit-block data-min="30" data-maxh="330">{{ q.film }}</div>
+        </div>
+      {% endif %}
+
+      <svg class="grain"><filter id="gq{{ loop.index }}"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3"/></filter><rect width="100%" height="100%" filter="url(#gq{{ loop.index }})"/></svg>
+
+      {% if q.sealCount and q.sealCount >= 2 %}
+        <div class="seal"><div class="seal-n">×{{ q.sealCount }}</div><div class="seal-l">AWARDS</div></div>
+        <div class="seal-name" data-fit-block data-min="16" data-maxh="90">{{ q.film }}</div>
+      {% endif %}
+
+      {% if not q.alsoHonoured %}
+      <div class="quad-foot">
+        {% for f in q.facts %}<div class="facts" data-fit data-min="9">{{ f }}</div>{% endfor %}
+        {% if q.credit %}<div class="credit" data-fit data-min="9">{{ q.credit }}</div>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="pill-wrap">
+    {% if pillPng %}
+      <img class="pill-img" src="{{ pillPng }}" alt="@thebigscreenindex">
+    {% else %}
+      <span class="pill-css"><span>🎬</span>@thebigscreenindex</span>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+/* Autoshrink law — see news-radar-card.html. fb:42 uses px-=1 for mono. */
+(function () {
+  function fitLine(el) {
+    var min = parseFloat(el.dataset.min || '9');
+    var px = parseFloat(getComputedStyle(el).fontSize);
+    while (el.scrollWidth > el.clientWidth && px > min) { px -= 1; el.style.fontSize = px + 'px'; }
+  }
+  function fitBlock(el) {
+    var min = parseFloat(el.dataset.min || '9');
+    var px = parseFloat(getComputedStyle(el).fontSize);
+    var maxH = el.dataset.maxh ? parseFloat(el.dataset.maxh) : 300;
+    while ((el.scrollHeight > maxH || el.scrollWidth > el.clientWidth) && px > min) {
+      px -= 1; el.style.fontSize = px + 'px';
+    }
+  }
+  document.querySelectorAll('[data-fit]').forEach(fitLine);
+  document.querySelectorAll('[data-fit-block]').forEach(fitBlock);
+  document.documentElement.setAttribute('data-fit-done', '1');
+})();
+</script>
+</body>
+</html>

@@ -52,12 +52,40 @@ export const STORY_CLASSES: ReadonlyArray<{
   },
   {
     name: "listicle",
-    re: /\b(this week|this weekend|the weekend)\b|\bott releases\b|\b\d+\s+best\b|\btop\s+\d+\b|\bwhat to watch\b|\bnew releases\b|movies\s*&\s*web series|streaming online|\([A-Za-z]+ \d+\s*[-–]\s*[A-Za-z]+ \d+\)/i,
+    re: new RegExp(
+      [
+        // Weekly-wrap furniture
+        String.raw`\b(this week|this weekend|the weekend)\b`,
+        String.raw`\bott releases\b`,
+        String.raw`\bnew releases\b`,
+        String.raw`\bwhat to watch\b`,
+        // Ranked lists
+        String.raw`\b\d+\s+best\b`,
+        String.raw`\btop\s+\d+\b`,
+        // "5 Priyanka Chopra-Produced Movies …" / "6 New Films …"
+        String.raw`\b\d+\s+(?:[\w'’-]+\s+){0,4}(?:movies|films|shows|series|titles|picks)\b`,
+        // "…7 titles to watch" / "…10 things streaming"
+        String.raw`\b\d+\s+(?:[\w'’-]+\s+){0,4}(?:to watch|streaming)\b`,
+        // Catalogue pages
+        String.raw`movies\s*&\s*web series`,
+        String.raw`streaming online`,
+        // Date-range wraps: "(July 13 - July 19)"
+        String.raw`\([A-Za-z]+ \d+\s*[-–]\s*[A-Za-z]+ \d+\)`,
+        // PIPE-STUFFED SEO headlines: 2+ pipe-delimited segments
+        // ("… | Prime Video, Netflix, Sonyliv, Jiohotstar, Zee5 …").
+        String.raw`(?:\|[^|]{2,}){2,}`,
+      ].join("|"),
+      "i"
+    ),
     weight: 0,
     suppressed: true,
   },
   // ── real story classes, strongest first ───────────────────────────────────
   { name: "obituary",     re: /passes? away|passed away|\bdemise\b|no more at \d+|dies at|dead at \d+/i, weight: 5 },
+  // RUMOR sits ABOVE the factual classes on purpose: "reportedly locks a release
+  // date" is a rumour about a date, not a date. Misordering it would let
+  // unconfirmed trade chatter render as a RADAR announcement.
+  { name: "rumor",        re: /\breportedly\b|\bin talks\b|\brumou?r|\bbuzz is\b|\bsaid to be\b|\bspeculation\b/i, weight: 2 },
   // `national (film )?awards?` — the ruled fix. The 2026-07-18 shadow run missed
   // "72nd National Awards: Complete list of winners is here" (classed `general`,
   // weight 1) because the old matcher required the literal "national film award".

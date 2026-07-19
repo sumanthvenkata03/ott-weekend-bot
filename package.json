@@ -25,6 +25,7 @@
     "archives:reset": "tsx scripts/archives-reset.ts",
     "radar": "tsx src/jobs/reddit-radar.ts",
     "news": "tsx src/jobs/news-edition.ts",
+    "render:news": "tsx src/rendering/render-news-samples.ts",
     "test": "vitest run --dir src/discovery",
     "test:discovery": "vitest run --dir src/discovery"
   },

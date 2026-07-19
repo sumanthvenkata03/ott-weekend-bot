@@ -8,6 +8,17 @@ import type { WednesdayDropDraft } from "../../delivery/notion.js";
 import type { WedDropEdition } from "../../shared/wed-drop-edition.js";
 import { notableComposersBlock, enrichmentBlock } from "./_shared.js";
 import { compareByProminence } from "../../shared/prominence.js";
+// THE Name Sweep — one implementation, shared with Archives + the News Desk.
+// Wed keeps its OWN vocabulary (WED_DROP_NON_PERSON_WORDS below) and its own
+// self-report/superlative rules; only the sweep mechanics are shared.
+import {
+  buildAllowlist,
+  isPersonBacked,
+  nameCandidates,
+  nameTokens,
+  personTokens,
+  type NameAllowlist,
+} from "../../shared/copy-guard.js";
 
 /**
  * Wed Drop is a variable-count post now that it spans both this weekend's
@@ -199,15 +210,15 @@ interface CopyViolation {
   leader?: string;
 }
 
-// Honorifics carry no identity — strip them so "Mr. Bachchan" ~ "Bachchan".
-const HONORIFICS = new Set(["mr", "mrs", "ms", "dr", "sri", "smt", "shri"]);
-
 // Words that legitimately appear Titlecased in Wed Drop copy but are NOT people
 // (pillar boilerplate + join words + streaming brands). Any of these tokens inside
 // a swept run is treated as filler, so single non-name caps (Prayagraj, Eid,
 // Netflix) and editorial phrases ("This Weekend", "Now Streaming", "Prime Video")
 // are never mistaken for a name.
-const NON_PERSON_WORDS: readonly string[] = [
+// WED-DROP-SPECIFIC — deliberately not merged with Archives'/News' lists. Adding
+// a word here makes one more token count as filler, which makes the guard
+// LOOSER; the lists stay per-pillar so no site inherits another's blind spots.
+export const WED_DROP_NON_PERSON_WORDS: readonly string[] = [
   "the", "this", "that", "these", "now", "new", "our", "your", "one", "which",
   "weekend", "week", "weeks", "streaming", "stream", "theaters", "theatres",
   "theater", "cinema", "cinemas", "screen", "big", "box", "office", "drop",
@@ -231,61 +242,18 @@ const NON_PERSON_WORDS: readonly string[] = [
 // here: no score backing required.
 const SUPERLATIVE_RE = /\b(?:top|highest|best)[-\s]?rated\b/i;
 
-interface NameAllowlist {
-  /** One token-set per real film-data person (for strict subset backing). */
-  persons: Set<string>[];
-  /** Flat token set of non-person words: title / platform / language / boilerplate. */
-  nonPerson: Set<string>;
-}
-
-/** Diacritic-, case- and honorific-normalized significant tokens (≥2 chars). */
-function nameTokens(s: string): string[] {
-  return s
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .split(/\s+/)
-    .filter((t) => t.length >= 2 && !HONORIFICS.has(t));
-}
-
 function buildNameAllowlist(releases: Release[]): NameAllowlist {
-  const persons: Set<string>[] = [];
-  const nonPerson = new Set<string>(NON_PERSON_WORDS);
-  const addPerson = (s?: string) => {
-    if (!s) return;
-    const toks = nameTokens(s);
-    if (toks.length) persons.push(new Set(toks));
-  };
-  const addNonPerson = (s?: string) => {
-    if (s) for (const t of nameTokens(s)) nonPerson.add(t);
-  };
+  const personNames: (string | undefined)[] = [];
+  const nonPersonText: (string | undefined)[] = [];
   for (const r of releases) {
-    (r.cast ?? []).forEach(addPerson);
-    (r.leadCast ?? []).forEach(addPerson);
-    addPerson(r.director);
-    addPerson(r.musicDirector);
-    addNonPerson(r.title);
-    for (const p of r.platform) addNonPerson(p);
-    addNonPerson(r.language);
+    personNames.push(...(r.cast ?? []), ...(r.leadCast ?? []), r.director, r.musicDirector);
+    nonPersonText.push(r.title, ...r.platform, r.language);
   }
-  return { persons, nonPerson };
-}
-
-/** Name-tokens with non-person filler (boilerplate / title / platform / join words) removed. */
-function personTokens(raw: string, allow: NameAllowlist): string[] {
-  return nameTokens(raw).filter((t) => !allow.nonPerson.has(t));
-}
-
-/**
- * STRICT person-backing: every name-token of the candidate must appear in ONE
- * person's full-name token set (partial mention OK in the subset direction:
- * {kapoor} ⊆ {anil,kapoor}; a cross-person blend is NOT: {shahid,kapoor} ⊄ any
- * single person, so "Shahid Kapoor" riding a real "Janhvi Kapoor" stays caught).
- */
-function isPersonBacked(toks: string[], persons: Set<string>[]): boolean {
-  if (toks.length === 0) return true;
-  return persons.some((p) => toks.every((t) => p.has(t)));
+  return buildAllowlist({
+    personNames,
+    nonPersonText,
+    nonPersonWords: WED_DROP_NON_PERSON_WORDS,
+  });
 }
 
 /** True when the candidate's tokens are covered by some self-reported namesUsed entry. */
@@ -301,20 +269,6 @@ function locateName(name: string, output: LLMOutput): string {
   );
   return rel ? rel.title : "caption";
 }
-
-// A capitalized "name word": Unicode-uppercase start, allowing internal
-// apostrophes/hyphens and initials' periods ("S.", "A.R.", "D'Cruz", "Mr.").
-const CAP_WORD = String.raw`\p{Lu}[\p{L}'’.\-]*`;
-// (a) A run of 2–3 consecutive capitalized words = a name-shaped N-gram.
-const NGRAM_RE = new RegExp(`(${CAP_WORD}(?:\\s+${CAP_WORD}){1,2})`, "gu");
-// (b) A join-trigger + a SINGLE capitalized token NOT followed by another capital
-//     (multi-word runs after a trigger are already the N-gram rule's job). Triggers
-//     are matched in both cases WITHOUT the /i flag, which would defeat \p{Lu}.
-const TRIGGER = String.raw`(?:\b[Ww]ith|\b[Ss]tarring|\b[Aa]longside|\b[Ff]eaturing|\b[Ff]eat\.?|\b[Aa]nd|&|×|,)`;
-// The first lookahead pins the capture to a WHOLE word (so greedy \p{L}* can't
-// backtrack to a partial like "Ani" from "Anil"); the second keeps a multi-word
-// name (whose 2nd word is capitalized) as the N-gram rule's job, not a lone single.
-const TRIGGER_SINGLE_RE = new RegExp(`${TRIGGER}\\s+(${CAP_WORD})(?![\\p{L}'’.\\-])(?!\\s+\\p{Lu})`, "gu");
 
 /** Text surfaces the sweep reads: the caption + every release-slide body. */
 function copyTexts(output: LLMOutput): Array<{ text: string; where: string }> {
@@ -347,10 +301,7 @@ function findCopyViolations(output: LLMOutput, allow: NameAllowlist, releases: R
   // ── Name sweep v2 ──
   const declared = (output.namesUsed ?? []).map((n) => new Set(nameTokens(n)));
   for (const { text, where } of copyTexts(output)) {
-    const cands = new Set<string>();
-    for (const m of text.matchAll(NGRAM_RE)) cands.add(m[1]!);
-    for (const m of text.matchAll(TRIGGER_SINGLE_RE)) cands.add(m[1]!);
-    for (const raw of cands) {
+    for (const raw of nameCandidates(text)) {
       const toks = personTokens(raw, allow);
       if (toks.length === 0) continue;                              // fully boilerplate → not a name
       if (!isPersonBacked(toks, allow.persons)) { push({ kind: "name", name: raw, where }); continue; }

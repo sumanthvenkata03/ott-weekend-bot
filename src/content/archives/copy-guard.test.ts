@@ -12,7 +12,7 @@ function mkRelease(p: Partial<Release>): Release {
   };
 }
 
-describe("archives copy-guard — name sweep (SCHEDULED DUPLICATE of Wed Drop v2)", () => {
+describe("archives copy-guard — name sweep (shared module, archives vocabulary)", () => {
   const film = mkRelease({
     title: "Kammatipaadam",
     cast: ["Dulquer Salmaan", "Vinayakan"],
