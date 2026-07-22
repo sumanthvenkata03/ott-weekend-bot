@@ -1,5 +1,5 @@
 // src/content/weekend/monday-movement.ts
-import { format, parseISO } from "date-fns";
+import { editorialMonthLabel } from "../../shared/editorial-clock.js";
 import { z } from "zod";
 import { callClaudeJSON } from "../claude.js";
 import { log } from "../../shared/logger.js";
@@ -123,7 +123,10 @@ export async function generateMondayMovement(
 
   // Catch-up framing: no "Week of X — Y" range. The masthead already carries the
   // issue date; the label just names the shelf's month.
-  const weekLabel = `Catch-Up · ${format(parseISO(weekEnd), "MMMM yyyy")}`;
+  // Through the editorial clock — weekEnd is already an IST stamp (the job
+  // builds it with utcStamp(editorialDateUTC())), so the label must read it as
+  // one. Shape unchanged: "Catch-Up · July 2026".
+  const weekLabel = `Catch-Up · ${editorialMonthLabel(weekEnd)}`;
   log.info(`Generating Monday Movement (catch-up): ${weekLabel} (${hiddenGems.length} gems)`);
 
   const gemsBlock = hiddenGems.map(r => releaseForPrompt(r)).join("\n\n");

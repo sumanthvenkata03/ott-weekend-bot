@@ -3,7 +3,7 @@
 
 import { promises as fs } from "node:fs";
 import { renderToPNG, closeBrowser } from "./renderer.js";
-import { editorialTodayStamp, editorialDisplayDate } from "../shared/editorial-clock.js";
+import { editorialTodayStamp, editorialDisplayDate, editorialCoverDate, editorialCoverRange } from "../shared/editorial-clock.js";
 import { log } from "../shared/logger.js";
 import type { WednesdayDropDraft, WedDropSlide } from "../delivery/notion.js";
 import type { Release } from "../shared/types.js";
@@ -98,6 +98,9 @@ export async function renderWedDrop(
     issue: String(issueNumber).padStart(3, "0"),
     date: editorialTodayStamp(now),
     displayDate: editorialDisplayDate(now),
+    // THE pixel date — "MMM D · YYYY". `date`/`displayDate` stay for filenames
+    // and the machine room; neither reaches a card any more.
+    coverDate: editorialCoverDate(now),
     pillarLabel: "WED DROP" as const,
     editionLabel: meta.mastheadLabel,
   };
@@ -117,7 +120,9 @@ export async function renderWedDrop(
   const coverPath = `${outputDir}/wed-drop-${meta.slug}-${baseCtx.date}-cover.png`;
   const coverCtx: WedDropCoverContext = {
     ...baseCtx,
-    weekendDates: draft.weekendDates,
+    // Cover renders the STANDARD range form; falls back to the legacy display
+    // string only if a draft predates weekendRange.
+    weekendDates: draft.weekendRange ?? draft.weekendDates,
     filmCount: draft.releases.length,
     coverTitle: edition === "ott" ? "This Week's OTT Drops." : "This Week's Theatrical Drops.",
     gridClass: `count-${Math.min(gridItems.length, 4)}`,
@@ -219,6 +224,10 @@ if (isMainModule) {
   // reorders both the releases and the 'release' slides into prominence order
   // (biggest film first), so this no-LLM render demonstrates exactly what
   // job:wednesday produces.
+  // The sample weekend window, as ISO stamps — the single source for both the
+  // legacy display string and the standard pixel range.
+  const SAMPLE_WINDOW = { start: "2026-06-17", end: "2026-06-21" };
+
   const draftOf = (
     weekendDates: string,
     cover: { title: string; body: string },
@@ -238,6 +247,9 @@ if (isMainModule) {
     return {
       pillar: "Wed Drop",
       weekendDates,
+      // Mirrors generateWednesdayDrop: the sample must carry the SAME
+      // standard pixel range the production draft does.
+      weekendRange: editorialCoverRange(SAMPLE_WINDOW.start, SAMPLE_WINDOW.end),
       caption: `${cover.title} — ${cover.body}`,
       hashtags: "#WeekendWatch #TBSI",
       carouselSlides: "(legacy markdown blob)",
@@ -316,6 +328,7 @@ if (isMainModule) {
   const emptyDraft: WednesdayDropDraft = {
     pillar: "Wed Drop",
     weekendDates: "Jun 17 — Jun 21, 2026",
+    weekendRange: editorialCoverRange(SAMPLE_WINDOW.start, SAMPLE_WINDOW.end),
     caption: "",
     hashtags: "",
     carouselSlides: "",

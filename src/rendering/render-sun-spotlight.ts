@@ -6,7 +6,7 @@
 //   - card-case-against (1080x1080)
 
 import { renderToPNG, closeBrowser } from "./renderer.js";
-import { utcStamp } from "../shared/editorial-clock.js";
+import { utcStamp, editorialCoverDateOf } from "../shared/editorial-clock.js";
 import { log } from "../shared/logger.js";
 import type { SundaySpotlightDraft } from "../delivery/notion.js";
 import type { SunSpotlightRenderContext } from "./types.js";
@@ -88,7 +88,7 @@ function buildContext(
     posterFallbackColor: LANGUAGE_FALLBACK_COLORS[film.language] ?? "#1A1614",
     hook: draft.reelScript.hook,
     issueNumber: String(issueNumber).padStart(3, "0"),
-    issueDate: formatIssueDate(date),
+    coverDate: editorialCoverDateOf(utcStamp(date)),
     whyItWorks: draft.reelScript.whyItWorks,
     platform: firstPlatform ?? "",
     platformLogoStem: firstPlatform ? platformLogoStem(firstPlatform) : "",
@@ -202,7 +202,7 @@ if (isMainModule) {
     caseAgainstSkepticism: "If you skip a film because the actors don't share your language, you're letting Hindi cinema's marketing budget pick what counts as Indian. Manjummel Boys runs 135 minutes with subtitles you'll forget after twenty.",
   };
 
-  // Fixed sample date — issueDate "31·05·26" per spec. UTC-anchored (Date.UTC)
+  // Fixed sample date — renders "MAY 31 · 2026". UTC-anchored (Date.UTC)
   // so the render's getUTC*/utcStamp accessors read May 31 regardless of the
   // machine's local zone (the render now consumes the editorial anchor by UTC).
   const fixedDate = new Date(Date.UTC(2026, 4, 31));

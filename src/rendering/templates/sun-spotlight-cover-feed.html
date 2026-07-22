@@ -34,7 +34,7 @@
     color: var(--brass);
     text-transform: uppercase;
   }
-  .issue-date {
+  .cover-date {
     position: absolute;
     top: 170px;
     left: 0; right: 0;
@@ -263,7 +263,7 @@
 <div class="canvas">
 
   <div class="masthead-label">★ SUN SPOTLIGHT ★</div>
-  <div class="issue-date">№ {{ issueNumber }} · {{ issueDate }}</div>
+  <div class="cover-date">{{ coverDate }}</div>
   <div class="top-rule"></div>
 
   <div class="poster-frame">
@@ -295,7 +295,6 @@
   </div>
 
   <div class="footer-left">★ THE BIG SCREEN INDEX ★</div>
-  <div class="footer-right">VOL. 01 · ISSUE {{ issueNumber }}</div>
 
   <!-- B — page-turn dog-ear, true bottom-right corner (no TURN label; 48px so it
        clears the footer-right "VOL. 01 · ISSUE NNN" that occupies this corner) -->

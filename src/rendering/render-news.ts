@@ -21,6 +21,7 @@ import { log } from "../shared/logger.js";
 import type { ComposedEdition, SelectedStory } from "../content/news/news-compose.js";
 import type { ResolvedFilm } from "../content/news/news-resolve.js";
 import { CARD_LINE_MAX, clampWords, stripHeadlineTail, type CardCopy } from "../content/news/news-caption.js";
+import { editorialCoverDateOf } from "../shared/editorial-clock.js";
 
 /** cluster id → editorial card copy, from the package step. */
 export type CardCopyMap = Record<string, CardCopy>;
@@ -200,6 +201,12 @@ export async function renderNews(
 ): Promise<NewsRenderResult> {
   if (edition.format === "none") return { cardPaths: [], notes: ["no edition — nothing rendered"] };
 
+  // `istDate` is the MACHINE stamp ("2026-07-22"). It keeps driving filenames,
+  // R2 paths and the zip name — but it must never reach a pixel. Every
+  // follower-facing slot below uses `humanDate` instead (see editorial-clock:
+  // THE ONE PIXEL DATE FORMAT).
+  const humanDate = editorialCoverDateOf(istDate);
+
   await fs.mkdir(outputDir, { recursive: true });
   const pill = await pillDataUri();
   const notes: string[] = [];
@@ -229,7 +236,7 @@ export async function renderNews(
         facts: creditFor(s),
         // The DEK is the statement — an editorial clause, not the feed headline.
         statement: cardCopy[c.id]?.cardDek ?? lineFor(s, cardCopy),
-        footer: `${creditFor(s)} · ${istDate}`,
+        footer: `${creditFor(s)} · ${humanDate}`,
       },
     });
     cardPaths.push(path);
@@ -295,7 +302,7 @@ export async function renderNews(
         mosaicCols: tiles.length <= 2 ? 1 : 2,
         coverDarken: artTiles === 0 ? 0.18 : artTiles < 4 ? 0.52 : 0.70,
         pillPng: pill,
-        eyebrow: `${lead.segment.badge} · ${istDate}`,
+        eyebrow: `${lead.segment.badge} · ${humanDate}`,
         numeral: String(films.length),
         title: lineFor(lead, cardCopy),
         factLine: creditFor(lead),
@@ -340,7 +347,7 @@ export async function renderNews(
       mosaicCols: tiles.length <= 2 ? 1 : 2,
       coverDarken: artTiles === 0 ? 0.18 : artTiles < tiles.length ? 0.52 : 0.70,
       pillPng: pill,
-      eyebrow: `${lead.segment.badge} · ${istDate}`,
+      eyebrow: `${lead.segment.badge} · ${humanDate}`,
       numeral: String(all.length),
       title: lineFor(lead, cardCopy),
       factLine: all

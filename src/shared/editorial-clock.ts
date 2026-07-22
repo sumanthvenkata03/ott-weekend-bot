@@ -31,6 +31,12 @@ const MONTH_ABBR = [
 	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ] as const;
 
+/** Full month names — the editorial label form (editorialMonthLabel). */
+const MONTH_NAMES = [
+	"January", "February", "March", "April", "May", "June",
+	"July", "August", "September", "October", "November", "December",
+] as const;
+
 const DOW_NAMES = [
 	"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
 ] as const;
@@ -97,6 +103,82 @@ export function editorialDisplayDate(now: Date = new Date()): string {
 export function editorialCoverDate(now: Date = new Date()): string {
 	const { y, m, d } = editorialDateParts(now);
 	return `${MONTH_ABBR[m - 1]} ${d} · ${y}`.toUpperCase();
+}
+
+// ── THE ONE PIXEL DATE FORMAT ────────────────────────────────────────────────
+//
+// Every date a follower SEES renders as "MMM D · YYYY" uppercased — the shape
+// editorialCoverDate() already produced for the Sat Verdict cover. Before this,
+// pixels carried five different formats (dd·mm, dd·mm·yy, MMM D · YYYY, a
+// free-form range, and the raw yyyy-MM-dd machine stamp). Machine formats stay
+// in the machine room: console, Slack, R2 paths, zip names, ledger.
+//
+// These two take an ALREADY-IST "yyyy-MM-dd" STAMP rather than an instant,
+// because the pixel callers hold stamps (editorialTodayStamp output, window
+// edges) — not a `now`. Shifting such a stamp through editorialDateUTC again
+// would apply IST twice and slide the date. They therefore read the stamp's
+// fields directly, which keeps THE TRAP satisfied: no local getter, no
+// formatter, no Date parsing of any kind.
+
+/** Split a "yyyy-MM-dd" stamp into numeric parts. Null on anything malformed. */
+function stampParts(stamp: string): { y: number; m: number; d: number } | null {
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(stamp ?? "").trim());
+	if (!match) return null;
+	const y = Number(match[1]);
+	const m = Number(match[2]);
+	const d = Number(match[3]);
+	if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+	return { y, m, d };
+}
+
+/**
+ * "MMM D · YYYY" UPPERCASED from an IST "yyyy-MM-dd" stamp — e.g. "2026-07-15"
+ * → "JUL 15 · 2026". Returns "" for a malformed stamp so a bad value renders as
+ * nothing rather than as the word "Invalid Date" on a published card.
+ */
+export function editorialCoverDateOf(stamp: string): string {
+	const p = stampParts(stamp);
+	if (!p) return "";
+	return `${MONTH_ABBR[p.m - 1]} ${p.d} · ${p.y}`.toUpperCase();
+}
+
+/**
+ * Range form from two IST stamps — "JUN 17 — JUN 21 · 2026". The year is
+ * factored out and printed ONCE when both ends share it; across a year boundary
+ * both ends carry their own ("DEC 30 · 2026 — JAN 2 · 2027") because dropping
+ * either year there would be ambiguous. Falls back to whichever end is valid if
+ * the other is malformed, and to "" if neither is.
+ */
+export function editorialCoverRange(startStamp: string, endStamp: string): string {
+	const a = stampParts(startStamp);
+	const b = stampParts(endStamp);
+	if (!a || !b) return editorialCoverDateOf(startStamp) || editorialCoverDateOf(endStamp);
+	if (a.y !== b.y) {
+		return `${editorialCoverDateOf(startStamp)} — ${editorialCoverDateOf(endStamp)}`;
+	}
+	const left = `${MONTH_ABBR[a.m - 1]} ${a.d}`.toUpperCase();
+	const right = `${MONTH_ABBR[b.m - 1]} ${b.d}`.toUpperCase();
+	return `${left} — ${right} · ${a.y}`;
+}
+
+/**
+ * "MMMM yyyy" from an IST "yyyy-MM-dd" stamp — e.g. "2026-07-22" → "July 2026".
+ * Mixed case, NOT uppercased: this is an editorial label ("Catch-Up · July
+ * 2026"), not the pixel date stamp.
+ *
+ * Exists so no caller has to reach for date-fns `format(parseISO(stamp), …)`,
+ * which is a local-time round-trip. That particular round-trip is lossless for a
+ * DATE-ONLY string (parseISO builds local midnight, format reads local fields —
+ * they cancel), so replacing it fixes no live drift. What it fixes is the
+ * PATTERN: the same two calls applied to the anchor Date, or to a stamp that
+ * ever gains a time component, DO drift, and THE TRAP exists precisely so no one
+ * has to re-derive which of those cases is safe. Reads the stamp's fields
+ * directly and constructs no Date at all.
+ */
+export function editorialMonthLabel(stamp: string): string {
+	const p = stampParts(stamp);
+	if (!p) return "";
+	return `${MONTH_NAMES[p.m - 1]} ${p.y}`;
 }
 
 /**

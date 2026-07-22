@@ -301,7 +301,9 @@ export interface SunSpotlightRenderContext extends PlatformStyle, CardEnrichment
   posterFallbackColor: string;
   hook: string;
   issueNumber: string;       // "044"
-  issueDate: string;         // "31·05·26"
+  /** THE pixel date, "MMM D · YYYY" (e.g. "MAY 31 · 2026"). Named coverDate,
+   *  not issueDate: it is a DATE, and nothing issue-numbered reaches pixels. */
+  coverDate: string;
 
   // Card 1 (whyItWorks)
   whyItWorks: string;

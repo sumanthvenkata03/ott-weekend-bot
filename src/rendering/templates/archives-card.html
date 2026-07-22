@@ -137,7 +137,8 @@
   }
 
   .veil-footer {
-    display: flex; justify-content: space-between; align-items: baseline;
+    /* clean-pixels: the meta span is gone, so the lone wordmark centers. */
+    display: flex; justify-content: center; align-items: baseline;
     margin-top: 22px; padding-top: 14px; border-top: 1.5px solid rgba(244,236,220,0.35);
     font-family: 'Playfair Display', serif; font-size: 16px; letter-spacing: 4px; color: var(--cream);
   }
@@ -174,7 +175,6 @@
 
   <div class="veil-top">
     <span class="mast-label halo">★ THE EVERGREENS</span>
-    <span class="mast-date halo">{{ issueDate }}</span>
   </div>
 
   {% if isTreasure %}
@@ -213,7 +213,6 @@
 
     <div class="veil-footer halo">
       <span>★ THE BIG SCREEN INDEX</span>
-      <span class="meta">VOL. {{ vol }}</span>
     </div>
   </div>
 

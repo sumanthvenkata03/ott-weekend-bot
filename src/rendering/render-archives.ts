@@ -9,7 +9,7 @@ import { promises as fs } from "node:fs";
 import sharp from "sharp";
 import { ofetch } from "ofetch";
 import { renderToPNG } from "./renderer.js";
-import { editorialTodayStamp, editorialDisplayDate } from "../shared/editorial-clock.js";
+import { editorialTodayStamp, editorialCoverDate } from "../shared/editorial-clock.js";
 import { log } from "../shared/logger.js";
 import type { Release } from "../shared/types.js";
 import type { ArchivesKind } from "../content/archives/archives-ledger.js";
@@ -219,7 +219,8 @@ function buildCardContext(
   i: number,
   total: number,
   vol: number,
-  displayDate: string,
+  /** THE pixel date, "MMM D · YYYY" — the card's only date. */
+  pixelDate: string,
   boost: StripBoost
 ): CardContext {
   const r = card.release;
@@ -227,8 +228,10 @@ function buildCardContext(
   const platform = r.platform[0];
   return {
     vol: formatVolume(vol),
-    issueDate: displayDate,
-    checkedDate: displayDate,
+    // issueDate is retained for the context TYPE but no longer reaches pixels:
+    // the mast-date span is gone, so the ✓ CHECKED chip is the card's one date.
+    issueDate: pixelDate,
+    checkedDate: pixelDate,
     slotNumber: i + 1,
     totalSlots: total,
     isTreasure: card.kind === "treasure",
@@ -256,17 +259,16 @@ export async function renderArchives(
 ): Promise<ArchivesRenderResult> {
   const now = new Date();
   const date = editorialTodayStamp(now);
-  const displayDate = editorialDisplayDate(now);
   log.info(`Rendering TBSI Archives — VOL. ${formatVolume(deck.vol)} (${deck.cards.length} cards)`);
 
   await cleanOldRenders(outputDir, date);
 
   // Distinct-genre count for the cover line.
   const genres = new Set(deck.cards.map((c) => (c.primaryGenre ?? c.release.genre[0] ?? "").toLowerCase()));
-  // "dd·MM" for the cover foot — the leading "dd·MM" of the "dd·MM·yy" display
-  // string. If editorialDisplayDate's format ever changes, this slice yields the
-  // wrong date and the cover verify fails loudly rather than shipping silently.
-  const coverDate = displayDate.slice(0, 5);
+  // THE pixel date — "MMM D · YYYY" (clean pixels). Replaces the old
+  // displayDate.slice(0,5) "dd·MM", which was both a second date format and a
+  // brittle substring of another string's formatting.
+  const coverDate = editorialCoverDate(now);
 
   // L3: sample each strip's veil-zone luminance → per-strip ink boosts (additive
   // cover-context fields). Parallel, free CDN fetches; fails soft toward more ink.
@@ -274,7 +276,7 @@ export async function renderArchives(
 
   const coverCtx = {
     vol: formatVolume(deck.vol),
-    issueDate: displayDate,
+    issueDate: coverDate,
     coverDate,
     filmCount: deck.cards.length,
     genreCount: genres.size,
@@ -300,7 +302,7 @@ export async function renderArchives(
   const cardPaths: string[] = [];
   for (let i = 0; i < deck.cards.length; i++) {
     // Same deck-sampled boosts drive the card's full-bleed adaptive ink.
-    const ctx = buildCardContext(deck.cards[i]!, i, deck.cards.length, deck.vol, displayDate, boosts[i]!);
+    const ctx = buildCardContext(deck.cards[i]!, i, deck.cards.length, deck.vol, coverDate, boosts[i]!);
     const cardPath = `${outputDir}/${ARCHIVES_SLUG}-${date}-card-${String(i + 1).padStart(2, "0")}.png`;
     await renderToPNG({
       templateName: "archives-card",

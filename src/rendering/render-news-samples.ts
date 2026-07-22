@@ -39,7 +39,7 @@ async function main(): Promise<void> {
       numeral: "JULY 31",
       facts: "REPUBLIC WORLD  ·  123TELUGU  ·  ZEE5",
       statement: "Balan The Boy locks its pan-Indian streaming date.",
-      footer: "REPUBLIC WORLD · 2026-07-19",
+      footer: "REPUBLIC WORLD · JUL 19 · 2026",
     },
   });
 
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
       facts: "THE HINDU  ·  CINEMA EXPRESS  ·  THE NEW INDIAN EXPRESS  ·  HINDUSTAN TIMES",
       statement:
         "A deliberately overlong statement line that runs well past the natural measure of the card so the block autoshrink has something real to fight with.",
-      footer: "THE HINDU · CINEMA EXPRESS · 2026-07-19",
+      footer: "THE HINDU · CINEMA EXPRESS · JUL 19 · 2026",
     },
   });
 
@@ -104,7 +104,7 @@ async function main(): Promise<void> {
         { film: "Feminichi Fathima" },
       ],
       mosaicCols: 2,
-      eyebrow: "TBSI REGISTER · 2026-07-19",
+      eyebrow: "TBSI REGISTER · JUL 19 · 2026",
       numeral: "4",
       title: "72nd National Awards: the complete winners list.",
       factLine: "THE HINDU · CINEMA EXPRESS · 123TELUGU · BUSINESS STANDARD",

@@ -142,6 +142,13 @@ export interface WedDropSlide {
 export interface WednesdayDropDraft {
   pillar: "Wed Drop";
   weekendDates: string;
+  /**
+   * PIXEL-ONLY date range, "JUN 17 — JUN 21 · 2026" (editorialCoverRange).
+   * Separate from `weekendDates` on purpose: that string feeds the LLM prompt
+   * and the Notion title, so it must NOT change shape. This one exists solely
+   * so the cover can render the one standard pixel date format.
+   */
+  weekendRange?: string;
   caption: string;
   hashtags: string;
   releases: Release[];

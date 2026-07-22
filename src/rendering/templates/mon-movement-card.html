@@ -346,7 +346,7 @@
     border-top: 2px solid var(--ink);
     padding-top: 14px;
     display: flex;
-    justify-content: space-between;
+    justify-content: center;   /* clean-pixels: lone wordmark, centered */
     font-family: 'Playfair Display', serif;
     font-size: 16px;
     letter-spacing: 4px;
@@ -382,8 +382,8 @@
 <div class="canvas">
 
   <div class="masthead">
-    <span class="label">★ MON MOVEMENT · №{{ issue }}</span>
-    <span class="date">{{ date | date('dd-mm') }}</span>
+    <span class="label">★ MON MOVEMENT</span>
+    <span class="date">{{ coverDate }}</span>
   </div>
   <div class="masthead-rule"></div>
 
@@ -503,7 +503,6 @@
 
   <div class="footer">
     <span>★ THE BIG SCREEN INDEX ★</span>
-    <span class="meta">VOL. {{ vol }} · ISSUE {{ issue }}</span>
   </div>
 
 </div>

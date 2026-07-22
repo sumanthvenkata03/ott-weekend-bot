@@ -213,7 +213,7 @@
   <div class="content">
     <div class="eyebrow"><span class="star">&#9733;</span> THE BIG SCREEN INDEX &middot; WED DROP <span class="star">&#9733;</span></div>
     <div class="cover-title">{{ coverTitle }}</div>
-    <div class="meta">&#8470; {{ issue }} &middot; {{ filmCount }} {{ "FILM" | pluralize(filmCount, "FILMS") }} &middot; {{ weekendDates }}</div>
+    <div class="meta">{{ filmCount }} {{ "FILM" | pluralize(filmCount, "FILMS") }} &middot; {{ weekendDates }}</div>
     <!-- swipe affordance #2 -->
     <div class="swipe">{% if filmCount >= 2 %}SWIPE FOR ALL {{ filmCount }} <span class="arrow">&#8594;</span>{% else %}SWIPE <span class="arrow">&#8594;</span>{% endif %}</div>
   </div>

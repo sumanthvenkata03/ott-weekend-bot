@@ -1,5 +1,6 @@
 // src/content/weekend/wednesday-drop.ts
 import { format, parseISO } from "date-fns";
+import { editorialCoverRange } from "../../shared/editorial-clock.js";
 import { z } from "zod";
 import { callClaudeJSON } from "../claude.js";
 import { log } from "../../shared/logger.js";
@@ -564,6 +565,7 @@ Be specific. Take stands. Lean South-heavy where the films justify it.`;
   return {
     pillar: "Wed Drop",
     weekendDates,
+    weekendRange: editorialCoverRange(weekendStart, weekendEnd),
     caption: output.caption,
     hashtags: output.hashtags.join(" "),
     slides: sorted.slides,

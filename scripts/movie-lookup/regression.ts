@@ -7,20 +7,22 @@
 // It verifies, printing a clear PASS/FAIL per check:
 //   (i)  repo baseline is intact:
 //        - npx tsc --noEmit          → exactly 44 errors
-//        - npx vitest run            → exactly 523 passed (Issue 016 enforcement pin
+//        - npx vitest run            → exactly 647 passed (Issue 016 enforcement pin
 //          + Wed Drop copy self-policing + data-source integrity: Kannada parser
 //          canary / OMDb cross-source sanity / Bengali trim + One-Time Watch taxonomy
 //          + the News Desk suites: gather window / clustering / class matcher /
 //          dedupe ledger / composer rules / N1 receipt rule
 //          + the SAFETY CORE: country gate at all three seams — ingest / reconcile /
-//          news-resolve — plus the seven-language realignment)
+//          news-resolve — plus the seven-language realignment
+//          + CLEAN PIXELS: the one pixel date format, the news slot builders,
+//          and the permanent template lint (no issue/vol/machine-date in markup))
 //        - computeDropHash(FIXED)    → green ("92bcfb40772d")
 //   (ii) the tool's own tests (*.check.ts) all pass.
 
 import { execSync } from "node:child_process";
 
 const BASELINE_TSC = 44;
-const BASELINE_TESTS = 523;
+const BASELINE_TESTS = 647;
 
 interface Check { name: string; pass: boolean; detail: string; }
 const results: Check[] = [];

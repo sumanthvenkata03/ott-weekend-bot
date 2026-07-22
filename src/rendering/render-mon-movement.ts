@@ -3,7 +3,7 @@
 
 import { promises as fs } from "node:fs";
 import { renderToPNG, closeBrowser } from "./renderer.js";
-import { editorialTodayStamp, editorialDisplayDate } from "../shared/editorial-clock.js";
+import { editorialTodayStamp, editorialDisplayDate, editorialCoverDate } from "../shared/editorial-clock.js";
 import { log } from "../shared/logger.js";
 import type { MovementDraft } from "../delivery/notion.js";
 import type { Release } from "../shared/types.js";
@@ -101,6 +101,9 @@ export async function renderMonMovement(
     issue: String(issueNumber).padStart(3, "0"),
     date: editorialTodayStamp(now),
     displayDate: editorialDisplayDate(now),
+    // THE pixel date — "MMM D · YYYY". `date`/`displayDate` stay for filenames
+    // and the machine room; neither reaches a card any more.
+    coverDate: editorialCoverDate(now),
     pillarLabel: "MON MOVEMENT" as const,
   };
 
@@ -246,7 +249,11 @@ if (isMainModule) {
   );
   const sampleDraft: MovementDraft = {
     pillar: "Mon Movement",
-    weekLabel: "Week of May 18 — May 24, 2026",
+    // Mirrors production: monday-movement.ts builds `Catch-Up · MMMM yyyy`.
+    // The old "Week of X — Y" range was dropped from the generator (see its
+    // catch-up framing comment) but lingered here, so the sample was showing a
+    // format the real card never renders.
+    weekLabel: "Catch-Up · July 2026",
     weekHeadline: "Three Malayalam thrillers landed and not one Hindi drama. Mollywood owns the genre clock.",
     caption: "Mollywood is running the clock this week.",
     hashtags: "#OTTReleases #WeekendWatch #IndianCinema",
