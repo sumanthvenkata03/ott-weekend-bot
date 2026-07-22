@@ -212,8 +212,14 @@ export function unicodeBold(s: string): string {
   return out;
 }
 
-/** The seven editorial languages, for content-derived language tags. */
-const TAG_LANGUAGES = ["Telugu", "Tamil", "Malayalam", "Kannada", "Hindi", "Bengali", "Marathi"] as const;
+/**
+ * The seven editorial languages, for content-derived language tags. Realigned to
+ * the platform-wide seven (candidates.ts VALID_LANGUAGES): Bengali out, Punjabi
+ * in. Before this, a Punjabi story could not earn #PunjabiCinema no matter what
+ * the copy said, while a Bengali one could — the gather-side split-brain
+ * reproduced on the tagging side.
+ */
+const TAG_LANGUAGES = ["Telugu", "Tamil", "Malayalam", "Kannada", "Hindi", "Punjabi", "Marathi"] as const;
 
 /**
  * Languages the PACKAGE is actually about, read from the story TEXT.

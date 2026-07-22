@@ -23,8 +23,10 @@ import { RECONCILE_LANGUAGES } from "./run.js";
 export const liveDeps: ReconcileDeps = {
   searchTitle: (title, opts) => searchTitleTmdb(title, opts),
   fetchCredits: async (tmdbId) => {
-    const { leadCast } = await getCreditsAndLanguages(tmdbId);
-    return { leadCast };
+    // ONE /movie/{id} call already being made for the cast — the country fields
+    // ride it, so the seam-(b) country gate adds no request.
+    const { leadCast, countries } = await getCreditsAndLanguages(tmdbId);
+    return { leadCast, ...(countries ? { countries } : {}) };
   },
 };
 

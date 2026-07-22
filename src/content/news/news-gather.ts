@@ -43,6 +43,14 @@ const MAX_ITEMS_PER_QUERY = 40;
  * scorer (not the query) does the editorial narrowing, so the shadow week can
  * see what a loose net catches before we tighten. Google News search operators
  * are allowed here; `when:2d` is appended by the fetcher, not written inline.
+ *
+ * THE SEVEN are now the SAME seven the rest of the platform covers (see
+ * candidates.ts VALID_LANGUAGES). This desk used to query Bengali and never
+ * query Punjabi — a second copy of the discovery split-brain, in a second
+ * pipeline. The Bengali query in particular ("Bengali cinema Bangla …") is a
+ * Dhaka magnet: it is the query that surfaced Mastul, a Bangladeshi film, onto a
+ * published deck. Language coverage is fixed here; NATIONALITY is enforced
+ * separately by shared/country-gate.ts at news-resolve.
  */
 export const NEWS_QUERIES: ReadonlyArray<{ language: Language; query: string }> = [
   { language: "Hindi",     query: "Bollywood Hindi film news OTT release" },
@@ -51,7 +59,7 @@ export const NEWS_QUERIES: ReadonlyArray<{ language: Language; query: string }> 
   { language: "Malayalam", query: "Malayalam cinema Mollywood film news OTT release" },
   { language: "Kannada",   query: "Kannada cinema Sandalwood film news OTT release" },
   { language: "Marathi",   query: "Marathi cinema film news OTT release" },
-  { language: "Bengali",   query: "Bengali cinema Bangla film news OTT release" },
+  { language: "Punjabi",   query: "Punjabi cinema Pollywood film news OTT release" },
 ];
 
 /** A gathered headline, before any scoring. */

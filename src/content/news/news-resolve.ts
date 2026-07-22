@@ -27,8 +27,9 @@
 // winner set out of a headline is its own extraction problem. Those items render
 // typographic unless a judged match happens to fire.
 
-import { searchTitleTmdb, posterUrl } from "../../ingestion/releases/tmdb.js";
+import { searchTitleTmdb, posterUrl, getMovieCountries } from "../../ingestion/releases/tmdb.js";
 import { resolveTitleToTmdb } from "../../discovery/sources/resolveTitle.js";
+import { isIndianFilm, countryGateLine, type CountryFields } from "../../shared/country-gate.js";
 import { log } from "../../shared/logger.js";
 import type { VerifiedStory } from "./news-verify.js";
 import type { JudgedFilm } from "../../jobs/reddit-radar.js";
@@ -136,6 +137,28 @@ export function sanityCheck(
   return { ok: true, similarity: sim, reason: `sim ${sim.toFixed(2)}${judgedMatch ? " +judged" : ""}` };
 }
 
+// ── COUNTRY GATE · seam (c) ─────────────────────────────────────────────────
+//
+// The sanity gate above answers "is this the film we asked for". It cannot
+// answer "is this film Indian" — and a wrong-NATIONALITY poster is the same
+// class of harm as a wrong-FILM poster: a confident, published, visual claim
+// that a Bangladeshi film is part of Indian OTT news. Mastul's title matches
+// perfectly and its year is in range; only the country gate stops it.
+//
+// This lane cannot ride an existing detail fetch the way seams (a) and (b) do:
+// news-resolve reaches films through /search/movie, which carries neither
+// country field. So it asks for one, and only after the sanity gate has already
+// passed — the cheap deterministic check always runs first.
+//
+// INJECTED so the suite runs with zero network. The default is the live cached
+// fetcher; tests pass a stub.
+
+/** Fetches the raw country fields for a TMDb movie id. Injected for testing. */
+export type CountryFetcher = (tmdbId: number) => Promise<CountryFields>;
+
+/** Live default — cached 30 days (country of origin does not change). */
+export const liveCountryFetcher: CountryFetcher = (tmdbId) => getMovieCountries(tmdbId);
+
 // ── Detectors (PURE — no I/O, unit-tested off real headlines) ────────────────
 
 /** Straight, curly and double quotes; 2–60 chars; not an all-caps SHOUT run. */
@@ -211,7 +234,8 @@ async function resolveOne(
   language: string,
   windowYear: number,
   confidence: ResolveConfidence,
-  judgedMatch = false
+  judgedMatch = false,
+  fetchCountries: CountryFetcher = liveCountryFetcher
 ): Promise<{ film: ResolvedFilm | null; reason: string }> {
   try {
     const search = await searchTitleTmdb(title, { year: windowYear, language });
@@ -221,6 +245,13 @@ async function resolveOne(
     }
     const sane = sanityCheck(title, res.hit, windowYear, judgedMatch);
     if (!sane.ok) return { film: null, reason: `"${title}" → ${sane.reason}` };
+
+    // COUNTRY GATE — only now, on a hit that already looks like the right film.
+    const verdict = isIndianFilm(await fetchCountries(res.hit.id));
+    log.info(countryGateLine("news-resolve", res.hit.title, res.hit.id, verdict));
+    if (!verdict.ok) {
+      return { film: null, reason: `"${title}" → ${verdict.reason}` };
+    }
 
     const poster = posterUrl(res.hit.posterPath ?? null);
     return {
@@ -233,7 +264,10 @@ async function resolveOne(
       },
       reason:
         `"${title}" → tmdb ${res.hit.id}${poster ? " +poster" : " (no poster art)"}` +
-        ` [${sane.reason}]${res.ambiguous ? " ambiguous" : ""}`,
+        ` [${sane.reason}]${res.ambiguous ? " ambiguous" : ""}` +
+        // Surface the ⚠ in the run table too, not just the log stream — a poster
+        // published on unverified nationality should be visible to the editor.
+        (verdict.present ? "" : " ⚠ no country data"),
     };
   } catch (err) {
     return { film: null, reason: `"${title}" → lookup failed (${err instanceof Error ? err.message : String(err)})` };
@@ -255,7 +289,8 @@ export async function resolveStory(
   story: VerifiedStory,
   judged: JudgedFilm[],
   findJudged: (title: string, films: JudgedFilm[]) => JudgedFilm | null,
-  windowYear: number
+  windowYear: number,
+  fetchCountries: CountryFetcher = liveCountryFetcher
 ): Promise<ResolvedStory> {
   const headline = story.cluster.headline;
   const language = story.cluster.language;
@@ -267,7 +302,7 @@ export async function resolveStory(
     for (const ref of story.films) {
       const judgedHit = findJudged(ref.title, judged);
       const { film, reason } = await resolveOne(
-        ref.title, language, windowYear, "quoted", Boolean(judgedHit)
+        ref.title, language, windowYear, "quoted", Boolean(judgedHit), fetchCountries
       );
       reasons.push(reason);
       if (film) {
@@ -293,7 +328,7 @@ export async function resolveStory(
   const extracted = extractFilmTitle(headline);
   if (extracted) {
     const { film, reason } = await resolveOne(
-      extracted.title, language, windowYear, extracted.confidence
+      extracted.title, language, windowYear, extracted.confidence, false, fetchCountries
     );
     if (film) return { story, film, films: [film], reason: `${extracted.confidence}:${reason}` };
     reasons.push(`${extracted.confidence}:${reason}`);
@@ -322,10 +357,11 @@ export async function resolveStories(
   stories: VerifiedStory[],
   judged: JudgedFilm[],
   findJudged: (title: string, films: JudgedFilm[]) => JudgedFilm | null,
-  windowYear: number
+  windowYear: number,
+  fetchCountries: CountryFetcher = liveCountryFetcher
 ): Promise<ResolvedStory[]> {
   const out: ResolvedStory[] = [];
-  for (const s of stories) out.push(await resolveStory(s, judged, findJudged, windowYear));
+  for (const s of stories) out.push(await resolveStory(s, judged, findJudged, windowYear, fetchCountries));
   return out;
 }
 

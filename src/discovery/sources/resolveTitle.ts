@@ -12,9 +12,18 @@
 import type { TmdbTitleHit, TmdbTitleSearch } from "../../ingestion/releases/tmdb.js";
 import type { Language } from "../../shared/types.js";
 
-// The eight Indian languages we cover (TMDb ISO 639-1 codes). A NEW ai-net film
+// The SEVEN Indian languages we cover (TMDb ISO 639-1 codes). A NEW ai-net film
 // whose resolved TMDb original_language is not in this set is non-Indian.
-export const INDIAN_LANG_CODES = new Set(["te", "ta", "ml", "hi", "kn", "bn", "mr", "pa"]);
+//
+// "bn" is deliberately absent — it matches candidates.ts VALID_LANGUAGES and
+// discovery/index.ts ALL_LANGUAGES, the two sets this had drifted from. Bengali
+// stays in the display maps below (an incidental record must still translate);
+// it is simply never an ADMISSION ticket.
+//
+// This set answers "what language is it", which is NOT "where is it from" — a
+// Bangladeshi film speaks Bengali, a Pakistani one Punjabi. Nationality is
+// shared/country-gate.ts's job; the two checks sit side by side at each seam.
+export const INDIAN_LANG_CODES = new Set(["te", "ta", "ml", "hi", "kn", "mr", "pa"]);
 
 const NAME_TO_CODE: Record<string, string> = {
   telugu: "te", tamil: "ta", malayalam: "ml", kannada: "kn",

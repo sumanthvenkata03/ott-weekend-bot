@@ -5,6 +5,7 @@ import { z } from "zod";
 import { log } from "../../shared/logger.js";
 import { cached } from "../../shared/cache.js";
 import type { Release, Language, Platform } from "../../shared/types.js";
+import type { CountryFields } from "../../shared/country-gate.js";
 
 const BASE_URL = "https://api.themoviedb.org/3";
 const throttle = pThrottle({ limit: 4, interval: 1000 });
@@ -63,10 +64,21 @@ const TMDbGenreSchema = z.object({
   id: z.number(),
   name: z.string(),
 });
+const TMDbProductionCountrySchema = z.object({
+  iso_3166_1: z.string(),
+  name: z.string().optional(),
+});
 const TMDbMovieDetailsSchema = z.object({
   id: z.number(),
   original_language: z.string(),
   spoken_languages: z.array(TMDbSpokenLanguageSchema),
+  // COUNTRY GATE (shared/country-gate.ts). These are the ONLY place TMDb states
+  // where a film is FROM — they exist on /movie/{id} and on NO discover or search
+  // response, which is why the gate lives at the detail seam. Both are optional
+  // because TMDb populates them inconsistently (some records carry one, not the
+  // other); the gate unions them and fails open when both are empty.
+  origin_country: z.array(z.string()).optional(),
+  production_countries: z.array(TMDbProductionCountrySchema).optional(),
   // Widened (Step 2 discovery→Release backfill) — these ride on the SAME
   // /movie/{id} response getCreditsAndLanguages already fetches (zero new API
   // calls). They let enrich populate the poster/synopsis/genre/popularity fields
@@ -189,7 +201,11 @@ export async function discoverIndianReleases(
 ): Promise<Release[]> {
   log.info(`Fetching TMDb releases ${startDate} → ${endDate}`);
 
-  const langs = ["hi", "te", "ta", "ml", "kn", "mr", "bn", "pa"];
+  // The SEVEN active coverage languages. "bn" is deliberately absent: Bengali was
+  // trimmed from active coverage (see discovery/index.ts ALL_LANGUAGES and
+  // candidates.ts VALID_LANGUAGES, which this now matches). Querying bn here was
+  // the split-brain that let a Bangladeshi film in on a language ticket.
+  const langs = ["hi", "te", "ta", "ml", "kn", "mr", "pa"];
   const all: Release[] = [];
 
   for (const lang of langs) {
@@ -257,7 +273,8 @@ export async function discoverIndianOTTArrivals(
 ): Promise<Release[]> {
   log.info(`Fetching TMDb OTT arrivals ${startDate} → ${endDate}`);
 
-  const langs = ["hi", "te", "ta", "ml", "kn", "mr", "bn", "pa"];
+  // Same seven active coverage languages as discoverIndianReleases — "bn" absent.
+  const langs = ["hi", "te", "ta", "ml", "kn", "mr", "pa"];
   const all: Release[] = [];
 
   for (const lang of langs) {
@@ -347,6 +364,13 @@ function isoToDisplay(iso: string): string {
 
 export interface CreditsAndLanguages {
   leadCast: string[];
+  /**
+   * Raw country fields off the SAME /movie/{id} response (zero extra calls).
+   * Handed to shared/country-gate.ts unchanged — this module never interprets
+   * them, so the union logic exists in exactly one place. Absent on an error
+   * return, which the gate correctly treats as the fail-open ⚠ path.
+   */
+  countries?: CountryFields;
   musicDirector?: string;
   audioLanguages?: {
     original: string;
@@ -429,8 +453,17 @@ export async function getCreditsAndLanguages(tmdbId: number): Promise<CreditsAnd
           }
         : undefined;
 
+    // Country fields ride along untouched — the gate does all interpretation.
+    // Always emitted (even when both are absent) so a seam can tell "TMDb
+    // answered and had no country data" (⚠ pass) from "the fetch failed".
+    const countries: CountryFields = {
+      ...(details.origin_country ? { origin_country: details.origin_country } : {}),
+      ...(details.production_countries ? { production_countries: details.production_countries } : {}),
+    };
+
     const result: CreditsAndLanguages = {
       leadCast,
+      countries,
       audioLanguages: {
         original: isoToDisplay(originalIso),
         ...(dubbedDisplay.length > 0 ? { dubbed: dubbedDisplay } : {}),
@@ -454,6 +487,37 @@ export async function getCreditsAndLanguages(tmdbId: number): Promise<CreditsAnd
       err instanceof Error ? err.message : err
     );
     return { leadCast: [] };
+  }
+}
+
+/**
+ * COUNTRY GATE · seam (c) fetcher — the country fields for ONE movie id.
+ *
+ * The news resolver reaches films through /search/movie, and a search response
+ * carries NEITHER origin_country NOR production_countries (verified against every
+ * cached search payload in this repo: 274 result objects, zero with either
+ * field). Country data exists only on /movie/{id}, so the news lane must ask for
+ * it explicitly — unlike seams (a) and (b), which ride an existing detail fetch.
+ *
+ * Cost: one extra TMDb GET per film that has already cleared the sanity gate,
+ * cached 30 days (country of origin is immutable). TMDb is key-based and
+ * unbilled; no Anthropic call is involved.
+ *
+ * Returns the RAW subset for shared/country-gate.ts to interpret. On failure it
+ * returns {} — which the gate reads as the fail-open ⚠ path, so a TMDb outage
+ * degrades to "let it through and flag it", never to a silent drop.
+ */
+export async function getMovieCountries(tmdbId: number): Promise<CountryFields> {
+  try {
+    const raw = await tmdbFetchCached<unknown>(`/movie/${tmdbId}`, {}, 30 * 24 * 60 * 60);
+    const details = TMDbMovieDetailsSchema.parse(raw);
+    return {
+      ...(details.origin_country ? { origin_country: details.origin_country } : {}),
+      ...(details.production_countries ? { production_countries: details.production_countries } : {}),
+    };
+  } catch (err) {
+    log.warn(`Country fetch failed for TMDb ${tmdbId}`, err instanceof Error ? err.message : err);
+    return {};
   }
 }
 

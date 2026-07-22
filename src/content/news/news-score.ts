@@ -145,10 +145,21 @@ export const BIG_SCORE_THRESHOLD = 9;
 // silently never appears. A false admit is caught by the editor, who is the
 // final gate. Wrong-and-visible beats wrong-and-silent.
 
-/** Indian-cinema markers — EDITABLE. Any one admits the story. */
+/**
+ * Indian-cinema markers — EDITABLE. Any one admits the story.
+ *
+ * "bengali" was REMOVED. It is the one language marker that is not evidence of
+ * Indian cinema: Bengali is the national language of Bangladesh, so "Bengali
+ * cinema" admitted Dhaka stories on an Indian ticket — and because the Indian
+ * list is checked first, that admission beat the "dhaka"/"bangladeshi" foreign
+ * markers sitting right below it. Removing it does not blind the gate to West
+ * Bengal: "india"/"indian"/"kolkata-tagged trade terms still admit, and the
+ * fail-open branch admits anything unmarked. Nationality proper is now enforced
+ * downstream by shared/country-gate.ts at news-resolve.
+ */
 export const INDIA_SCOPE_MARKERS: readonly string[] = [
-  // The seven editorial languages
-  "telugu", "tamil", "malayalam", "kannada", "hindi", "bengali", "marathi",
+  // The editorial languages that are unambiguously Indian markers
+  "telugu", "tamil", "malayalam", "kannada", "hindi", "marathi",
   // Industry names
   "tollywood", "kollywood", "bollywood", "mollywood", "pollywood", "sandalwood",
   // Nation / region

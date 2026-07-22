@@ -1,6 +1,7 @@
 // src/ingestion/releases/index.ts
 import { log } from "../../shared/logger.js";
 import type { Release, Language } from "../../shared/types.js";
+import { isIndianFilm, countryGateLine, type CountryFields } from "../../shared/country-gate.js";
 import {
   discoverIndianReleases,
   getImdbId,
@@ -208,10 +209,52 @@ function mergeReleaseDates(
  * discover row, so `needsBackfill` is false there and that path's output is
  * byte-identical; a discovery stub carries no tmdbPopularity, so it gets filled.
  */
-async function enrichWithCreditsAndLanguages(releases: Release[]): Promise<Release[]> {
+/**
+ * A release paired with the raw country fields from its /movie/{id} response.
+ * The pairing is transient — it exists only between the credits step and the
+ * country gate, so no country data leaks into the Release type or onto a card.
+ */
+export interface ReleaseWithCountry {
+  release: Release;
+  /** undefined ⇒ no detail fetch happened (no tmdbId). The gate fails open. */
+  countries?: CountryFields;
+}
+
+/**
+ * COUNTRY GATE · seam (a). Drops films TMDb states are NOT from India.
+ *
+ * PURE — the country data was already fetched upstream, so this makes no calls
+ * and is directly unit-testable. Every outcome is logged (pass, ⚠ pass and
+ * reject alike): a silent reject would look identical to a film TMDb never had.
+ *
+ * Placement is load-bearing, not incidental: this runs AFTER the /movie/{id}
+ * credits step (which is where country data first exists) and BEFORE the ratings
+ * step, so a rejected film never costs an OMDb or an MDBList call.
+ */
+export function applyCountryGate(items: ReleaseWithCountry[]): Release[] {
+  const kept: Release[] = [];
+  let rejected = 0;
+  let warned = 0;
+  for (const { release, countries } of items) {
+    const verdict = isIndianFilm(countries ?? {});
+    log.info(countryGateLine("ingest", release.title, release.tmdbId, verdict));
+    if (!verdict.ok) { rejected++; continue; }
+    if (!verdict.present) warned++;
+    kept.push(release);
+  }
+  if (rejected > 0 || warned > 0) {
+    log.info(
+      `  [country-gate/ingest] ${kept.length}/${items.length} kept — ` +
+      `${rejected} rejected as non-Indian, ${warned} passed with ⚠ (no TMDb country data)`
+    );
+  }
+  return kept;
+}
+
+async function enrichWithCreditsAndLanguages(releases: Release[]): Promise<ReleaseWithCountry[]> {
   return Promise.all(
     releases.map(async r => {
-      if (!r.tmdbId) return r;
+      if (!r.tmdbId) return { release: r };
       const data = await getCreditsAndLanguages(r.tmdbId);
       // Trust the discover-derived language for the original track; keep TMDb's
       // spoken_languages for dubbed. See reconcileAudioOriginal for the why.
@@ -225,7 +268,7 @@ async function enrichWithCreditsAndLanguages(releases: Release[]): Promise<Relea
       // AI-OTT discovery stub survives a TMDb response that only has theatrical.
       const mergedReleaseDates = mergeReleaseDates(r.releaseDates, data.releaseDates);
 
-      return {
+      const release: Release = {
         ...r,
         ...(data.leadCast.length > 0 ? { leadCast: data.leadCast } : {}),
         ...(data.musicDirector ? { musicDirector: data.musicDirector } : {}),
@@ -239,6 +282,8 @@ async function enrichWithCreditsAndLanguages(releases: Release[]): Promise<Relea
         ...(needsBackfill && data.tmdbVoteAverage !== undefined && r.tmdbVoteAverage === undefined ? { tmdbVoteAverage: data.tmdbVoteAverage } : {}),
         ...(needsBackfill && data.tmdbVoteCount !== undefined && r.tmdbVoteCount === undefined ? { tmdbVoteCount: data.tmdbVoteCount } : {}),
       };
+      // Countries travel BESIDE the release, never on it — see ReleaseWithCountry.
+      return { release, ...(data.countries ? { countries: data.countries } : {}) };
     })
   );
 }
@@ -287,12 +332,20 @@ export async function enrichReleases(stubs: Release[]): Promise<Release[]> {
   // 3. Credits + audio language structure (+ Step 2 poster/synopsis/genre/popularity backfill)
   log.info(`Fetching credits + audio languages...`);
   const withCredits = await enrichWithCreditsAndLanguages(withPlatforms);
-  const enrichedCount = withCredits.filter(r => r.leadCast || r.musicDirector || r.audioLanguages).length;
+  const enrichedCount = withCredits.filter(
+    ({ release: r }) => r.leadCast || r.musicDirector || r.audioLanguages
+  ).length;
   log.info(`  Credits/audio enrichment: ${enrichedCount}/${stubs.length}`);
+
+  // 3.5 COUNTRY GATE (seam a). Deliberately BETWEEN steps 3 and 4: step 3 is the
+  // first point country data exists, and rejecting here means a non-Indian film
+  // never costs the OMDb + MDBList calls step 4 would spend on it.
+  log.info(`Applying country gate (India-origin)...`);
+  const indian = applyCountryGate(withCredits);
 
   // 4. Enrich ratings — MDBList primary + OMDb gap-fill (+ Phase 5.7 audio merge)
   log.info(`Enriching ratings with MDBList + OMDb...`);
-  return enrichWithRatings(withCredits);
+  return enrichWithRatings(indian);
 }
 
 export async function ingestReleases(

@@ -21,8 +21,22 @@ describe("NEWS_QUERIES", () => {
   it("covers exactly the seven editorial languages", () => {
     expect(NEWS_QUERIES).toHaveLength(7);
     expect(NEWS_QUERIES.map((q) => q.language)).toEqual([
-      "Hindi", "Telugu", "Tamil", "Malayalam", "Kannada", "Marathi", "Bengali",
+      "Hindi", "Telugu", "Tamil", "Malayalam", "Kannada", "Marathi", "Punjabi",
     ]);
+  });
+
+  it("REGRESSION — the news desk no longer queries Bengali and no longer skips Punjabi", () => {
+    // The desk used to query bn and never query pa: the discovery split-brain,
+    // reproduced in a second pipeline. The Bengali query in particular
+    // ("Bengali cinema Bangla …") is what surfaced Mastul, a Bangladeshi film.
+    const langs = NEWS_QUERIES.map((q) => q.language);
+    expect(langs).not.toContain("Bengali");
+    expect(langs).toContain("Punjabi");
+    // And no query TEXT may reach for Bengali/Bangla either — the language set
+    // and the query strings must not disagree.
+    const allQueryText = NEWS_QUERIES.map((q) => q.query).join(" ").toLowerCase();
+    expect(allQueryText).not.toContain("bengali");
+    expect(allQueryText).not.toContain("bangla");
   });
 });
 

@@ -31,6 +31,8 @@ import { qualifyingDate, inWindow } from "../shared/post-validator.js";
 import type { BucketWindow, ManifestRow } from "../shared/post-validator.js";
 import { normalizeTitle } from "../discovery/normalize.js";
 import { resolveTitleToTmdb, languageForCode, INDIAN_LANG_CODES } from "../discovery/sources/resolveTitle.js";
+import { isIndianFilm, countryGateLine, type CountryFields } from "../shared/country-gate.js";
+import { log } from "../shared/logger.js";
 import type {
   ExtractedFilm,
   LandingStatus,
@@ -50,8 +52,15 @@ const ISO = /^\d{4}-\d{2}-\d{2}$/;
 // ── Injected TMDb access (real in run.ts, mocked in tests) ──────────────────
 export interface ReconcileDeps {
   searchTitle: (title: string, opts: { year?: number; language?: string }) => Promise<TmdbTitleSearch>;
-  /** Top-billed cast for a movie id — TMDb, never the LLM. */
-  fetchCredits: (tmdbId: number) => Promise<{ leadCast: string[] }>;
+  /**
+   * Top-billed cast for a movie id — TMDb, never the LLM.
+   *
+   * Also returns the raw country fields, because the live implementation already
+   * calls /movie/{id} for the cast: seam (b) of the country gate therefore costs
+   * ZERO additional API calls. `countries` is optional so existing test doubles
+   * stay valid (an omitted value is the gate's fail-open ⚠ path).
+   */
+  fetchCredits: (tmdbId: number) => Promise<{ leadCast: string[]; countries?: CountryFields }>;
 }
 
 export interface ReconcileInput {
@@ -192,6 +201,8 @@ interface AiResolution {
   hit?: TmdbTitleHit;
   ambiguous: boolean;
   cast?: string[];   // fetched only for NEW (non-pool) movie hits
+  /** Country fields from the SAME fetchCredits call — country gate, seam (b). */
+  countries?: CountryFields;
 }
 
 async function resolveAiFilm(
@@ -222,13 +233,22 @@ async function resolveAiFilm(
     return { ai, kind: res.kind, ambiguous: res.ambiguous };
   }
 
-  // Cast for a NEW (non-pool) movie hit only — TMDb, never the LLM.
+  // Cast for a NEW (non-pool) movie hit only — TMDb, never the LLM. The SAME
+  // call carries the country fields the seam-(b) gate needs, so the gate is free:
+  // it is fetched for exactly the non-pool films the guard governs, and never for
+  // a pool film (which the guard must never touch).
   let cast: string[] | undefined;
+  let countries: CountryFields | undefined;
   if (!poolByTmdbId.has(res.hit.id)) {
     const credits = await deps.fetchCredits(res.hit.id);
     if (credits.leadCast.length > 0) cast = credits.leadCast;
+    countries = credits.countries;
   }
-  return { ai, kind: "movie", hit: res.hit, ambiguous: res.ambiguous, ...(cast ? { cast } : {}) };
+  return {
+    ai, kind: "movie", hit: res.hit, ambiguous: res.ambiguous,
+    ...(cast ? { cast } : {}),
+    ...(countries ? { countries } : {}),
+  };
 }
 
 // ── Builders ────────────────────────────────────────────────────────────────
@@ -430,6 +450,7 @@ export async function reconcile(input: ReconcileInput, deps: ReconcileDeps): Pro
   const aiByPoolId = new Map<number, AiResolution>();
   const newMovies: AiResolution[] = [];
   const nonIndian: AiResolution[] = [];
+  const nonIndianCountry: AiResolution[] = [];
   const unverified: AiResolution[] = [];
   const seriesRejected: AiResolution[] = [];
   for (const res of resolutions) {
@@ -440,10 +461,20 @@ export async function reconcile(input: ReconcileInput, deps: ReconcileDeps): Pro
         // construction and must never be dropped/downgraded by it.
         if (!aiByPoolId.has(res.hit.id)) aiByPoolId.set(res.hit.id, res);
       } else {
-        // NEW ai-net discovery — apply the Indian-language guard.
+        // NEW ai-net discovery — apply the Indian-language guard, then the
+        // country gate beside it. They answer DIFFERENT questions: the first is
+        // "what language is it", the second "where is it from". Mastul passes a
+        // bn-shaped language check and fails the country check; that gap is
+        // exactly what let it through before.
         const iso = res.hit.originalLanguage;
-        if (iso && INDIAN_LANG_CODES.has(iso)) newMovies.push(res);
-        else nonIndian.push(res);
+        if (!(iso && INDIAN_LANG_CODES.has(iso))) {
+          nonIndian.push(res);
+        } else {
+          const verdict = isIndianFilm(res.countries ?? {});
+          log.info(countryGateLine("reconcile", res.hit.title, res.hit.id, verdict));
+          if (verdict.ok) newMovies.push(res);
+          else nonIndianCountry.push(res);
+        }
       }
     } else if (res.kind === "series") {
       seriesRejected.push(res);
@@ -482,6 +513,15 @@ export async function reconcile(input: ReconcileInput, deps: ReconcileDeps): Pro
     ...nonIndian.map((res) => ({
       title: res.ai.title,
       reason: "non-Indian-language",
+      ...(res.hit?.originalLanguage ? { originalLanguage: res.hit.originalLanguage } : {}),
+      ...(res.ai.sources?.[0]?.url ? { sourceUrl: res.ai.sources[0]!.url } : {}),
+    })),
+    // DISTINCT from "non-Indian-language" on purpose: this film's language was
+    // fine and TMDb said it is not from India. Collapsing the two reasons would
+    // hide the Mastul class in the review.
+    ...nonIndianCountry.map((res) => ({
+      title: res.ai.title,
+      reason: `non-Indian-country [${isIndianFilm(res.countries ?? {}).countries.join(",")}]`,
       ...(res.hit?.originalLanguage ? { originalLanguage: res.hit.originalLanguage } : {}),
       ...(res.ai.sources?.[0]?.url ? { sourceUrl: res.ai.sources[0]!.url } : {}),
     })),
