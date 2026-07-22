@@ -266,7 +266,18 @@ async function enrichWithCreditsAndLanguages(releases: Release[]): Promise<Relea
 
       // Merge (not overwrite) release dates so a press-sourced ott date on an
       // AI-OTT discovery stub survives a TMDb response that only has theatrical.
-      const mergedReleaseDates = mergeReleaseDates(r.releaseDates, data.releaseDates);
+      const merged = mergeReleaseDates(r.releaseDates, data.releaseDates);
+
+      // R2 — DISCOVER FALLBACK. TMDb's /movie/{id}/release_dates is queried for
+      // the IN row only, and plenty of Indian films carry no IN row at all
+      // (Chennai Love Story had AU/GB/IE/NZ/US and nothing for India). The film
+      // still HAS a real date — the discover row's primary release_date, already
+      // on this record — so use it rather than render a card with no ★ RELEASED
+      // band. Flagged so the manifest can warn on the weaker provenance.
+      const needsFallback = !merged?.theatrical && !merged?.ott && Boolean(r.releaseDate);
+      const mergedReleaseDates = needsFallback
+        ? { theatrical: r.releaseDate }
+        : merged;
 
       const release: Release = {
         ...r,
@@ -274,6 +285,7 @@ async function enrichWithCreditsAndLanguages(releases: Release[]): Promise<Relea
         ...(data.musicDirector ? { musicDirector: data.musicDirector } : {}),
         ...(audioLanguages ? { audioLanguages } : {}),
         ...(mergedReleaseDates ? { releaseDates: mergedReleaseDates } : {}),
+        ...(needsFallback ? { releaseDatesFallback: "discover" as const } : {}),
         // Backfill — discovery stubs only; never overwrites an existing value.
         ...(needsBackfill && data.posterUrl && !r.posterUrl ? { posterUrl: data.posterUrl } : {}),
         ...(needsBackfill && data.synopsis && !r.synopsis ? { synopsis: data.synopsis } : {}),
@@ -300,7 +312,19 @@ async function enrichWithCreditsAndLanguages(releases: Release[]): Promise<Relea
  * discovery-backed getCandidates() all call it, so enrichment is never
  * duplicated. The stages are lifted verbatim from the previous in-function code.
  */
-export async function enrichReleases(stubs: Release[]): Promise<Release[]> {
+export interface EnrichOptions {
+  /**
+   * R3 — skip seam (a) of the country gate for films that ALREADY passed it at
+   * another seam. AI-net finds are gated at seam (b) (reconcile's new-movie
+   * guard) before they reach here; re-running the gate would re-log every
+   * verdict and print a SECOND ⚠ for the same film, making the audit read as
+   * though it were checked twice. The gate itself is not weakened — the film
+   * was already rejected-or-passed upstream, by the same pure predicate.
+   */
+  skipCountryGate?: boolean;
+}
+
+export async function enrichReleases(stubs: Release[], opts: EnrichOptions = {}): Promise<Release[]> {
   if (stubs.length === 0) return stubs;
 
   // 1. Resolve IMDb IDs
@@ -340,8 +364,14 @@ export async function enrichReleases(stubs: Release[]): Promise<Release[]> {
   // 3.5 COUNTRY GATE (seam a). Deliberately BETWEEN steps 3 and 4: step 3 is the
   // first point country data exists, and rejecting here means a non-Indian film
   // never costs the OMDb + MDBList calls step 4 would spend on it.
-  log.info(`Applying country gate (India-origin)...`);
-  const indian = applyCountryGate(withCredits);
+  let indian: Release[];
+  if (opts.skipCountryGate) {
+    log.info(`Country gate skipped — already gated upstream (seam b).`);
+    indian = withCredits.map((x) => x.release);
+  } else {
+    log.info(`Applying country gate (India-origin)...`);
+    indian = applyCountryGate(withCredits);
+  }
 
   // 4. Enrich ratings — MDBList primary + OMDb gap-fill (+ Phase 5.7 audio merge)
   log.info(`Enriching ratings with MDBList + OMDb...`);

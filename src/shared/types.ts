@@ -47,6 +47,13 @@ export interface Release {
     theatrical?: string;  // ISO date YYYY-MM-DD
     ott?: string;         // ISO date YYYY-MM-DD
   };
+  /**
+   * R2 — set when releaseDates.theatrical was BACKFILLED from the discover
+   * `releaseDate` because TMDb carried no IN release_dates row (the Chennai
+   * Love Story case). The date is real; its provenance is weaker, so the
+   * manifest warns rather than silently presenting it as an IN-region date.
+   */
+  releaseDatesFallback?: "discover";
   
   // Content
   genre: string[];
