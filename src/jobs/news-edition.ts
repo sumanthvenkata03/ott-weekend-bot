@@ -56,6 +56,27 @@ function escapeMd(s: string): string {
 const SLACK_SECTION_LIMIT = 2900;
 const SLACK_MAX_BLOCKS = 45;
 
+/** Slack's hard ceiling on blocks per message. Exceeding it is a 400. */
+export const SLACK_BLOCK_CEILING = 50;
+/** Cards shown as inline images; the rest become links + a zip pointer. */
+export const MAX_INLINE_IMAGES = 5;
+
+/**
+ * Enforce Slack's 50-block ceiling on the assembled message.
+ *
+ * The per-section chunker already bounds TEXT size, but the checklist adds
+ * image and divider blocks that chunking cannot merge — block COUNT is a
+ * separate limit from block SIZE, and only the audit tail is expendable. Trims
+ * from the end (audit first, checklist last) and says what it dropped, so the
+ * post-first section is never the part that gets cut.
+ */
+export function capBlocks(blocks: unknown[]): unknown[] {
+  if (blocks.length <= SLACK_BLOCK_CEILING) return blocks;
+  const kept = blocks.slice(0, SLACK_BLOCK_CEILING - 1);
+  kept.push(context(`_…audit trail truncated — ${blocks.length - kept.length} block(s) over Slack's ${SLACK_BLOCK_CEILING}-block ceiling._`));
+  return kept;
+}
+
 /**
  * Pack lines into as few section blocks as fit under Slack's per-section limit.
  * Required, not defensive: the first Phase-1 live send failed with a 400 until
@@ -207,82 +228,108 @@ export function buildPackageMessage(
   const blocks: unknown[] = [
     { type: "header", text: { type: "plain_text", text: head, emoji: true } },
     context(`${istDate} · IST · _suggestions for manual posting — nothing is published automatically_`),
-    section(`*FORMAT:* \`${edition.format}\`\n_${escapeMd(edition.why)}_`),
+    section(`*FORMAT:* \`${edition.format}\`
+_${escapeMd(edition.why)}_`),
   ];
   const plain: string[] = [head, `${istDate} (IST)`, "", `FORMAT: ${edition.format}`, edition.why];
 
-  // ── Stories, each with its SEGMENT badge ──
-  const shown = edition.cover
-    ? [edition.cover, ...edition.cards.filter((c) => c !== edition.cover)]
-    : edition.cards;
-  if (shown.length > 0) {
-    blocks.push(divider());
-    plain.push("", "STORIES");
-    for (const s of shown) {
-      const c = s.resolved.story.cluster;
-      const film = s.resolved.film;
-      const art = film?.posterUrl ? `poster (${film.confidence})` : "typographic";
-      const chip = c.judgedTitle ? ` · ★ ${escapeMd(c.judgedTitle)}` : "";
-      blocks.push(
-        section(
-          `\`${s.segment.badge}\`  *<${s.resolved.story.sourceUrl}|${escapeMd(c.headline)}>*\n` +
-            `${escapeMd(c.outlets.slice(0, 4).join(", "))} · Tier ${c.bestTier} · ${c.storyClass} · score ${c.score}${chip}\n` +
-            `_${escapeMd(s.segmentReason)} · art: ${art}_`
-        )
-      );
-      plain.push(`[${s.segment.badge}] ${c.headline} — ${c.outlets.join(", ")} · score ${c.score} · ${art}`);
-    }
-  }
+  // ══ POST CHECKLIST — everything needed to publish, in the order you do it ══
+  // Deliberately post-first, audit-second. The owner opens this to POST, not to
+  // review scoring; the audit trail keeps its full detail but moves below.
 
-  // ── Card previews + zip ──
-  if (delivery.previewUrls.length > 0) {
-    blocks.push(divider());
-    const links = delivery.previewUrls.map((u, i) => `<${u}|card ${String(i + 1).padStart(2, "0")}>`).join("  ·  ");
-    blocks.push(section(`*CARDS*\n${links}${delivery.zipUrl ? `\n\n📦 <${delivery.zipUrl}|download deck .zip>` : "\n_single card — no zip_"}`));
-    plain.push("", "CARDS", ...delivery.previewUrls, delivery.zipUrl ?? "(no zip — single card)");
+  // 1️⃣ IMAGES — inline so the cards are visible without opening a link.
+  blocks.push(divider(), section("*1️⃣ IMAGES*"));
+  const inline = delivery.previewUrls.slice(0, MAX_INLINE_IMAGES);
+  inline.forEach((url, i) => {
+    // Slack needs a non-empty alt_text; the cover is always previewUrls[0]
+    // because renderNews emits it first.
+    const alt = i === 0 && delivery.previewUrls.length > 1 ? "cover" : `card ${String(i).padStart(2, "0")}`;
+    blocks.push({ type: "image", image_url: url, alt_text: alt });
+  });
+  const overflow = delivery.previewUrls.length - inline.length;
+  if (overflow > 0) {
+    const links = delivery.previewUrls.slice(MAX_INLINE_IMAGES)
+      .map((u, i) => `<${u}|card ${String(i + MAX_INLINE_IMAGES).padStart(2, "0")}>`).join("  ·  ");
+    blocks.push(section(`${links}
+_(+${overflow} more in the zip)_`));
   }
+  // A zip cannot be inlined — it stays a link line.
+  blocks.push(section(delivery.zipUrl ? `📦 <${delivery.zipUrl}|download deck .zip>` : "_single card — no zip_"));
+  plain.push("", "1. IMAGES", ...delivery.previewUrls, delivery.zipUrl ?? "(no zip — single card)");
 
-  // ── Caption ──
-  blocks.push(divider());
+  // 2️⃣ CAPTION — its own fence.
   const captionLines = pkg.heldFor.length
-    ? [`*CAPTION — HELD*`, `_unbacked names: ${pkg.heldFor.join(", ")}_`]
-    : [
-        "*CAPTION* _(copy below)_",
-        "```",
-        pkg.caption,
-        "",
-        pkg.captionHashtags.join(" "),
-        "```",
-        `_first comment:_ \`${pkg.commentHashtags.join(" ")}\``,
-      ];
-  blocks.push(...toSectionBlocks(captionLines));
+    ? ["*2️⃣ CAPTION — HELD*", `_unbacked names: ${pkg.heldFor.join(", ")}_`]
+    : ["*2️⃣ CAPTION*", "```", `${pkg.caption}
+
+${pkg.captionHashtags.join(" ")}`, "```"];
+  blocks.push(divider(), ...toSectionBlocks(captionLines));
   plain.push("", ...captionLines);
 
-  // ── Badge-check board (§3 law 7 — no tick, no tag) ──
+  // 3️⃣ FIRST COMMENT — its own fence.
+  if (pkg.commentHashtags.length > 0) {
+    const lines = ["*3️⃣ FIRST COMMENT*", "```", pkg.commentHashtags.join(" "), "```"];
+    blocks.push(...toSectionBlocks(lines));
+    plain.push("", ...lines);
+  }
+
+  // 4️⃣ PINNED COMMENT — its own fence.
+  if (pkg.pinnedComment) {
+    const lines = ["*4️⃣ PINNED COMMENT*", "```", pkg.pinnedComment, "```"];
+    blocks.push(...toSectionBlocks(lines));
+    plain.push("", ...lines);
+  }
+
+  // 5️⃣ TAG CHECK — unchanged rules: no tick, no tag.
   if (pkg.badgeCheckBoard.length > 0) {
     const rows = pkg.badgeCheckBoard.map(
       (b) => `• ${escapeMd(b.name)} — ${b.candidateHandle ? `candidate \`${escapeMd(b.candidateHandle)}\`` : "_no handle suggested_"}`
     );
-    blocks.push(divider(), ...toSectionBlocks([
-      "*BADGE CHECK — verify before tagging*",
+    const lines = [
+      "*5️⃣ TAG CHECK — verify before tagging*",
       "_No tick, no tag. These are candidates only; nothing is auto-tagged._",
       ...rows,
-    ]));
-    plain.push("", "BADGE CHECK", ...rows);
+    ];
+    blocks.push(...toSectionBlocks(lines));
+    plain.push("", ...lines);
   }
 
-  if (pkg.pinnedComment) {
-    blocks.push(...toSectionBlocks(["*PINNED COMMENT*", "```", pkg.pinnedComment, "```"]));
+  // ══ AUDIT — the full trail, preserved, below the checklist ══
+  const shown = edition.cover
+    ? [edition.cover, ...edition.cards.filter((c) => c !== edition.cover)]
+    : edition.cards;
+  if (shown.length > 0) {
+    const lines = ["*STORIES*"];
+    for (const s2 of shown) {
+      const c = s2.resolved.story.cluster;
+      const film = s2.resolved.film;
+      const art = film?.posterUrl ? `poster (${film.confidence})` : "typographic";
+      const chip = c.judgedTitle ? ` · ★ ${escapeMd(c.judgedTitle)}` : "";
+      const link = s2.resolved.story.sourceUrl
+        ? `*<${s2.resolved.story.sourceUrl}|${escapeMd(c.headline)}>*`
+        : `*${escapeMd(c.headline)}*`;
+      lines.push(
+        `\`${s2.segment.badge}\`  ${link}
+` +
+          `${escapeMd(c.outlets.slice(0, 4).join(", "))} · Tier ${c.bestTier} · ${c.storyClass} · score ${c.score}${chip}
+` +
+          `_${escapeMd(s2.segmentReason)} · art: ${art}_`
+      );
+      plain.push(`[${s2.segment.badge}] ${c.headline} — ${c.outlets.join(", ")} · score ${c.score} · ${art}`);
+    }
+    blocks.push(divider(), ...toSectionBlocks(lines));
   }
 
-  // ── Held + stats ──
   const heldVerified = verified.filter((v) => !v.confirmed);
-  const droppedLines = edition.dropped.map((d) => `• ${escapeMd(d.headline)}\n   _${escapeMd(d.reason)}_`);
+  const droppedLines = edition.dropped.map((d) => `• ${escapeMd(d.headline)}
+   _${escapeMd(d.reason)}_`);
   if (heldVerified.length || ineligible.length || droppedLines.length) {
     const lines = ["*HELD*"];
-    for (const v of heldVerified) lines.push(`• ${escapeMd(v.cluster.headline)}\n   _${escapeMd(v.basis)}_`);
+    for (const v of heldVerified) lines.push(`• ${escapeMd(v.cluster.headline)}
+   _${escapeMd(v.basis)}_`);
     lines.push(...droppedLines);
-    for (const c of ineligible.slice(0, 5)) lines.push(`• ${escapeMd(c.headline)}\n   _${escapeMd(c.holdReason)}_`);
+    for (const c of ineligible.slice(0, 5)) lines.push(`• ${escapeMd(c.headline)}
+   _${escapeMd(c.holdReason)}_`);
     if (ineligible.length > 5) lines.push(`_…and ${ineligible.length - 5} more below the eligibility floor._`);
     blocks.push(divider(), ...toSectionBlocks(lines));
     plain.push("", ...lines);
@@ -297,7 +344,7 @@ export function buildPackageMessage(
   blocks.push(context(`_${statsLine}_\n_${thresholdLine}_`));
   plain.push("", statsLine, thresholdLine);
 
-  return { blocks, text: `${head} — ${istDate}: ${edition.format}`, plain: plain.join("\n") };
+  return { blocks: capBlocks(blocks), text: `${head} — ${istDate}: ${edition.format}`, plain: plain.join("\n") };
 }
 
 /** Route to #tbsi-news-desk; fall back to the main channel with a stated notice. */
@@ -409,6 +456,23 @@ async function main(opts: { slack: boolean; mode: RunMode }): Promise<void> {
   console.log(`\n${plain}\n`);
 
   if (!opts.slack) {
+    // Block-structure summary: the dry run's job is to prove the message would
+    // be ACCEPTED, not just that the copy reads well. Counts here are what
+    // Slack validates against (block ceiling, section size, image blocks).
+    const byType = new Map<string, number>();
+    for (const b of blocks as { type: string }[]) byType.set(b.type, (byType.get(b.type) ?? 0) + 1);
+    const fences = (blocks as { text?: { text?: string } }[])
+      .filter((b) => (b.text?.text ?? "").includes("```")).length;
+    const maxSection = Math.max(
+      0,
+      ...(blocks as { text?: { text?: string } }[]).map((b) => (b.text?.text ?? "").length)
+    );
+    // eslint-disable-next-line no-console
+    console.log(
+      `BLOCK STRUCTURE: ${blocks.length}/${SLACK_BLOCK_CEILING} blocks · ` +
+        [...byType].map(([t, n]) => `${n} ${t}`).join(" · ") +
+        ` · ${fences} fenced block(s) · largest section ${maxSection}/3000 chars`
+    );
     log.info("  --no-slack: dry run — nothing sent, nothing marked seen.");
     return;
   }

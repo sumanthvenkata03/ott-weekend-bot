@@ -22,6 +22,7 @@ const mk = (headline: string, basis: string, outlets = ["The Hindu"]): VerifiedS
   confirmed: true,
   sourceUrl: "https://thehindu.com/x",
   basis,
+  films: [],
 });
 
 describe("news caption sweep — backing corpus is the stories' own text", () => {

@@ -30,15 +30,54 @@ export const MAX_VERIFIED_STORIES = 5;
 
 const CACHE_TTL_SECONDS = 24 * 60 * 60;
 
-const StoryVerdictSchema = z.object({
-  id: z.string(),
-  confirmed: z.boolean(),
-  sourceUrl: z.string(),
-  basis: z.string(),
+/**
+ * A HELD story legitimately has no receipt. Requiring `sourceUrl: string`
+ * unconditionally meant every run containing an unconfirmed story failed schema
+ * validation and burned the retry — ~2 minutes of wall clock, observed live,
+ * for a response that was editorially correct.
+ *
+ * So the field is optional/nullable IN THE SHAPE, and the receipt rule moves
+ * into a refinement: `confirmed: true` still REQUIRES a non-empty string. The
+ * requirement did not loosen — it moved to where it is actually true. Nothing
+ * can be confirmed without a receipt, and applyReceiptRule then re-checks that
+ * the URL is a real, non-aggregator page.
+ */
+/**
+ * A film the story is ABOUT, as the primary page prints it. This is what makes
+ * multi-film art possible: an awards story names many films, and a register
+ * quadrant needs one per film, not one per story.
+ *
+ * `title` must be verbatim from the page — the resolver's sanity gate compares
+ * it against TMDb, so a paraphrase becomes a rejection. `note` is that film's
+ * ROLE in this story, which becomes the quadrant's gold fact line.
+ */
+const FilmRefSchema = z.object({
+  title: z.string(),
+  note: z.string(),
 });
-const NewsVerifySchema = z.object({
+
+const StoryVerdictSchema = z
+  .object({
+    id: z.string(),
+    confirmed: z.boolean(),
+    sourceUrl: z.string().nullish(),
+    basis: z.string(),
+    /** Present on CONFIRMED stories that are about films; omitted otherwise. */
+    films: z.array(FilmRefSchema).max(6).optional(),
+  })
+  .refine((v) => !v.confirmed || (typeof v.sourceUrl === "string" && v.sourceUrl.trim() !== ""), {
+    message: "confirmed=true requires a non-empty sourceUrl — a confirmation without a receipt is not a confirmation",
+    path: ["sourceUrl"],
+  });
+export const NewsVerifySchema = z.object({
   stories: z.array(StoryVerdictSchema).default([]),
 });
+
+/** A film named by the verified page, with its role in this story. */
+export interface FilmRef {
+  title: string;
+  note: string;
+}
 
 export interface VerifiedStory {
   cluster: ScoredCluster;
@@ -46,6 +85,8 @@ export interface VerifiedStory {
   /** Citable receipt — non-empty ONLY when confirmed. */
   sourceUrl: string;
   basis: string;
+  /** Films the page names. Empty for held or person-only stories. */
+  films: FilmRef[];
 }
 
 /** Aggregator/redirect hosts that can never serve as a receipt. */
@@ -105,25 +146,33 @@ ${list}
 
 RULES — read them as hard constraints:
 1. "confirmed": true ONLY if you found a page from a real news outlet that independently states the same fact. Not the headline restated — the fact, on a page you actually retrieved.
-2. "sourceUrl": the direct URL of that page. It MUST be the outlet's own URL. Never a news.google.com link, never a search-results page, never a homepage. If you cannot produce such a URL, "confirmed" MUST be false.
+2. "sourceUrl": the direct URL of that page. It MUST be the outlet's own URL. Never a news.google.com link, never a search-results page, never a homepage. If you cannot produce such a URL, "confirmed" MUST be false — and then "sourceUrl" may be null or omitted entirely. Do NOT invent a placeholder URL to fill the field.
 3. "basis": ONE line, max 20 words, stating what you found — name the outlet. If unconfirmed, state what was missing (e.g. "only aggregator copies found, no primary outlet page").
 4. Do NOT confirm from your own prior knowledge. A fact you remember but could not retrieve is UNCONFIRMED.
 5. Return exactly one entry per id given. Do not invent ids.
 6. FIGURES. If the headline's CENTRAL claim is a number (a box-office total, a deal value, a percentage drop) and your sources disagree on that number, set "confirmed": false and say which sources conflict — the story IS the figure, so an unsettled figure is an unsettled story. If the figure is INCIDENTAL to an event that is itself confirmed, confirm the event and mark the figure as an estimate in "basis" ("an estimated ...").
 
-Return JSON: {"stories":[{"id":"...","confirmed":true,"sourceUrl":"...","basis":"..."}]}`;
+7. "films": for a CONFIRMED story ABOUT one or more films, list them (max 6) as {"title","note"}.
+   - "title": EXACTLY as the primary page prints it. Do not translate, expand, abbreviate or add a year. A paraphrased title will fail the resolver's identity check and the film will be dropped.
+   - "note": that film's role in THIS story, max 40 characters — "Best Feature Film", "steep second-day fall", "wins Best Telugu Film".
+   - OMIT "films" entirely for a person-only story (an interview, a casting rumour about a person) and for any HELD story.
+
+Return JSON: {"stories":[{"id":"...","confirmed":true,"sourceUrl":"...","basis":"...","films":[{"title":"...","note":"..."}]}]}`;
 }
 
 /** Cache key: the day's story set. Different stories ⇒ different call. */
 function cacheKey(clusters: ScoredCluster[], dateStamp: string): string {
   const projection = clusters.map((c) => `${c.id}|${c.headline}`).join("\n");
   const hash = createHash("sha256").update(projection).digest("hex").slice(0, 16);
-  return `news:verify:v1:${dateStamp}:${hash}`;
+  // v2 — the response SHAPE changed (films[] added). A cached v1 verdict is
+  // schema-valid but has no film list, which would silently disable multi-film
+  // art for the cache's whole lifetime. A shape change must invalidate its cache.
+  return `news:verify:v2:${dateStamp}:${hash}`;
 }
 
 /** Every story held, with one stated reason. The fail-soft shape. */
 function allHeld(clusters: ScoredCluster[], basis: string): VerifiedStory[] {
-  return clusters.map((cluster) => ({ cluster, confirmed: false, sourceUrl: "", basis }));
+  return clusters.map((cluster) => ({ cluster, confirmed: false, sourceUrl: "", basis, films: [] }));
 }
 
 /**
@@ -162,9 +211,14 @@ export async function verifyStories(
         confirmed: false,
         sourceUrl: "",
         basis: "no verdict returned for this story — held",
+        films: [],
       };
     }
-    const ruled = applyReceiptRule(raw);
-    return { cluster, ...ruled };
+    // Normalize the nullable schema field before the receipt rule, which owns
+    // the "is this actually a citable page" question.
+    const ruled = applyReceiptRule({ ...raw, sourceUrl: raw.sourceUrl ?? "" });
+    // Films ride ONLY on a surviving confirmation: a story the receipt rule
+    // demoted has no verified page, so its film list has no provenance either.
+    return { cluster, ...ruled, films: ruled.confirmed ? (raw.films ?? []) : [] };
   });
 }

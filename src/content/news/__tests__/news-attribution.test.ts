@@ -5,7 +5,7 @@
 // https://outlookindia.com/…" and printing it twice.
 import { describe, it, expect } from "vitest";
 import { DOMAIN_OUTLET, buildSourceLines, clampWords, outletForUrl, stripHeadlineTail } from "../news-caption.js";
-import { fallbackCardLine } from "../../../rendering/render-news.js";
+import { fallbackCardLine, sealCountFor } from "../../../rendering/render-news.js";
 
 describe("outletForUrl", () => {
   it("names a Tier-A registry domain", () => {
@@ -144,5 +144,30 @@ describe("fallbackCardLine — a failed caption still yields a readable card", (
 
   it("passes a short clean headline through untouched", () => {
     expect(fallbackCardLine("Raayan takes Best Tamil Film")).toBe("Raayan takes Best Tamil Film");
+  });
+});
+
+describe("sealCountFor — ×N only on an explicit multiple", () => {
+  it("reads an explicit ×N", () => {
+    expect(sealCountFor("×2 wins")).toBe(2);
+    expect(sealCountFor("x3 awards")).toBe(3);
+  });
+
+  it("reads a spelled or numeric count", () => {
+    expect(sealCountFor("3 awards")).toBe(3);
+    expect(sealCountFor("two wins")).toBe(2);
+  });
+
+  it("gives NO seal to a single category — a seal means multiple", () => {
+    expect(sealCountFor("Best Feature Film")).toBe(0);
+    expect(sealCountFor("steep second-day fall")).toBe(0);
+    expect(sealCountFor(undefined)).toBe(0);
+  });
+});
+
+describe("DOMAIN_OUTLET — yesterday's bare-domain flags", () => {
+  it("now names BizAsia and India TV", () => {
+    expect(outletForUrl("https://www.bizasialive.com/72nd-national-film-awards")).toBe("BizAsia");
+    expect(outletForUrl("https://www.indiatvnews.com/entertainment/news/kattalan")).toBe("India TV");
   });
 });

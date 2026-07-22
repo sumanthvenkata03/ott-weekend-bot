@@ -2,7 +2,7 @@
 // The chunker cover is regression for a REAL failure: the first live Phase-1
 // send returned 400 because a ~6k-char draft went out as one section.
 import { describe, it, expect } from "vitest";
-import { buildPackageMessage, headerFor, isEphemeral, istClockTime, resolveNewsWebhook, toSectionBlocks, zipCaptionText, type PackageDelivery } from "../news-edition.js";
+import { MAX_INLINE_IMAGES, SLACK_BLOCK_CEILING, buildPackageMessage, capBlocks, headerFor, isEphemeral, istClockTime, resolveNewsWebhook, toSectionBlocks, zipCaptionText, type PackageDelivery } from "../news-edition.js";
 import type { ComposedEdition, SelectedStory } from "../../content/news/news-compose.js";
 import type { NewsPackage } from "../../content/news/news-caption.js";
 import type { ScoredCluster } from "../../content/news/news-score.js";
@@ -74,10 +74,13 @@ const cluster = (over: Partial<ScoredCluster> = {}): ScoredCluster => ({
 
 const sel = (over: Partial<ScoredCluster> = {}, poster = false): SelectedStory => ({
   resolved: {
-    story: { cluster: cluster(over), confirmed: true, sourceUrl: "https://thehindu.com/x", basis: "confirmed" },
+    story: { cluster: cluster(over), confirmed: true, sourceUrl: "https://thehindu.com/x", basis: "confirmed", films: [] },
     film: poster
       ? { title: "Balan The Boy", confidence: "quoted", tmdbId: 42, posterUrl: "https://image.tmdb.org/p.jpg" }
       : null,
+    films: poster
+      ? [{ title: "Balan The Boy", confidence: "quoted", tmdbId: 42, posterUrl: "https://image.tmdb.org/p.jpg" }]
+      : [],
     reason: "r",
   },
   segment: SEGMENTS.RADAR,
@@ -86,6 +89,7 @@ const sel = (over: Partial<ScoredCluster> = {}, poster = false): SelectedStory =
 
 const edition = (over: Partial<ComposedEdition> = {}): ComposedEdition => ({
   format: "register-single",
+  explodeFilms: false,
   why: "REGISTER-SINGLE — 2 renderable stories.",
   cover: null,
   cards: [sel(), sel({ headline: "Another story", id: "c2" })],
@@ -149,10 +153,13 @@ describe("buildPackageMessage", () => {
     expect(t).toContain("art: typographic");
   });
 
-  it("includes card previews and the zip link", () => {
-    const t = allText(build().blocks);
-    expect(t).toContain("https://r2/card-01.png");
-    expect(t).toContain("download deck .zip");
+  it("includes card previews (now INLINE images) and the zip link", () => {
+    const { blocks } = build();
+    // Post-first layout: previews are image blocks, so the URL lives in
+    // image_url rather than in any section's text.
+    const imgs = (blocks as { type: string; image_url?: string }[]).filter((b) => b.type === "image");
+    expect(imgs.map((b) => b.image_url)).toContain("https://r2/card-01.png");
+    expect(allText(blocks)).toContain("download deck .zip");
   });
 
   it("says so when a single card ships without a zip", () => {
@@ -167,15 +174,16 @@ describe("buildPackageMessage", () => {
     expect((caption.text!.text.match(/```/g) ?? [])).toHaveLength(2);
   });
 
-  it("splits hashtags — caption set vs first comment", () => {
+  it("splits hashtags — caption set vs its own FIRST COMMENT step", () => {
     const t = allText(build().blocks);
-    expect(t).toContain("#TBSI #IndianCinema");
-    expect(t).toContain("first comment:");
+    expect(t).toContain("#TBSI #IndianCinema");   // step 2, inside the caption fence
+    expect(t).toContain("3️⃣ FIRST COMMENT");      // step 3, its own fence
+    expect(t).toContain("#OTT #MovieNews");
   });
 
-  it("shows the badge-check board and never claims a verified tag", () => {
+  it("shows the tag-check board and never claims a verified tag", () => {
     const t = allText(build().blocks);
-    expect(t).toContain("BADGE CHECK");
+    expect(t).toContain("5️⃣ TAG CHECK");
     expect(t).toContain("No tick, no tag");
     expect(t).toContain("Chidambaram");
   });
@@ -277,5 +285,117 @@ describe("run modes — scheduled / --now / --test-banner", () => {
       { previewUrls: [] }, [], [], stats, "now", "18:42"
     );
     expect(asBlocks(blocks)[0]!.text!.text).toContain("on-demand · 18:42 IST");
+  });
+});
+
+// ── MICRO 3: inline images + post-first checklist ──────────────────────────
+
+const withImages = (n: number, zip = true): PackageDelivery => ({
+  previewUrls: Array.from({ length: n }, (_, i) => `https://r2.example/img-${i}.png`),
+  ...(zip ? { zipUrl: "https://r2.example/deck.zip" } : {}),
+});
+const buildD = (d: PackageDelivery) =>
+  buildPackageMessage("2026-07-19", edition(), pkg(), d, [], [], stats, "now", "18:42");
+type ImageBlock = { type: string; image_url?: string; alt_text?: string };
+
+describe("inline card images", () => {
+  it("renders each card as a Block Kit image block", () => {
+    const imgs = (buildD(withImages(3)).blocks as ImageBlock[]).filter((b) => b.type === "image");
+    expect(imgs).toHaveLength(3);
+    expect(imgs[0]!.image_url).toBe("https://r2.example/img-0.png");
+  });
+
+  it("labels the first image 'cover' and the rest 'card NN'", () => {
+    const imgs = (buildD(withImages(3)).blocks as ImageBlock[]).filter((b) => b.type === "image");
+    expect(imgs[0]!.alt_text).toBe("cover");
+    expect(imgs[1]!.alt_text).toBe("card 01");
+    expect(imgs[2]!.alt_text).toBe("card 02");
+  });
+
+  it("a lone image is a card, not a cover", () => {
+    const imgs = (buildD(withImages(1)).blocks as ImageBlock[]).filter((b) => b.type === "image");
+    expect(imgs[0]!.alt_text).toBe("card 00");
+  });
+
+  it("every image block carries a non-empty alt_text (Slack rejects blank)", () => {
+    for (const b of (buildD(withImages(4)).blocks as ImageBlock[]).filter((x) => x.type === "image")) {
+      expect(b.alt_text!.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("CAPS inline images and links the overflow with a count", () => {
+    const { blocks } = buildD(withImages(8));
+    expect((blocks as ImageBlock[]).filter((b) => b.type === "image")).toHaveLength(MAX_INLINE_IMAGES);
+    const t = allText(blocks);
+    expect(t).toContain(`(+${8 - MAX_INLINE_IMAGES} more in the zip)`);
+    expect(t).toContain("https://r2.example/img-5.png");
+  });
+
+  it("keeps the zip as a LINK line — a zip cannot be inlined", () => {
+    const t = allText(buildD(withImages(2)).blocks);
+    expect(t).toContain("download deck .zip");
+    const imgs = (buildD(withImages(2)).blocks as ImageBlock[]).filter((b) => b.type === "image");
+    expect(imgs.every((b) => !b.image_url!.endsWith(".zip"))).toBe(true);
+  });
+
+  it("says so when there is no zip", () => {
+    expect(allText(buildD(withImages(1, false)).blocks)).toContain("single card — no zip");
+  });
+});
+
+describe("post-first checklist layout", () => {
+  it("orders the five steps 1-5", () => {
+    const t = allText(buildD(withImages(2)).blocks);
+    const order = ["1️⃣ IMAGES", "2️⃣ CAPTION", "3️⃣ FIRST COMMENT", "4️⃣ PINNED COMMENT", "5️⃣ TAG CHECK"];
+    let last = -1;
+    for (const step of order) {
+      const at = t.indexOf(step);
+      expect(at, `${step} missing`).toBeGreaterThan(-1);
+      expect(at, `${step} out of order`).toBeGreaterThan(last);
+      last = at;
+    }
+  });
+
+  it("puts the whole checklist ABOVE the audit trail", () => {
+    const t = allText(buildD(withImages(2)).blocks);
+    expect(t.indexOf("5️⃣ TAG CHECK")).toBeLessThan(t.indexOf("*STORIES*"));
+  });
+
+  it("gives caption, first comment and pinned comment their OWN fences", () => {
+    const fenced = (buildD(withImages(1)).blocks as Block[])
+      .filter((b) => (b.text?.text ?? "").includes("```"));
+    expect(fenced.length).toBeGreaterThanOrEqual(3);
+    for (const f of fenced) expect((f.text!.text.match(/```/g) ?? []).length % 2).toBe(0);
+  });
+
+  it("preserves the audit content below the checklist", () => {
+    const t = allText(buildD(withImages(1)).blocks);
+    expect(t).toContain("*STORIES*");
+    expect(t).toContain("thresholds: BIG≥");
+    expect(t).toContain("86 gathered");
+  });
+});
+
+describe("capBlocks — Slack's 50-block ceiling", () => {
+  it("passes a normal message through untouched", () => {
+    const b = Array.from({ length: 20 }, () => ({ type: "divider" }));
+    expect(capBlocks(b)).toHaveLength(20);
+  });
+
+  it("trims from the END so the checklist survives, not the audit", () => {
+    const b = Array.from({ length: 80 }, (_, i) => ({ type: "divider", n: i }));
+    const out = capBlocks(b) as { n?: number }[];
+    expect(out).toHaveLength(SLACK_BLOCK_CEILING);
+    expect(out[0]!.n).toBe(0);                       // head kept
+    expect(out.at(-1)).toHaveProperty("type", "context"); // truncation notice
+  });
+
+  it("says how much it dropped", () => {
+    const out = capBlocks(Array.from({ length: 60 }, () => ({ type: "divider" })));
+    expect(JSON.stringify(out.at(-1))).toContain("truncated");
+  });
+
+  it("a real package stays under the ceiling", () => {
+    expect(buildD(withImages(5)).blocks.length).toBeLessThanOrEqual(SLACK_BLOCK_CEILING);
   });
 });

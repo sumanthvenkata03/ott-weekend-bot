@@ -39,6 +39,8 @@ export interface ResolvedFilm {
   /** Title as extracted (detector (a)/(b)) or as judged (detector (c)). */
   title: string;
   confidence: ResolveConfidence;
+  /** This film's role in the story — becomes the quadrant's gold fact line. */
+  note?: string;
   tmdbId?: number;
   posterUrl?: string;
   imdbId?: string;
@@ -48,9 +50,90 @@ export interface ResolvedFilm {
 
 export interface ResolvedStory {
   story: VerifiedStory;
+  /** Lead film — films[0] when present, else the detector hit. Null if none. */
   film: ResolvedFilm | null;
+  /** EVERY film the verified page named, resolved. Drives quadrant explosion. */
+  films: ResolvedFilm[];
   /** Printable one-liner for the run table. */
   reason: string;
+}
+
+// ── SANITY GATE (resolver v2) ───────────────────────────────────────────────
+//
+// TMDb's search returns SOMETHING for almost any string. Without an identity
+// check, "G.D.N" resolved to "Hulk and the Agents of S.M.A.S.H." — the dot-
+// separated initials tokenised into a match. A wrong poster is worse than no
+// poster: it is a confident, published, visual lie about which film this is.
+//
+// A hit is accepted only when BOTH hold:
+//   • the normalized titles are similar enough to be the same film, AND
+//   • the release year is within TMDB_YEAR_TOLERANCE of the window, OR the film
+//     independently matches our judged archive (a real identity we already hold).
+
+/** Minimum normalized-title similarity to accept a TMDb hit. */
+export const TITLE_SIMILARITY_MIN = 0.6;
+/** Years either side of the window a hit may fall and still be plausible. */
+export const TMDB_YEAR_TOLERANCE = 3;
+
+/** Comparable title tokens: lowercased, punctuation stripped, no stopwords. */
+function titleTokenSet(s: string): Set<string> {
+  return new Set(
+    s
+      .toLowerCase()
+      .replace(/[’']/g, "")
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((t) => t.length > 0 && !["the", "a", "an", "of", "and"].includes(t))
+  );
+}
+
+/**
+ * Title similarity in [0,1]: shared tokens over the SHORTER title, so a short
+ * real title is not punished for matching inside a longer one. PURE.
+ */
+export function titleSimilarity(a: string, b: string): number {
+  const A = titleTokenSet(a);
+  const B = titleTokenSet(b);
+  if (A.size === 0 || B.size === 0) return 0;
+  let hits = 0;
+  for (const t of A) if (B.has(t)) hits++;
+  return hits / Math.min(A.size, B.size);
+}
+
+export interface SanityVerdict {
+  ok: boolean;
+  similarity: number;
+  /** Printable — why it passed or failed. */
+  reason: string;
+}
+
+/**
+ * Decide whether a TMDb hit is really the film we asked for. PURE, so the
+ * Hulk-class rejection is unit-testable without touching the network.
+ */
+export function sanityCheck(
+  asked: string,
+  hit: { title: string; year?: number },
+  windowYear: number,
+  judgedMatch = false
+): SanityVerdict {
+  const sim = titleSimilarity(asked, hit.title);
+  if (sim < TITLE_SIMILARITY_MIN) {
+    return {
+      ok: false,
+      similarity: sim,
+      reason: `REJECTED low-sim ${sim.toFixed(2)} (got "${hit.title}")`,
+    };
+  }
+  const yearOk = hit.year === undefined || Math.abs(hit.year - windowYear) <= TMDB_YEAR_TOLERANCE;
+  if (!yearOk && !judgedMatch) {
+    return {
+      ok: false,
+      similarity: sim,
+      reason: `REJECTED year ${hit.year} outside ±${TMDB_YEAR_TOLERANCE} of ${windowYear} (got "${hit.title}")`,
+    };
+  }
+  return { ok: true, similarity: sim, reason: `sim ${sim.toFixed(2)}${judgedMatch ? " +judged" : ""}` };
 }
 
 // ── Detectors (PURE — no I/O, unit-tested off real headlines) ────────────────
@@ -119,6 +202,55 @@ export function extractFilmTitle(
  * Resolve one confirmed story to a film + poster, best effort. Never throws:
  * a TMDb failure degrades to unresolved, and unresolved renders typographic.
  */
+/**
+ * Resolve ONE title against TMDb, gated. Returns null when the gate rejects —
+ * a rejection is a success of the guard, not a failure of the run.
+ */
+async function resolveOne(
+  title: string,
+  language: string,
+  windowYear: number,
+  confidence: ResolveConfidence,
+  judgedMatch = false
+): Promise<{ film: ResolvedFilm | null; reason: string }> {
+  try {
+    const search = await searchTitleTmdb(title, { year: windowYear, language });
+    const res = resolveTitleToTmdb({ title, language, isSeries: false }, search, windowYear);
+    if (res.kind !== "movie" || !res.hit) {
+      return { film: null, reason: `"${title}" → no TMDb movie match` };
+    }
+    const sane = sanityCheck(title, res.hit, windowYear, judgedMatch);
+    if (!sane.ok) return { film: null, reason: `"${title}" → ${sane.reason}` };
+
+    const poster = posterUrl(res.hit.posterPath ?? null);
+    return {
+      film: {
+        title: res.hit.title,
+        confidence,
+        tmdbId: res.hit.id,
+        ...(poster ? { posterUrl: poster } : {}),
+        ...(res.ambiguous ? { ambiguous: true } : {}),
+      },
+      reason:
+        `"${title}" → tmdb ${res.hit.id}${poster ? " +poster" : " (no poster art)"}` +
+        ` [${sane.reason}]${res.ambiguous ? " ambiguous" : ""}`,
+    };
+  } catch (err) {
+    return { film: null, reason: `"${title}" → lookup failed (${err instanceof Error ? err.message : String(err)})` };
+  }
+}
+
+/**
+ * Resolve one confirmed story to its film set, best effort. Never throws.
+ *
+ * PREFERRED PATH (v2): the verifier's `films[]` — titles read off the page it
+ * actually retrieved, so an awards story yields every winner, not just whatever
+ * the headline happened to lead with. Each entry goes through the sanity gate
+ * independently; rejects are logged and dropped.
+ *
+ * FALLBACK: the original headline detectors, unchanged, for stories the verifier
+ * gave no film list (person-only stories, or an older cached verdict).
+ */
 export async function resolveStory(
   story: VerifiedStory,
   judged: JudgedFilm[],
@@ -126,60 +258,62 @@ export async function resolveStory(
   windowYear: number
 ): Promise<ResolvedStory> {
   const headline = story.cluster.headline;
+  const language = story.cluster.language;
+  const reasons: string[] = [];
 
-  const extracted = extractFilmTitle(headline);
-  if (extracted) {
-    try {
-      const search = await searchTitleTmdb(extracted.title, {
-        year: windowYear,
-        language: story.cluster.language,
-      });
-      const res = resolveTitleToTmdb(
-        { title: extracted.title, language: story.cluster.language, isSeries: false },
-        search,
-        windowYear
+  // ── v2: resolve every film the page named ──
+  if (story.films.length > 0) {
+    const films: ResolvedFilm[] = [];
+    for (const ref of story.films) {
+      const judgedHit = findJudged(ref.title, judged);
+      const { film, reason } = await resolveOne(
+        ref.title, language, windowYear, "quoted", Boolean(judgedHit)
       );
-      if (res.kind === "movie" && res.hit) {
-        const poster = posterUrl(res.hit.posterPath ?? null);
-        return {
-          story,
-          film: {
-            title: res.hit.title,
-            confidence: extracted.confidence,
-            tmdbId: res.hit.id,
-            ...(poster ? { posterUrl: poster } : {}),
-            ...(res.ambiguous ? { ambiguous: true } : {}),
-          },
-          reason:
-            `${extracted.confidence}:"${extracted.title}" → TMDb ${res.hit.id}` +
-            `${poster ? " +poster" : " (no poster art)"}${res.ambiguous ? " [ambiguous]" : ""}`,
-        };
+      reasons.push(reason);
+      if (film) {
+        films.push({ ...film, note: ref.note, ...(judgedHit?.imdbId ? { imdbId: judgedHit.imdbId } : {}) });
+      } else if (judgedHit) {
+        // No TMDb art, but a real identity we already hold — keep it typographic.
+        films.push({ title: ref.title, confidence: "judged", note: ref.note, ...(judgedHit.imdbId ? { imdbId: judgedHit.imdbId } : {}) });
+      } else {
+        // Named by the page but unresolvable → still a real film, rendered
+        // typographically. The page is the provenance; TMDb is only the art.
+        films.push({ title: ref.title, confidence: "none", note: ref.note });
       }
-    } catch (err) {
-      log.warn(`  resolve failed for "${extracted.title}" — ${err instanceof Error ? err.message : String(err)}`);
     }
-  }
-
-  // (c) judged index — a real identity even without art.
-  const judgedHit = findJudged(headline, judged);
-  if (judgedHit) {
     return {
       story,
-      film: {
-        title: judgedHit.title,
-        confidence: "judged",
-        ...(judgedHit.imdbId ? { imdbId: judgedHit.imdbId } : {}),
-      },
-      reason: `judged:"${judgedHit.title}" (no poster — judged index carries no art)`,
+      film: films[0] ?? null,
+      films,
+      reason: reasons.join(" · "),
     };
+  }
+
+  // ── fallback: headline detectors ──
+  const extracted = extractFilmTitle(headline);
+  if (extracted) {
+    const { film, reason } = await resolveOne(
+      extracted.title, language, windowYear, extracted.confidence
+    );
+    if (film) return { story, film, films: [film], reason: `${extracted.confidence}:${reason}` };
+    reasons.push(`${extracted.confidence}:${reason}`);
+  }
+
+  const judgedHit = findJudged(headline, judged);
+  if (judgedHit) {
+    const film: ResolvedFilm = {
+      title: judgedHit.title,
+      confidence: "judged",
+      ...(judgedHit.imdbId ? { imdbId: judgedHit.imdbId } : {}),
+    };
+    return { story, film, films: [film], reason: `judged:"${judgedHit.title}" (no poster — judged index carries no art)` };
   }
 
   return {
     story,
     film: null,
-    reason: extracted
-      ? `${extracted.confidence}:"${extracted.title}" → no TMDb match — typographic`
-      : "no title detected — typographic",
+    films: [],
+    reason: reasons.length ? reasons.join(" · ") : "no title detected — typographic",
   };
 }
 

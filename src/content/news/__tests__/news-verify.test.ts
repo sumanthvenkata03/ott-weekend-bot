@@ -1,7 +1,7 @@
 // NEWS DESK · D — the receipt rule (N1) in code. No API is called by this suite:
 // it drives the pure guard that overrides model optimism.
 import { describe, it, expect } from "vitest";
-import { applyReceiptRule, isReceipt } from "../news-verify.js";
+import { NewsVerifySchema, applyReceiptRule, isReceipt } from "../news-verify.js";
 
 describe("isReceipt", () => {
   it("accepts a real outlet page", () => {
@@ -63,5 +63,79 @@ describe("applyReceiptRule — code overrides model optimism", () => {
   it("never leaves an unconfirmed story without a stated reason (N1)", () => {
     const out = applyReceiptRule({ confirmed: false, sourceUrl: "", basis: "" });
     expect(out.basis).not.toBe("");
+  });
+});
+
+// ── MICRO 3: held stories legitimately have no receipt ─────────────────────
+
+describe("StoryVerdictSchema — sourceUrl is required only when confirmed", () => {
+  it("a HELD story with NO sourceUrl validates first-pass", () => {
+    // The live cost of the old shape: every run containing an unconfirmed story
+    // failed validation and burned the retry (~2 min) for an editorially
+    // correct response.
+    const r = NewsVerifySchema.safeParse({
+      stories: [{ id: "c1", confirmed: false, basis: "no primary outlet page found" }],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts an explicit null sourceUrl on a held story", () => {
+    const r = NewsVerifySchema.safeParse({
+      stories: [{ id: "c1", confirmed: false, sourceUrl: null, basis: "held" }],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("REJECTS confirmed=true with no sourceUrl — the receipt is non-negotiable", () => {
+    const r = NewsVerifySchema.safeParse({
+      stories: [{ id: "c1", confirmed: true, basis: "I am sure" }],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("REJECTS confirmed=true with an empty-string sourceUrl", () => {
+    const r = NewsVerifySchema.safeParse({
+      stories: [{ id: "c1", confirmed: true, sourceUrl: "   ", basis: "x" }],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("accepts a properly confirmed story", () => {
+    const r = NewsVerifySchema.safeParse({
+      stories: [{ id: "c1", confirmed: true, sourceUrl: "https://thehindu.com/x", basis: "The Hindu confirms" }],
+    });
+    expect(r.success).toBe(true);
+  });
+});
+
+describe("films[] — multi-film schema (resolver v2)", () => {
+  it("a confirmed story carries films with title + note", () => {
+    const r = NewsVerifySchema.safeParse({
+      stories: [{
+        id: "c1", confirmed: true, sourceUrl: "https://thehindu.com/x", basis: "confirmed",
+        films: [
+          { title: "Article 370", note: "Best Feature Film" },
+          { title: "Kalki 2898 AD", note: "Best Popular Film" },
+        ],
+      }],
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.stories[0]!.films).toHaveLength(2);
+  });
+
+  it("a HELD story omits films entirely and still validates", () => {
+    const r = NewsVerifySchema.safeParse({
+      stories: [{ id: "c1", confirmed: false, basis: "no primary page" }],
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.stories[0]!.films).toBeUndefined();
+  });
+
+  it("caps the list at 6 films", () => {
+    const films = Array.from({ length: 7 }, (_, i) => ({ title: `F${i}`, note: "win" }));
+    const r = NewsVerifySchema.safeParse({
+      stories: [{ id: "c1", confirmed: true, sourceUrl: "https://x.com/a", basis: "b", films }],
+    });
+    expect(r.success).toBe(false);
   });
 });

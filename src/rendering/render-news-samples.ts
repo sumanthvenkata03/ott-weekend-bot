@@ -135,8 +135,55 @@ async function main(): Promise<void> {
     },
   });
 
+  // ── RESOLVER V2: film-quadrant explosion ────────────────────────────────
+  // 07 four resolved posters · 08 mixed 2 poster + 2 typographic
+  // 09 all-typographic (page named films, TMDb resolved none)
+  await renderToPNG({
+    templateName: "news-register-card",
+    width: W, height: H, outputPath: `${OUT}/07-explode-4poster.png`,
+    data: {
+      quads: [
+        { posterUrl: P1, cropPosition: "center 28%", film: "Article 370", facts: ["BEST FEATURE FILM"], credit: "" },
+        { posterUrl: P2, cropPosition: "center 30%", film: "Kalki 2898 AD", sealCount: 2,
+          facts: ["BEST POPULAR FILM · 2 AWARDS"], credit: "" },
+        { posterUrl: P1, cropPosition: "center 26%", film: "Amaran", facts: ["BEST DIRECTION"], credit: "" },
+        { posterUrl: P2, cropPosition: "center 32%", film: "Raayan", facts: ["BEST TAMIL FILM"], credit: "" },
+      ],
+    },
+  });
+
+  await renderToPNG({
+    templateName: "news-register-card",
+    width: W, height: H, outputPath: `${OUT}/08-explode-mixed.png`,
+    data: {
+      quads: [
+        { posterUrl: P1, cropPosition: "center 28%", film: "Article 370", facts: ["BEST FEATURE FILM"], credit: "" },
+        { film: "Committee Kurrollu", facts: ["BEST TELUGU FILM"], credit: "" },
+        { posterUrl: P2, cropPosition: "center 30%", film: "Amaran", sealCount: 3,
+          facts: ["BEST DIRECTION · THREE WINS"], credit: "" },
+        { alsoHonoured: [{ label: "", lines: [
+          "FEMINICHI FATHIMA · BEST MALAYALAM FILM",
+          "SRIKANTH · BEST HINDI FILM",
+        ] }] },
+      ],
+    },
+  });
+
+  await renderToPNG({
+    templateName: "news-register-card",
+    width: W, height: H, outputPath: `${OUT}/09-explode-alltypo.png`,
+    data: {
+      quads: [
+        { film: "Article 370", facts: ["BEST FEATURE FILM"], credit: "" },
+        { film: "Committee Kurrollu", facts: ["BEST TELUGU FILM"], credit: "" },
+        { film: "Feminichi Fathima", facts: ["BEST MALAYALAM FILM"], credit: "" },
+        { film: "35 – Chinna Katha Kaadu", facts: ["BEST CHILDREN'S FILM"], credit: "" },
+      ],
+    },
+  });
+
   await closeBrowser();
-  log.success(`  6 samples → ${OUT}/`);
+  log.success(`  9 samples → ${OUT}/`);
 }
 
 const argv1 = (process.argv[1] ?? "").replace(/\\/g, "/");

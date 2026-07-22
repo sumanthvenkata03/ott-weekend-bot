@@ -142,7 +142,7 @@
           <div class="also-h">Also honoured.</div>
           {% for row in q.alsoHonoured %}
           <div class="also-row">
-            <div class="also-g" data-fit data-min="9">{{ row.label }}</div>
+            {% if row.label %}<div class="also-g" data-fit data-min="9">{{ row.label }}</div>{% endif %}
             {% for l in row.lines %}<div class="also-l" data-fit data-min="9">{{ l }}</div>{% endfor %}
           </div>
           {% endfor %}

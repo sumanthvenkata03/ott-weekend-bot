@@ -19,6 +19,7 @@ import { renderToPNG } from "./renderer.js";
 import { computeCropPosition } from "./poster-crop.js";
 import { log } from "../shared/logger.js";
 import type { ComposedEdition, SelectedStory } from "../content/news/news-compose.js";
+import type { ResolvedFilm } from "../content/news/news-resolve.js";
 import { CARD_LINE_MAX, clampWords, stripHeadlineTail, type CardCopy } from "../content/news/news-caption.js";
 
 /** cluster id → editorial card copy, from the package step. */
@@ -126,6 +127,45 @@ async function quadFor(s: SelectedStory, copy: CardCopyMap): Promise<Record<stri
   return quad;
 }
 
+/**
+ * FILM QUADRANT (resolver v2). One quadrant per FILM the verified page named —
+ * poster ground when TMDb resolved it, maroon typographic otherwise. The film's
+ * `note` (its role in the story) becomes the gold fact line, which is exactly
+ * what §2.2 asks for: "CATEGORY · WINNER NAME", one line per award.
+ *
+ * The ×N seal reuses the existing rule — a note naming multiple wins gets a
+ * count — so multi-award films read at a glance.
+ */
+async function filmQuad(f: ResolvedFilm, badge: string): Promise<Record<string, unknown>> {
+  const quad: Record<string, unknown> = {
+    film: f.title,
+    facts: f.note ? [f.note.toUpperCase()] : [badge],
+    credit: "",
+  };
+  const seal = sealCountFor(f.note);
+  if (seal >= 2) quad.sealCount = seal;
+  if (f.posterUrl) {
+    quad.posterUrl = f.posterUrl;
+    quad.cropPosition = await computeCropPosition(f.posterUrl);
+  }
+  return quad;
+}
+
+/**
+ * ×N seal count from a film's note. Only an EXPLICIT multiple earns a seal —
+ * "×2", "2 awards", "two wins". A note that merely lists one category does not.
+ */
+export function sealCountFor(note?: string): number {
+  if (!note) return 0;
+  const x = note.match(/[×x]\s*(\d+)/i);
+  if (x?.[1]) return Number.parseInt(x[1], 10);
+  const n = note.match(/\b(\d+)\s+(?:awards?|wins?|honours?|honors?)\b/i);
+  if (n?.[1]) return Number.parseInt(n[1], 10);
+  const words: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, six: 6 };
+  const w = note.toLowerCase().match(/\b(two|three|four|five|six)\s+(?:awards?|wins?|honours?|honors?)\b/);
+  return w?.[1] ? (words[w[1]] ?? 0) : 0;
+}
+
 /** Pad a slide's quadrants to exactly 4 so the 2×2 never leaves a hole. */
 function padQuads(
   quads: Record<string, unknown>[],
@@ -218,6 +258,65 @@ export async function renderNews(
 
   // ── register: cover + quadrant slides ─────────────────────────────────────
   const all = edition.cards;
+
+  // FILM EXPLOSION (resolver v2): the lead story named ≥2 films, so quadrants go
+  // per FILM. Overflow beyond the 2×2 grid becomes the "Also honoured." quadrant
+  // (§2.2) rather than being silently dropped.
+  if (edition.explodeFilms && edition.cover) {
+    const lead = edition.cover;
+    const films = lead.resolved.films;
+    const perSlide = QUADS_PER_SLIDE;
+    const shown = films.slice(0, perSlide - (films.length > perSlide ? 1 : 0));
+    const rest = films.slice(shown.length);
+
+    const quads = await Promise.all(shown.map((f) => filmQuad(f, lead.segment.badge)));
+    if (rest.length > 0) {
+      quads.push({
+        alsoHonoured: [{
+          label: "",
+          lines: rest.map((f) => `${f.title.toUpperCase()}${f.note ? ` · ${f.note.toUpperCase()}` : ""}`),
+        }],
+      });
+    }
+    while (quads.length < perSlide) quads.push({ film: "THE BIG SCREEN INDEX", facts: [] });
+
+    // Cover mosaic draws from ALL resolved posters, not just the first four.
+    const tiles = films.filter((f) => f.posterUrl).slice(0, 4)
+      .map((f) => ({ posterUrl: f.posterUrl!, film: f.title.slice(0, 26) }));
+    while (tiles.length > 0 && tiles.length < 2) tiles.push({ ...tiles[0]! });
+    const artTiles = tiles.length;
+
+    coverPath = `${outputDir}/${NEWS_SLUG}-${istDate}-cover.png`;
+    await renderToPNG({
+      templateName: "news-register-cover",
+      width: CARD_W, height: CARD_H, outputPath: coverPath,
+      data: {
+        tiles: tiles.length ? tiles : [{ film: lead.resolved.film?.title ?? "" }],
+        mosaicCols: tiles.length <= 2 ? 1 : 2,
+        coverDarken: artTiles === 0 ? 0.18 : artTiles < 4 ? 0.52 : 0.70,
+        pillPng: pill,
+        eyebrow: `${lead.segment.badge} · ${istDate}`,
+        numeral: String(films.length),
+        title: lineFor(lead, cardCopy),
+        factLine: creditFor(lead),
+        swipeLine: "SWIPE FOR THE FULL LIST →",
+      },
+    });
+    notes.push(`register cover (film-explosion): ${artTiles}/${films.length} films have art`);
+
+    const path = `${outputDir}/${NEWS_SLUG}-${istDate}-card-01.png`;
+    await renderToPNG({
+      templateName: "news-register-card",
+      width: CARD_W, height: CARD_H, outputPath: path,
+      data: { quads: quads.slice(0, perSlide), pillPng: pill },
+    });
+    cardPaths.push(path);
+    const withArt = quads.filter((q) => q.posterUrl).length;
+    notes.push(`register slide 01 (per-film): ${withArt} poster / ${shown.length - withArt} typographic${rest.length ? ` · ${rest.length} in Also honoured` : ""}`);
+    log.info(`  Rendered film-exploded register → ${path}`);
+    return { coverPath, cardPaths, notes };
+  }
+
   const tiles = all.slice(0, 4).map((s) => ({
     ...(s.resolved.film?.posterUrl ? { posterUrl: s.resolved.film.posterUrl } : {}),
     // Only a RESOLVED film name goes on a tile. An unresolved story has no short

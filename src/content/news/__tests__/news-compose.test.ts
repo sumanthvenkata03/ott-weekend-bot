@@ -63,6 +63,7 @@ const story = (id: string, over: Partial<ScoredCluster> = {}, confirmed = true):
   confirmed,
   sourceUrl: confirmed ? `https://thehindu.com/${id}` : "",
   basis: confirmed ? `The Hindu confirms ${id}` : "no primary outlet page found",
+  films: [],
 });
 
 const res = (
@@ -73,6 +74,7 @@ const res = (
 ): ResolvedStory => ({
   story: story(id, over, confirmed),
   film,
+  films: film ? [film] : [],
   reason: film ? `resolved ${film.title}` : "no title detected — typographic",
 });
 
@@ -220,5 +222,48 @@ describe("composeEdition — suggest-only segments", () => {
       { OWNER_GO: "1" } as NodeJS.ProcessEnv
     );
     expect(e.cards.some((c) => c.resolved.story.cluster.storyClass === "rumor")).toBe(false);
+  });
+});
+
+// ── RESOLVER V2 — quadrant explosion decision ─────────────────────────────
+
+describe("composeEdition — film-quadrant explosion", () => {
+  const multi = { score: BIG_SCORE_THRESHOLD + 1, storyClass: "awards", items: [item("a"), item("b"), item("c"), item("d")] };
+  const filmsOf = (n: number): ResolvedFilm[] =>
+    Array.from({ length: n }, (_, i) => ({
+      title: `Film ${i}`, confidence: "quoted" as const, tmdbId: 100 + i,
+      posterUrl: `https://image.tmdb.org/p${i}.jpg`, note: "Best Feature Film",
+    }));
+
+  const withFilms = (id: string, films: ResolvedFilm[], over: Partial<ScoredCluster>): ResolvedStory => ({
+    story: story(id, over, true),
+    film: films[0] ?? null,
+    films,
+    reason: "r",
+  });
+
+  it("EXPLODES when the lead story resolved 2+ films", () => {
+    const e = composeEdition([withFilms("awards", filmsOf(4), multi), res("c2")], 60);
+    expect(e.format).toBe("register");
+    expect(e.explodeFilms).toBe(true);
+    expect(e.why).toContain("4 films resolved → one quadrant PER FILM");
+  });
+
+  it("does NOT explode on a single resolved film", () => {
+    const e = composeEdition([withFilms("awards", filmsOf(1), multi), res("c2")], 60);
+    expect(e.format).toBe("register");
+    expect(e.explodeFilms).toBe(false);
+    expect(e.why).toContain("clubbed by story");
+  });
+
+  it("does NOT explode when no films resolved", () => {
+    const e = composeEdition([res("awards", null, multi), res("c2")], 60);
+    expect(e.explodeFilms).toBe(false);
+  });
+
+  it("never explodes a non-register format", () => {
+    const e = composeEdition([withFilms("c1", filmsOf(3), {}), res("c2")], 40);
+    expect(e.format).toBe("register-single");
+    expect(e.explodeFilms).toBe(false);
   });
 });

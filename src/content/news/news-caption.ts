@@ -75,6 +75,9 @@ export const DOMAIN_OUTLET: Readonly<Record<string, string>> = {
   "economictimes.indiatimes.com": "The Economic Times",
   "ndtv.com": "NDTV",
   "zee5.com": "ZEE5",
+  // Added after yesterday's run printed these as bare domains.
+  "bizasialive.com": "BizAsia",
+  "indiatvnews.com": "India TV",
 };
 
 /**

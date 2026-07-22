@@ -1,6 +1,6 @@
 // NEWS DESK — film-title detectors (ruling R1). Pure only: no TMDb is called.
 import { describe, it, expect } from "vitest";
-import { extractFilmTitle, extractPrefixTitle, extractQuotedTitle } from "../news-resolve.js";
+import { TITLE_SIMILARITY_MIN, TMDB_YEAR_TOLERANCE, extractFilmTitle, extractPrefixTitle, extractQuotedTitle, sanityCheck, titleSimilarity } from "../news-resolve.js";
 
 describe("extractQuotedTitle — detector (a)", () => {
   it("pulls a straight-quoted title", () => {
@@ -57,5 +57,58 @@ describe("extractFilmTitle — detector precedence", () => {
     // The NFA case — winner-film extraction is explicitly out of v1 scope.
     expect(extractFilmTitle("72nd National Awards: Complete list of winners is here")).not.toBeNull();
     expect(extractFilmTitle("Awards season continues across the industry")).toBeNull();
+  });
+});
+
+// ── RESOLVER V2 — the sanity gate ──────────────────────────────────────────
+
+describe("titleSimilarity", () => {
+  it("is 1 for the same title", () => {
+    expect(titleSimilarity("Article 370", "Article 370")).toBe(1);
+  });
+
+  it("ignores articles and punctuation", () => {
+    expect(titleSimilarity("The Paradise", "Paradise")).toBe(1);
+    expect(titleSimilarity("35 – Chinna Katha Kaadu", "35 Chinna Katha Kaadu")).toBe(1);
+  });
+
+  it("is 0 for unrelated titles", () => {
+    expect(titleSimilarity("G.D.N", "Hulk and the Agents of S.M.A.S.H.")).toBeLessThan(0.6);
+  });
+});
+
+describe("sanityCheck — the Hulk class", () => {
+  it("REJECTS the G.D.N → Hulk match that shipped a wrong poster", () => {
+    const v = sanityCheck("G.D.N", { title: "Hulk and the Agents of S.M.A.S.H.", year: 2013 }, 2026);
+    expect(v.ok).toBe(false);
+    expect(v.reason).toContain("REJECTED low-sim");
+    expect(v.reason).toContain("Hulk and the Agents");
+  });
+
+  it("ACCEPTS a genuine match in the window", () => {
+    const v = sanityCheck("Article 370", { title: "Article 370", year: 2024 }, 2026);
+    expect(v.ok).toBe(true);
+    expect(v.similarity).toBe(1);
+  });
+
+  it("REJECTS a same-title film far outside the year window (the 2019 Blast trap)", () => {
+    const v = sanityCheck("Blast", { title: "Blast", year: 2019 }, 2026);
+    expect(v.ok).toBe(false);
+    expect(v.reason).toContain("REJECTED year");
+  });
+
+  it("a JUDGED match overrides the year gate — we already hold that identity", () => {
+    const v = sanityCheck("Blast", { title: "Blast", year: 2019 }, 2026, true);
+    expect(v.ok).toBe(true);
+    expect(v.reason).toContain("+judged");
+  });
+
+  it("accepts a hit with no year rather than guessing", () => {
+    expect(sanityCheck("Kattalan", { title: "Kattalan" }, 2026).ok).toBe(true);
+  });
+
+  it("the threshold is the documented constant", () => {
+    expect(TITLE_SIMILARITY_MIN).toBe(0.6);
+    expect(TMDB_YEAR_TOLERANCE).toBe(3);
   });
 });

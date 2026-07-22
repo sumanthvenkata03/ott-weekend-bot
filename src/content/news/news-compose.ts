@@ -41,6 +41,9 @@ export const REGISTER_QUADRANTS = 4;
 /** Items in a cluster at/above which it is a multi-item "list" story. */
 export const MULTI_ITEM_MIN = 3;
 
+/** Resolved films on the lead story at/above which quadrants go per-film. */
+export const FILM_EXPLODE_MIN = 2;
+
 export interface SelectedStory {
   resolved: ResolvedStory;
   segment: Segment;
@@ -49,6 +52,12 @@ export interface SelectedStory {
 
 export interface ComposedEdition {
   format: EditionFormat;
+  /**
+   * True when the lead story named ≥2 resolvable films, so the register's
+   * quadrants are PER FILM rather than per story. An awards story is a list OF
+   * FILMS; giving it one quadrant wastes the format the spec designed for it.
+   */
+  explodeFilms: boolean;
   /** Emitted verbatim into the package — the reasoning, not a label. */
   why: string;
   /** The lead story (jn-skin subject / register cover anchor). Null for none. */
@@ -149,6 +158,7 @@ export function composeEdition(
   if (pool.length < MIN_STORIES_FOR_EDITION) {
     return {
       format: "none",
+      explodeFilms: false,
       why:
         `No edition today — ${gatheredCount} gathered, ${confirmed.length} confirmed, ` +
         `${pool.length} renderable (need ${MIN_STORIES_FOR_EDITION}).`,
@@ -160,6 +170,7 @@ export function composeEdition(
 
   const lead = pool[0]!;
   const leadCluster = lead.resolved.story.cluster;
+  const leadFilms = lead.resolved.films.length;
   const isBig = leadCluster.score >= BIG_SCORE_THRESHOLD;
   const itemCount = leadCluster.items.length;
 
@@ -167,10 +178,14 @@ export function composeEdition(
   if (isBig && itemCount >= MULTI_ITEM_MIN) {
     return {
       format: "register",
+      explodeFilms: leadFilms >= FILM_EXPLODE_MIN,
       why:
         `REGISTER — "${leadCluster.headline}" scored ${leadCluster.score} ` +
         `(≥ ${BIG_SCORE_THRESHOLD}) across ${itemCount} items (≥ ${MULTI_ITEM_MIN}), so it is a LIST, ` +
-        `not a single announcement. Cover + quadrant slides, clubbed by film. ` +
+        `not a single announcement. ` +
+        (leadFilms >= FILM_EXPLODE_MIN
+          ? `${leadFilms} films resolved → one quadrant PER FILM. `
+          : `Cover + quadrant slides, clubbed by story. `) +
         `${pool.length} renderable of ${confirmed.length} confirmed.`,
       cover: lead,
       cards: pool,
@@ -182,6 +197,7 @@ export function composeEdition(
   if (isBig && lead.resolved.film?.posterUrl) {
     return {
       format: "jn-skin",
+      explodeFilms: false,
       why:
         `JN-SKIN — "${leadCluster.headline}" scored ${leadCluster.score} (≥ ${BIG_SCORE_THRESHOLD}) ` +
         `as a single story, and resolved to a poster (${lead.resolved.film.confidence}: ` +
@@ -199,6 +215,7 @@ export function composeEdition(
   const bigNoPoster = isBig && !lead.resolved.film?.posterUrl;
   return {
     format: "register-single",
+    explodeFilms: false,
     why:
       `REGISTER-SINGLE — ${pool.length} renderable stories, top score ${leadCluster.score}` +
       (bigNoPoster
