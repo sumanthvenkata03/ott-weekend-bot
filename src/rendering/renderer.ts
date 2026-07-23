@@ -139,7 +139,23 @@ export interface RenderOptions {
  * Render an HTML template to a PNG file.
  * Returns the absolute path of the written file.
  */
-export async function renderToPNG(options: RenderOptions): Promise<string> {
+/**
+ * What a render produced — the file AND the markup that produced it.
+ *
+ * The pre-raster HTML used to be computed and discarded. Keeping it is what
+ * makes the post-render audit possible at zero cost: no OCR, no re-render, no
+ * second browser pass — just assertions over exactly what was drawn.
+ */
+export interface RenderArtifact {
+  outputPath: string;
+  html: string;
+  templateName: string;
+  width: number;
+  height: number;
+  deviceScaleFactor: number;
+}
+
+export async function renderToPNG(options: RenderOptions): Promise<RenderArtifact> {
   const { templateName, data, width, height, outputPath, deviceScaleFactor = 2 } = options;
 
   // 1. Render template HTML
@@ -202,5 +218,5 @@ export async function renderToPNG(options: RenderOptions): Promise<string> {
 
   await page.close();
   log.info(`  ✓ Rendered ${templateName} → ${outputPath}`);
-  return outputPath;
+  return { outputPath, html, templateName, width, height, deviceScaleFactor };
 }

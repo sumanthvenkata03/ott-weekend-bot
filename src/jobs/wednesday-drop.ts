@@ -21,6 +21,11 @@ import { annotateWithAiReview, enforceVerification } from "../reconcile/ai-revie
 import { decideGate, writeReview, enforcementAuditLines, WED_DROP_LABELS } from "../reconcile/gate.js";
 import { capPoolForSelector } from "../reconcile/select.js";
 import type { ReconcileResult } from "../reconcile/types.js";
+import { enrichReleases } from "../ingestion/releases/index.js";
+import { assertPublishableTree, provenanceLine, type RunContext } from "../shared/run-context.js";
+import { confirmAutoPublish, applyAutoConfirmation, buildRedPing, editionOutcome } from "../reconcile/autonomy.js";
+import { auditRender, auditBlockers, type AuditSubject } from "../rendering/render-audit.js";
+import { saveRunArtifact, runArtifactPath } from "../shared/run-artifacts.js";
 
 /**
  * Manual one-off exclusion hook. WED_DROP_EXCLUDE is a comma-separated list of
@@ -83,13 +88,64 @@ function applyPlatformOverrides(pool: Release[], overrides: Map<string, Platform
  * editions ("theatrical" = In Theaters, "ott" = Now Streaming) are published
  * independently from the SAME issue number; the pools never merge.
  */
+/**
+ * W-2 / R3 — enrich AI-net-only films through the SHARED seam.
+ *
+ * A film is AI-net-only when reconcile built its Release from a TMDb SEARCH hit
+ * rather than joining a discover-pool record: foundIn is exactly ["ai-net"].
+ * Those Releases are hand-assembled by buildFromNewAi and are missing every
+ * field enrichReleases would have filled.
+ *
+ * THE ONLY CALLER that may pass skipCountryGate. Enforced by a caller-pin test —
+ * these films are gated at seam (b) upstream, and no other path has that
+ * guarantee.
+ */
+export async function enrichAiNetFilms(results: ReconcileResult[]): Promise<number> {
+  const targets = results.flatMap((r) =>
+    r.reconciled.filter(
+      (f) => f.release && f.tmdbId !== undefined && f.foundIn.length === 1 && f.foundIn[0] === "ai-net"
+    )
+  );
+  if (targets.length === 0) return 0;
+
+  log.info(`  Field parity: enriching ${targets.length} AI-net film(s) through the shared seam…`);
+  const enriched = await enrichReleases(
+    targets.map((f) => f.release!),
+    { skipCountryGate: true }
+  );
+  const byId = new Map(enriched.map((r) => [r.id, r]));
+  let applied = 0;
+  for (const f of targets) {
+    const e = byId.get(f.release!.id);
+    if (!e) continue;              // gate/enrichment dropped it — leave as-is
+    f.release = e;
+    applied++;
+  }
+  log.info(`  Field parity: ${applied}/${targets.length} AI-net film(s) now carry full card data`);
+  return applied;
+}
+
+/** Real PNG dimensions for the audit. Returns null when unmeasurable. */
+async function pngDimensions(path: string): Promise<{ width: number; height: number } | null> {
+  try {
+    const sharp = (await import("sharp")).default;
+    const m = await sharp(path).metadata();
+    if (typeof m.width !== "number" || typeof m.height !== "number") return null;
+    return { width: m.width, height: m.height };
+  } catch {
+    return null;   // audit reports "dimensions unavailable" — never a silent pass
+  }
+}
+
 async function produceEdition(
   edition: WedDropEdition,
   pool: Release[],
   issueNumber: string,
   windowStart: string,
   windowEnd: string,
-  auditLines: string[] = []
+  auditLines: string[] = [],
+  runCtx?: RunContext,
+  gate?: { mode: "auto" | "approved" | "blocked"; hash: string }
 ): Promise<void> {
   const meta = EDITION_META[edition];
   log.info(`\n— ${meta.notionTitle} — ${pool.length} candidate(s) in pool —`);
@@ -149,7 +205,10 @@ async function produceEdition(
   const draft = await generateWednesdayDrop(featured, edition, windowStart, windowEnd);
 
   if (draft.slides.length === 0) {
-    log.info(`  ${meta.notionTitle}: edition skipped — no films worth publishing this week.`);
+    // R6 — PER-EDITION EMPTINESS. A quiet week is not a failure and must never
+    // gate the sibling edition. The skip is announced, not silent.
+    const outcome = editionOutcome(meta.notionTitle, 0);
+    log.info(`  ${outcome.note}`);
     return;
   }
 
@@ -159,16 +218,53 @@ async function produceEdition(
   // Render PNGs (edition-scoped filenames: wed-drop-{slug}-{date}-…).
   const dateStr = editorialTodayStamp();
 
+  // W-1 — PERSIST BEFORE CHECKPOINTS. A downgrade or a block must be repairable
+  // without paying for another LLM run (see shared/run-artifacts.ts).
+  saveRunArtifact(runArtifactPath(`wed-drop-${meta.slug}`, dateStr, "draft"), draft);
+
   // Landing verifier: every carded film must show the right kind of date inside
   // this edition's window — OTT date for "Now Streaming", theatrical date for
   // "In Theaters". Flags drift loudly; HARD_FAIL_ON_INVALID (off) would abort.
   const vbucket = edition === "ott" ? ("ott" as const) : ("theatrical" as const);
+  // Each film carries its own WHY line (the LLM slide body whose title matches),
+  // so the contract can check the copy that will actually print on that card.
+  const whyByTitle = new Map<string, string>();
+  for (const sl of draft.slides) if (sl.type === "release") whyByTitle.set(sl.title, sl.body);
+
   const manifest = buildManifest(`Wed Drop · ${meta.slackLabel}`, issueNumber,
-    draft.releases.map(f => ({ film: f, bucket: vbucket })),
-    { [vbucket]: { start: windowStart, end: windowEnd, dateField: vbucket === "ott" ? "ott" : "theatrical", label: meta.notionTitle } });
+    draft.releases.map(f => ({
+      film: f,
+      bucket: vbucket,
+      ...(whyByTitle.has(f.title) ? { whyLine: whyByTitle.get(f.title)! } : {}),
+    })),
+    { [vbucket]: { start: windowStart, end: windowEnd, dateField: vbucket === "ott" ? "ott" : "theatrical", label: meta.notionTitle } },
+    { ...(runCtx ? { headSha: runCtx.headSha, treeDirty: runCtx.dirty } : {}) },
+    { cardType: "wed-drop", editionDate: dateStr });
   log.info("\n" + manifestToLog(manifest));
   saveManifest(manifest, `output/manifests/wed-drop-${meta.slug}-${dateStr}.json`);
   assertOrFlag(manifest);
+
+  // ── CHECKPOINT 2 (R9) — COMPLETENESS CONFIRMATION ────────────────────────
+  // decideGate ran BEFORE the LLM picked these films, so it could not know
+  // whether their cards would be complete. This is where that becomes knowable.
+  // DOWNGRADE-ONLY: it can turn auto into blocked and nothing else. An operator
+  // who typed --approve keeps exactly the authority they had.
+  const confirmation = confirmAutoPublish(manifest);
+  log.info(`  🔎 Contract: ${confirmation.reason}`);
+  if (gate) {
+    const finalMode = applyAutoConfirmation(gate.mode, confirmation);
+    if (finalMode !== gate.mode) {
+      log.warn(
+        `  ⛔ AUTO WITHDRAWN by the completeness contract — ${confirmation.blockers.length} blocker(s). ` +
+        `Nothing rendered for ${meta.notionTitle}.`
+      );
+      log.warn(buildRedPing({
+        edition: meta.slackLabel, hash: gate.hash, headSha: runCtx?.headSha ?? "",
+        blockers: confirmation.blockers,
+      }));
+      return;
+    }
+  }
 
   log.info(`  Rendering PNGs (Issue ${issueNumber})...`);
   const renderResult = await renderWedDrop(draft, issueNumber, edition, "output/posts");
@@ -181,6 +277,43 @@ async function produceEdition(
       `Check the prompt or rerun.`
     );
   }
+
+  // ── CHECKPOINT 3 (R9) — POST-RENDER AUDIT ────────────────────────────────
+  // The contract proved the DATA was complete; this proves the PIXELS came out.
+  // Issue 026 shipped two cards with missing bands because nothing between
+  // "we have the data" and "it's on R2" ever looked at the output.
+  // An audit RED means NO DELIVERY — an unaudited package never reaches R2.
+  const cardSubjects: AuditSubject[] = await Promise.all(
+    renderResult.artifacts.cards.map(async (a, i) => {
+      const dims = await pngDimensions(a.outputPath);
+      const title = draft.releases[i]?.title;
+      return {
+        label: `card-${String(i + 1).padStart(2, "0")}`,
+        kind: "wed-card" as const,
+        html: a.html,
+        ...(dims ? { pngWidth: dims.width, pngHeight: dims.height } : {}),
+        ...(title ? { expectTitle: title } : {}),
+      };
+    })
+  );
+  const coverDims = await pngDimensions(renderResult.artifacts.cover.outputPath);
+  const audit = auditRender({
+    cover: {
+      label: "cover", kind: "wed-cover", html: renderResult.artifacts.cover.html,
+      ...(coverDims ? { pngWidth: coverDims.width, pngHeight: coverDims.height } : {}),
+    },
+    cards: cardSubjects,
+    coverFilmCount: draft.releases.length,
+  });
+  if (!audit.ok) {
+    log.error(`  ⛔ RENDER AUDIT FAILED — ${audit.findings.length} finding(s). NOT delivering ${meta.notionTitle}.`);
+    log.warn(buildRedPing({
+      edition: meta.slackLabel, hash: gate?.hash ?? "-", headSha: runCtx?.headSha ?? "",
+      blockers: auditBlockers(audit),
+    }));
+    return;
+  }
+  log.success(`  ✅ Render audit clean — ${audit.checked} surface(s) verified.`);
 
   // Upload to R2 under an edition-specific folder: wed-drop/{date}/{slug}/…
   log.info("  Uploading to R2...");
@@ -279,8 +412,24 @@ function reconcileSummary(r: ReconcileResult): string {
   );
 }
 
+/**
+ * AUTONOMY SHIPS DARK. The gate is ON unless the operator explicitly disarms it.
+ * "false"/"0" (any case, trimmed) ⇒ auto-publish may fire; every other value —
+ * unset included — keeps the gate on. Pure, so the default is unit-tested.
+ */
+export function resolveAlwaysGate(raw: string | undefined): boolean {
+  return !["false", "0"].includes((raw ?? "").trim().toLowerCase());
+}
+
 async function main() {
   log.info("🎬 Wednesday Drop job — starting");
+
+  // W-1 — THE WORKING-TREE LAW. Jobs execute the working tree, so a SCHEDULED
+  // run on uncommitted code would publish unreviewed changes. Refuse before any
+  // spend (LLM, render, upload). A MANUAL run is never blocked — the operator is
+  // present and owns the call. See shared/run-context.ts.
+  const runCtx = assertPublishableTree();
+  log.info(`   provenance: ${provenanceLine(runCtx)}`);
 
   purgeExpired();
 
@@ -377,14 +526,36 @@ async function main() {
   const requireOttPlatform = !["false", "0"].includes((process.env.WED_DROP_REQUIRE_PLATFORM ?? "true").trim().toLowerCase());
   enforceVerification(results, { requireOttPlatform });
 
+  // 4c. W-2 / R3 — FIELD PARITY. An AI-net-only film reaches here on the stub
+  //     Release that buildFromNewAi hand-assembles, which carries no
+  //     audioLanguages (and no genre/runtime/ratings). That is why an
+  //     Ottam-Thullal-shaped card could never render its ★ AVAILABLE IN band:
+  //     the data existed in TMDb and was simply never fetched for this path.
+  //     Route those films through the SAME enrichReleases seam every pool film
+  //     uses, so one shared path fills every card slot.
+  //
+  //     skipCountryGate: these films already cleared the country gate at seam
+  //     (b) (reconcile's new-movie guard). Re-running seam (a) would re-log
+  //     every verdict and emit a second ⚠ for the same film.
+  await enrichAiNetFilms(results);
+
+  // Persist the reconciled results BEFORE any checkpoint, so a downgrade or a
+  // block can be diagnosed without paying for another LLM run.
+  saveRunArtifact(runArtifactPath("wed-drop", editorialTodayStamp(), "results"), results);
+
   // 5. GATE — AUTO-PUBLISH when the drop is fully verification-clean (see
   //    decideGate); otherwise block behind human approval, hashing over the
   //    (possibly demoted) set. The first blocked run writes the "Wed Drop —
   //    REVIEW" artifact and STOPS; a re-run with `--approve <hash>` renders only
-  //    if the reviewed list still hashes the same. WED_DROP_ALWAYS_GATE=true is
-  //    the kill-switch that forces the old always-block behavior. 🔴 and
-  //    enforcement-removed films never render.
-  const alwaysGate = ["true", "1"].includes((process.env.WED_DROP_ALWAYS_GATE ?? "").trim().toLowerCase());
+  //    if the reviewed list still hashes the same. 🔴 and enforcement-removed
+  //    films never render.
+  //
+  //    AUTONOMY SHIPS DARK. WED_DROP_ALWAYS_GATE defaults ON — every drop gates
+  //    for human approval, exactly as before autonomy existed. The owner DISARMS
+  //    the switch (WED_DROP_ALWAYS_GATE=false or 0) to let auto-publish fire,
+  //    after a shadow week has proven the checkpoints. Any other value — unset
+  //    included — keeps the gate on.
+  const alwaysGate = resolveAlwaysGate(process.env.WED_DROP_ALWAYS_GATE);
   const decision = decideGate(results, {
     ...(approveHash ? { approveHash } : {}),
     alwaysGate,
@@ -464,7 +635,7 @@ async function main() {
   if (!runThe) {
     log.info("In Theaters: skipped (WED_DROP_ONLY).");
   } else if (thePool.length > 0) {
-    await produceEdition("theatrical", thePool, issueNumber, startDate, endDate, auditLines);
+    await produceEdition("theatrical", thePool, issueNumber, startDate, endDate, auditLines, runCtx, { mode: decision.mode, hash: decision.hash });
   } else {
     log.info("In Theaters: no approved/renderable films this week — edition skipped.");
   }
@@ -472,7 +643,7 @@ async function main() {
   if (!runOtt) {
     log.info("Now Streaming: skipped (WED_DROP_ONLY).");
   } else if (ottPool.length > 0) {
-    await produceEdition("ott", ottPool, issueNumber, ottStartDate, endDate, auditLines);
+    await produceEdition("ott", ottPool, issueNumber, ottStartDate, endDate, auditLines, runCtx, { mode: decision.mode, hash: decision.hash });
   } else {
     log.info("Now Streaming: no approved/renderable films this week — edition skipped.");
   }

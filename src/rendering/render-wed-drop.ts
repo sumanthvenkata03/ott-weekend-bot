@@ -2,7 +2,7 @@
 // Orchestrator: WednesdayDropDraft → 1 cover PNG + N body card PNGs
 
 import { promises as fs } from "node:fs";
-import { renderToPNG, closeBrowser } from "./renderer.js";
+import { renderToPNG, closeBrowser, type RenderArtifact } from "./renderer.js";
 import { editorialTodayStamp, editorialDisplayDate, editorialCoverDate, editorialCoverRange } from "../shared/editorial-clock.js";
 import { log } from "../shared/logger.js";
 import type { WednesdayDropDraft, WedDropSlide } from "../delivery/notion.js";
@@ -73,6 +73,8 @@ function buildGridItem(r: Release): WedDropGridItem {
 export interface RenderResult {
   coverPath: string;
   cardPaths: string[];
+  /** Pre-raster artifacts (cover first, then cards) for the post-render audit. */
+  artifacts: { cover: RenderArtifact; cards: RenderArtifact[] };
 }
 
 export async function renderWedDrop(
@@ -128,7 +130,7 @@ export async function renderWedDrop(
     gridClass: `count-${Math.min(gridItems.length, 4)}`,
     gridItems,
   };
-  await renderToPNG({
+  const coverArtifact = await renderToPNG({
     templateName: "wed-drop-cover",
     data: coverCtx as unknown as Record<string, unknown>,
     width: 1080, height: 1350,
@@ -137,6 +139,7 @@ export async function renderWedDrop(
 
   // 2. Body cards: one per LLM release slide
   const cardPaths: string[] = [];
+  const cardArtifacts: RenderArtifact[] = [];
   for (let i = 0; i < releaseSlides.length; i++) {
     const slide = releaseSlides[i];
     // Find the Release object whose title matches the slide title
@@ -178,16 +181,17 @@ export async function renderWedDrop(
       ...buildStampContext(release),
     };
     const cardPath = `${outputDir}/wed-drop-${meta.slug}-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
-    await renderToPNG({
+    const cardArtifact = await renderToPNG({
       templateName: "wed-drop-card",
       data: cardCtx as unknown as Record<string, unknown>,
       width: 1080, height: 1080,
       outputPath: cardPath,
     });
     cardPaths.push(cardPath);
+    cardArtifacts.push(cardArtifact);
   }
 
-  return { coverPath, cardPaths };
+  return { coverPath, cardPaths, artifacts: { cover: coverArtifact, cards: cardArtifacts } };
 }
 
 // Standalone test mode
