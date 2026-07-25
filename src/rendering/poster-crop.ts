@@ -11,6 +11,7 @@
 
 import sharp from "sharp";
 import { ofetch } from "ofetch";
+import { log } from "../shared/logger.js";
 
 /** Default crop: top-biased so the poster's title treatment shows. */
 const DEFAULT_POSITION = "center 18%";
@@ -48,6 +49,12 @@ export async function computeCropPosition(posterUrl?: string): Promise<string> {
     const lum = g && b ? 0.2126 * r.mean + 0.7152 * g.mean + 0.0722 * b.mean : r.mean;
     return lum < DARK_LUMINANCE_THRESHOLD ? DARK_SHIFT_POSITION : DEFAULT_POSITION;
   } catch {
+    // The sample failed (CDN timeout, 404, undecodable bytes) so the crop is a
+    // GUESS, not a measurement — and a retry may well sample fine and pick a
+    // different one. Naming the poster + the value returned makes that
+    // run-to-run non-determinism visible instead of silent. (GO-A3 removes it
+    // for good by persisting the crop at draft time.)
+    log.warn(`  ⚠ poster-crop: sample failed for ${posterUrl} — falling back to "${FALLBACK_POSITION}"`);
     return FALLBACK_POSITION;
   }
 }

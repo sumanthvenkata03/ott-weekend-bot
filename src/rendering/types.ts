@@ -109,12 +109,16 @@ export interface SatVerdictCard extends CardEnrichment {
 }
 
 /** One poster tile on the Sat Verdict cover mosaic. Neutral + borderless — the
- *  verdict is no longer surfaced per-tile (moved to the masthead tally). */
+ *  verdict is no longer surfaced per-tile (moved to the tally). */
 export interface SatVerdictCoverTile {
   posterUrl?: string;
   fallbackColor: string;
   filmTitle: string;
   language: string;
+  /** CSS object-position for the poster crop, e.g. "center 18%" — the dark-crop
+   *  safeguard's verdict for this poster (poster-crop.ts). Same contract as
+   *  WedDropGridItem.cropPosition; the template defaults it when unset. */
+  cropPosition?: string;
 }
 
 /** One tier row in the masthead tally. The dot COLOR is chosen in the template
@@ -127,19 +131,23 @@ export interface SatVerdictTally {
 }
 
 /**
- * Full context for the Sat Verdict cover slide (1080x1350) — a full-bleed poster
- * mosaic under an ink-veil masthead (eyebrow / WATCH OR SKIP / sub-line / date /
- * tally) with a raised bottom swipe cue. Per-tile verdict borders, the legend, the
- * old title block, and the issue № are gone; the cover teases the tally, not the
- * per-film answer.
+ * Full context for the Sat Verdict cover slide (1080x1350) — the Wed Drop cover
+ * pattern: a full-bleed TOP-4 poster mosaic with a CENTERED overlay block
+ * (eyebrow / headline / meta / tally / swipe) floated over a symmetric scrim.
+ * Replaces the old top-aligned masthead + all-N row mosaic. Per-tile verdict
+ * borders, the legend and the issue № stay gone; the cover teases the tally,
+ * never the per-film answer.
  */
 export interface SatVerdictCoverContext extends RenderBase {
   pillarLabel: "SAT VERDICT";
-  /** Films split into mosaic rows by the renderer (e.g. 2/3/2 for 7). */
-  gridRows: SatVerdictCoverTile[][];
-  /** Per-tier counts (present tiers only, ladder order) for the masthead tally. */
+  /** Grid layout class for the poster wall: "count-1".."count-4" (top-4 cap). */
+  gridClass: string;
+  /** Up to 4 films shown as a poster-wall mosaic (deck order = cards 1–4). */
+  gridItems: SatVerdictCoverTile[];
+  /** Per-tier counts (present tiers only, ladder order) for the tally. */
   tally: SatVerdictTally[];
-  /** N — number of films judged (= draft.verdicts.length), for the swipe cue. */
+  /** N — number of films JUDGED (= draft.verdicts.length), NOT the mosaic size.
+   *  The mosaic caps at 4; this count never does, so the cover can't under-claim. */
   filmCount: number;
   /** Run date formatted "JUL 11 · 2026" (no zero-padded day). */
   coverDate: string;

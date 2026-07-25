@@ -3,7 +3,7 @@
 
 import { promises as fs } from "node:fs";
 import { renderToPNG, closeBrowser } from "./renderer.js";
-import { editorialTodayStamp, editorialDisplayDate, editorialCoverDate } from "../shared/editorial-clock.js";
+import { editorialTodayStamp, editorialDisplayDate, editorialCoverDateOf } from "../shared/editorial-clock.js";
 import { log } from "../shared/logger.js";
 import type { SaturdayVerdictDraft } from "../delivery/notion.js";
 import type { Release, Verdict } from "../shared/types.js";
@@ -27,6 +27,11 @@ import {
 // Reads only the release's popularity signals; cannot touch ★/verdict/seal.
 import { computeHeat } from "../content/weekend/heat.js";
 import { compareByProminence } from "../shared/prominence.js";
+// Dark-crop safeguard, shared with the Wed Drop cover mosaic. NOTE (queued,
+// GO-A3): this samples the poster over the network at render time and falls
+// back on any failure, so it is NOT deterministic run-to-run. It now warns when
+// it falls back (poster-crop.ts) so the drift is visible rather than silent.
+import { computeCropPosition } from "./poster-crop.js";
 
 /**
  * Delete any stale sat-verdict PNGs for this date before re-rendering, so a
@@ -76,28 +81,54 @@ const TALLY_LADDER: { kind: SatVerdictCard["verdictKind"]; key: SatVerdictTally[
   { kind: "skip",           key: "skip",      label: "SKIP" },
 ];
 
+/** The mosaic is capped at 4 cells — the Wed Drop cover rule, adopted verbatim.
+ *  (The old distributeGridRows, which split all N films into 2/3/2-style flex
+ *  rows, went with the row mosaic; the grid is CSS-Grid `count-*` now.) */
+const MOSAIC_CELLS = 4;
+
+/** The card fields the cover reads. Narrowed so the builder below can be called
+ *  with a bare fixture — it needs no research, no seal, no platform. */
+export type SatVerdictCoverCard = Pick<
+  SatVerdictCard,
+  "posterUrl" | "fallbackColor" | "filmTitle" | "language" | "verdictKind"
+>;
+
 /**
- * Split N films into poster-wall rows for the 4:5 Verdict Grid cover.
- * Known counts get a hand-tuned symmetric pattern (7 → 2/3/2); anything else
- * falls back to rows of 3 so the grid always fills gracefully.
+ * Everything on the cover context that is a PURE function of the deck — i.e.
+ * all of it except `cropPosition`, which needs a network sample. Split out so
+ * the mosaic contract (top-4 cap, deck order, gridClass, the full judged count,
+ * the tally ladder, the pixel date) is assertable in a unit test rather than
+ * only observable in a PNG.
+ *
+ * `dateStamp` is an ALREADY-IST "yyyy-MM-dd" (editorialTodayStamp output), so
+ * the date goes through editorialCoverDateOf — the stamp-based helper — and
+ * never re-applies the IST shift. See editorial-clock: THE TRAP.
  */
-function distributeGridRows<T>(items: T[]): T[][] {
-  const patterns: Record<number, number[]> = {
-    1: [1], 2: [2], 3: [3], 4: [2, 2], 5: [2, 3],
-    6: [3, 3], 7: [2, 3, 2], 8: [3, 2, 3], 9: [3, 3, 3],
+export function buildCoverContext(
+  cards: SatVerdictCoverCard[],
+  dateStamp: string
+): Pick<SatVerdictCoverContext, "gridClass" | "gridItems" | "tally" | "filmCount" | "coverDate"> {
+  // Deck order, capped at 4. Mosaic cell n IS card n — both read the same array.
+  const gridItems: SatVerdictCoverTile[] = cards.slice(0, MOSAIC_CELLS).map(c => ({
+    ...(c.posterUrl ? { posterUrl: c.posterUrl } : {}),
+    fallbackColor: c.fallbackColor,
+    filmTitle: c.filmTitle,
+    language: c.language,
+  }));
+  // Tally: count each tier over the WHOLE deck (not the mosaic), keep only
+  // present tiers, ladder order.
+  const tally: SatVerdictTally[] = TALLY_LADDER
+    .map(t => ({ key: t.key, label: t.label, count: cards.filter(c => c.verdictKind === t.kind).length }))
+    .filter(t => t.count > 0);
+  return {
+    gridClass: `count-${Math.min(gridItems.length, MOSAIC_CELLS)}`,
+    gridItems,
+    tally,
+    // The FULL judged count — 11 films behind a 4-cell mosaic still reads
+    // "11 FILMS JUDGED". The cover must never under-claim the deck.
+    filmCount: cards.length,
+    coverDate: editorialCoverDateOf(dateStamp),
   };
-  let sizes = patterns[items.length];
-  if (!sizes) {
-    sizes = [];
-    for (let rem = items.length; rem > 0; rem -= 3) sizes.push(Math.min(3, rem));
-  }
-  const rows: T[][] = [];
-  let i = 0;
-  for (const size of sizes) {
-    rows.push(items.slice(i, i + size));
-    i += size;
-  }
-  return rows;
 }
 
 function platformLogoStem(p: string): string {
@@ -229,29 +260,23 @@ export async function renderSatVerdict(
 
   await cleanOldRenders(outputDir, baseCtx.date);
 
-  // 1. Cover slide — a full-bleed poster mosaic (neutral, borderless tiles) under
-  //    an ink-veil masthead (eyebrow / WATCH OR SKIP / sub-line / date / tally) with
-  //    a raised bottom swipe cue. Prominence order → biggest film leads the wall.
-  //    The verdict is teased as a per-tier tally, never shown per-tile. `alsoSkipping`
-  //    stays a param for caller compatibility.
+  // 1. Cover slide — the Wed Drop cover pattern: a full-bleed TOP-4 poster mosaic
+  //    with a CENTERED overlay block (eyebrow / headline / meta / tally / swipe)
+  //    over a symmetric scrim. Deck order → the biggest film leads the mosaic, and
+  //    mosaic cell n IS card n by construction (both read `cards`). The verdict is
+  //    teased as a per-tier tally, never shown per-tile. `alsoSkipping` stays a
+  //    param for caller compatibility.
   const coverPath = `${outputDir}/sat-verdict-${baseCtx.date}-cover.png`;
-  const coverTiles: SatVerdictCoverTile[] = cards.map(c => ({
-    ...(c.posterUrl ? { posterUrl: c.posterUrl } : {}),
-    fallbackColor: c.fallbackColor,
-    filmTitle: c.filmTitle,
-    language: c.language,
+  const cover = buildCoverContext(cards, baseCtx.date);
+  // Dark-crop safeguard, per poster, in parallel — the ONLY non-pure step, kept
+  // out of buildCoverContext so the shape above stays testable without a browser
+  // or a network. A posterless film returns the default and renders the
+  // typographic fallback cell instead; the cell keeps its grid track either way,
+  // so the mosaic can never collapse.
+  await Promise.all(cover.gridItems.map(async gi => {
+    gi.cropPosition = await computeCropPosition(gi.posterUrl);
   }));
-  // Tally: count each tier over the deck, keep only present tiers, ladder order.
-  const tally: SatVerdictTally[] = TALLY_LADDER
-    .map(t => ({ key: t.key, label: t.label, count: cards.filter(c => c.verdictKind === t.kind).length }))
-    .filter(t => t.count > 0);
-  const coverCtx: SatVerdictCoverContext = {
-    ...baseCtx,
-    gridRows: distributeGridRows(coverTiles),
-    tally,
-    filmCount: cards.length,
-    coverDate: editorialCoverDate(now),
-  };
+  const coverCtx: SatVerdictCoverContext = { ...baseCtx, ...cover };
   await renderToPNG({
     templateName: "sat-verdict-cover",
     data: coverCtx as unknown as Record<string, unknown>,

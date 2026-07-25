@@ -24,40 +24,42 @@
   }
   .canvas { position: relative; width: 100%; height: 100%; overflow: hidden; }
 
-  /* ── Verdict Grid: a poster wall of every verdict film, filling the 4:5 frame.
-     Rows are pre-split by the renderer (e.g. 2 / 3 / 2 for 7). ── */
+  /* ── Poster wall: full-bleed grid of the TOP 4 films (deck order = cards 1–4).
+     Ported from the Wed Drop cover. The old all-N flex-row mosaic (rows pre-split
+     2/3/2 by the renderer) is gone with distributeGridRows. ── */
   .grid {
     position: absolute;
     inset: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;                 /* 3px ink seam between rows */
-    background: var(--ink);   /* shows through the gaps */
+    display: grid;
     z-index: 1;
   }
-  .row { display: flex; flex: 1 1 0; min-height: 0; gap: 3px; }  /* 3px ink seam between tiles */
-  /* Tiles are NEUTRAL + borderless — the verdict is no longer surfaced per-tile
-     (it moved to the masthead tally). The 3px flex `gap` above lets the grid's ink
-     background show between tiles, so the mosaic reads as a wall of separate stills
-     rather than one merged image. */
-  .tile {
+  /* Adaptive layouts by film count (capped at 4). */
+  .grid.count-1 { grid-template-columns: 1fr;      grid-template-rows: 1fr; }
+  .grid.count-2 { grid-template-columns: 1fr;      grid-template-rows: 1fr 1fr; }
+  .grid.count-3 { grid-template-columns: 1fr 1fr;  grid-template-rows: 1fr 1fr; }
+  .grid.count-4 { grid-template-columns: 1fr 1fr;  grid-template-rows: 1fr 1fr; }
+  /* 3 films → two on top, one full-width below. */
+  .grid.count-3 .cell:nth-child(3) { grid-column: 1 / -1; }
+
+  .cell {
     position: relative;
-    flex: 1 1 0;
-    min-width: 0;
     overflow: hidden;
     background-color: var(--ink);
   }
-
-  .tile-img {
+  .cell-img {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
-    object-fit: cover;
-    object-position: center 22%;
-    z-index: 2;
+    object-fit: cover;         /* == background-size: cover */
+    z-index: 2;                /* object-position set inline per-cell (dark-crop) */
   }
-  .tile-fallback {
+  /* Posterless film → typographic fallback cell (fallbackColor + title + lang).
+     LAYERED at z1 UNDER the image at z2 — deliberately NOT display:none'd the way
+     the Wed cover does it. When a poster 404s at render time the img's onerror
+     hides the <img>, and the fallback underneath is revealed; a hidden fallback
+     would leave a bare coloured rectangle with no title and no language. */
+  .cell-fallback {
     position: absolute;
     inset: 0;
     z-index: 1;
@@ -66,95 +68,110 @@
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 18px;
+    padding: 28px;
     color: var(--cream);
   }
-  .tile-fallback .lang {
+  .cell-fallback .lang {
     font-family: 'Inter', sans-serif;
-    font-size: 12px;
+    font-size: 15px;
     font-weight: 700;
-    letter-spacing: 0.28em;
+    letter-spacing: 0.34em;
     text-transform: uppercase;
-    opacity: 0.7;
-    margin-bottom: 10px;
+    opacity: 0.75;
+    margin-bottom: 16px;
   }
-  .tile-fallback .title {
+  .cell-fallback .title {
     font-family: 'Playfair Display', serif;
-    font-size: 26px;
+    font-size: 40px;
     font-weight: 800;
     line-height: 1.02;
+    letter-spacing: -0.5px;
   }
 
-  /* ── TOP INK-VEIL MASTHEAD — gradient family matching the card veils. Strong
-     over the content, fading to 0 by ~44% of canvas so it never reads as a hard
-     band. Sits above the mosaic (z5); content at z10. The synthetic bright tile
-     is top-right, directly under the veil's right half — the legibility stress
-     case the stops are tuned against. ── */
-  .masthead-veil {
+  /* ── Scrim band (the approved "B2-open" level) ── */
+  .scrimband {
     position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 600px;
-    z-index: 5;
+    left: 0; right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 560px;
+    z-index: 4;
     background: linear-gradient(180deg,
-      rgba(20, 16, 14, 0.94) 0%,
-      rgba(20, 16, 14, 0.90) 38%,
-      rgba(20, 16, 14, 0.66) 56%,
-      rgba(20, 16, 14, 0.0) 100%);
+      rgba(26,22,20,0) 0%,
+      rgba(26,22,20,.42) 26%,
+      rgba(26,22,20,.50) 50%,
+      rgba(26,22,20,.42) 74%,
+      rgba(26,22,20,0) 100%);
     pointer-events: none;
   }
-  .masthead {
+
+  /* ── Centered content ── */
+  .content {
     position: absolute;
-    top: 56px; left: 56px; right: 56px;
-    z-index: 10;
-    text-align: left;
+    left: 64px; right: 64px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 5;
+    text-align: center;
   }
-  .masthead .eyebrow {
+  .eyebrow {
     font-family: 'Inter', sans-serif;
-    font-size: 19px;
-    font-weight: 700;
-    letter-spacing: 0.30em;
+    font-weight: 800;
     text-transform: uppercase;
+    letter-spacing: 0.34em;
+    font-size: 20px;
     color: var(--brass);
-    margin-bottom: 20px;
+    text-shadow: 0 2px 6px rgba(0,0,0,.95), 0 4px 18px rgba(0,0,0,.8);
+    margin-bottom: 30px;
   }
-  .masthead .headline {
+  .eyebrow .star { color: var(--vermillion); }
+  /* ── HEADLINE CLEARANCE GUARD ──────────────────────────────────────────────
+     The headline string below is PINNED by sat-verdict-cover.test.ts. It was
+     measured at native res (1080x1350) and clears .chev-tab by 25.4px:
+       line 2 right edge = 931.9px   vs   .chev-tab left edge = 957.3px
+     That is roughly half a glyph at 98px. ANY change to the string — or to this
+     font-size, or to .content's insets — requires RE-MEASURING line 2's right
+     edge against the chev-tab left edge before shipping; a wider line 2 renders
+     the headline underneath the chevron tab. Do NOT shave the font size to fit:
+     reserve the chevron column with a right inset on .content instead. ── */
+  .cover-title {
     font-family: 'Playfair Display', serif;
-    font-size: 112px;
     font-weight: 900;
-    line-height: 0.92;
-    letter-spacing: 1px;
-    text-transform: uppercase;
+    font-size: 98px;
+    line-height: 1;
     color: var(--cream);
-    white-space: nowrap;
-    text-shadow: 0 4px 18px rgba(20, 16, 14, 0.55);
+    -webkit-text-stroke: 1.8px var(--cream);
+    text-shadow:
+      0 2px 5px rgba(0,0,0,.95),
+      0 8px 28px rgba(0,0,0,.9),
+      0 0 70px rgba(0,0,0,.63);
+    margin-bottom: 30px;
   }
-  .masthead .subline {
-    font-family: 'Inter', sans-serif;
-    font-size: 25px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    color: var(--cream);
-    margin-top: 22px;
-  }
-  .masthead .date {
+  .meta {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 22px;
     font-weight: 700;
-    letter-spacing: 0.12em;
+    font-size: 21px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
     color: var(--brass);
-    margin-top: 16px;
+    text-shadow: 0 2px 6px rgba(0,0,0,.95), 0 4px 18px rgba(0,0,0,.8);
+    margin-bottom: 26px;
   }
-  /* Tally strip — INSIDE the veil, never bare on tiles. Dot + count + label per
-     tier present in the deck, ladder order (renderer omits zero-count tiers). */
-  .masthead .tally {
+
+  /* Tally strip — dot + count + label per tier present in the deck, ladder order
+     (renderer omits zero-count tiers). CENTERED: the block is text-align:center
+     but a flex row does not inherit that, so justify-content is what actually
+     centers it. Carries the eyebrow's shadow stack because it now floats over
+     poster art at a .50 scrim, not under a .94 ink veil. */
+  .tally {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: center;
     gap: 8px 14px;
-    margin-top: 26px;
+    margin-bottom: 26px;
   }
-  .masthead .tally-item {
+  .tally-item {
     display: inline-flex;
     align-items: center;
     gap: 9px;
@@ -164,94 +181,110 @@
     letter-spacing: 0.10em;
     text-transform: uppercase;
     color: var(--cream);
+    text-shadow: 0 2px 6px rgba(0,0,0,.95), 0 4px 18px rgba(0,0,0,.8);
   }
-  .masthead .tally .dot {
+  /* A RING, not a size bump: 14px stays the feed-scale size that was tuned, and
+     a 2px ink collar is what separates any dot colour from bright poster art
+     (the sage WaT dot on a high-key still is the stress case). */
+  .tally .dot {
     width: 14px; height: 14px;
     border-radius: 50%;
     flex: 0 0 auto;
+    box-shadow: 0 0 0 2px rgba(20, 16, 14, 0.85);
   }
   /* Dot COLOURS keyed by tier class — presentation stays in the template. */
-  .masthead .tally .dot.mustwatch { background: var(--bottle); box-shadow: 0 0 0 2px var(--brass); }  /* brass ring — the gild extended to the dot, separating it from the sage WaT dot at feed scale (RD) */
-  .masthead .tally .dot.try       { background: #4a6b58;           }  /* Sage — 6th token, pending registration */
-  .masthead .tally .dot.onetime   { background: var(--brass);      }
-  .masthead .tally .dot.skip      { background: var(--vermillion); }
-  .masthead .tally-sep {
+  .tally .dot.mustwatch { background: var(--bottle); box-shadow: 0 0 0 2px var(--brass), 0 0 0 4px rgba(20, 16, 14, 0.85); }  /* brass ring — the gild extended to the dot, separating it from the sage WaT dot at feed scale (RD); the ink collar moves outside it */
+  .tally .dot.try       { background: #4a6b58;      }  /* Sage — 6th token, pending registration */
+  .tally .dot.onetime   { background: var(--brass); }
+  .tally .dot.skip      { background: var(--vermillion); }
+  .tally-sep {
     font-family: 'Inter', sans-serif;
     font-weight: 700;
-    color: rgba(244, 236, 220, 0.38);
+    color: rgba(244, 236, 220, 0.55);
+    text-shadow: 0 2px 6px rgba(0,0,0,.95);
   }
 
-  /* ── BOTTOM SWIPE CUE — raised into the safe zone (text bottom edge ~96px above
-     the canvas bottom) so IG's bottom-edge UI can't cover it, while the ink veil
-     still ANCHORS to the canvas edge (0 at its top → .82 at the bottom). The veil
-     is sized (440px) so the raised text sits on ≥.55 ink — the text lifts, the
-     veil doesn't float. Right-anchored; right inset = the masthead's left padding. ── */
-  .swipe-veil {
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    height: 440px;
-    z-index: 5;
-    background: linear-gradient(180deg,
-      rgba(20, 16, 14, 0.0) 0%,
-      rgba(20, 16, 14, 0.82) 100%);
-    pointer-events: none;
-  }
   .swipe {
-    position: absolute;
-    bottom: 96px;
-    right: 56px;
-    z-index: 10;
     font-family: 'Inter', sans-serif;
-    font-size: 27px;
     font-weight: 800;
-    letter-spacing: 0.18em;
+    font-size: 22px;
+    letter-spacing: 0.3em;
     text-transform: uppercase;
     color: var(--cream);
-    text-shadow: 0 2px 10px rgba(20, 16, 14, 0.9);
+    text-shadow: 0 2px 6px rgba(0,0,0,.95), 0 4px 18px rgba(0,0,0,.8);
   }
-  .swipe .arrow { color: var(--brass); font-weight: 900; }
+  .swipe .arrow { color: var(--brass); }
+
+  /* ── Chevron tab (right edge) ── */
+  .chev-tab {
+    position: absolute;
+    right: 0;
+    top: 37%;
+    z-index: 6;
+    background: rgba(26,22,20,.5);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    padding: 16px 20px 16px 24px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .chev-tab .chev {
+    font-family: 'Inter', sans-serif;
+    font-weight: 800;
+    font-size: 46px;
+    line-height: 1;
+    color: var(--cream);
+  }
+  .chev-tab .chev-1 { opacity: 0.4; }
+  .chev-tab .chev-2 { opacity: 0.68; }
+  .chev-tab .chev-3 { opacity: 1.0; }
 </style>
 </head>
 <body>
 <div class="canvas">
 
-  <!-- POSTER WALL — every verdict film, verdict-color borders, rows pre-split by the renderer -->
-  <div class="grid">
-    {% for row in gridRows %}
-    <div class="row">
-      {% for tile in row %}
-      <div class="tile" style="background-color: {{ tile.fallbackColor }};">
-        {% if tile.posterUrl %}
-          <img class="tile-img" src="{{ tile.posterUrl }}" alt="" onerror="this.style.display='none'" />
-        {% endif %}
-        <div class="tile-fallback">
-          <div class="lang">{{ tile.language | upper }}</div>
-          <div class="title">{{ tile.filmTitle }}</div>
-        </div>
+  <!-- POSTER WALL — top 4 films (deck order = cards 1–4) -->
+  <div class="grid {{ gridClass }}">
+    {% for item in gridItems %}{% if loop.index <= 4 %}
+    <div class="cell" style="background-color: {{ item.fallbackColor }};">
+      {% if item.posterUrl %}
+        <img src="{{ item.posterUrl }}" class="cell-img" alt=""
+             style="object-position: {{ item.cropPosition or 'center 18%' }};"
+             onerror="this.style.display='none'" />
+      {% endif %}
+      <div class="cell-fallback">
+        <div class="lang">{{ item.language | upper }}</div>
+        <div class="title">{{ item.filmTitle }}</div>
       </div>
-      {% endfor %}
     </div>
-    {% endfor %}
+    {% endif %}{% endfor %}
   </div>
 
-  <!-- TOP INK-VEIL MASTHEAD -->
-  <div class="masthead-veil"></div>
-  <div class="masthead">
-    <div class="eyebrow">&#9733; THE BIG SCREEN INDEX</div>
-    <div class="headline">WATCH OR SKIP</div>
-    <div class="subline">THIS WEEK IN THEATERS &mdash; OUR REVIEW</div>
-    <div class="date">{{ coverDate }}</div>
+  <!-- SCRIM BAND -->
+  <div class="scrimband"></div>
+
+  <!-- CHEVRON TAB (swipe affordance #1) -->
+  <div class="chev-tab">
+    <span class="chev chev-1">&#10095;</span>
+    <span class="chev chev-2">&#10095;</span>
+    <span class="chev chev-3">&#10095;</span>
+  </div>
+
+  <!-- CENTERED CONTENT -->
+  <div class="content">
+    <div class="eyebrow"><span class="star">&#9733;</span> THE BIG SCREEN INDEX &middot; WATCH OR SKIP <span class="star">&#9733;</span></div>
+    <div class="cover-title">This Week's Theatrical Review.</div>
+    <div class="meta">{{ filmCount }} {{ "FILM" | pluralize(filmCount, "FILMS") }} JUDGED &middot; {{ coverDate }}</div>
     <div class="tally">
       {% for t in tally %}
       <span class="tally-item"><span class="dot {{ t.key }}"></span>{{ t.count }} {{ t.label }}</span>
       {% if not loop.last %}<span class="tally-sep">&middot;</span>{% endif %}
       {% endfor %}
     </div>
+    <!-- swipe affordance #2 -->
+    <div class="swipe">{% if filmCount >= 2 %}SWIPE FOR ALL {{ filmCount }} <span class="arrow">&#8594;</span>{% else %}SWIPE <span class="arrow">&#8594;</span>{% endif %}</div>
   </div>
-
-  <!-- BOTTOM SWIPE CUE (raised into the safe zone) -->
-  <div class="swipe-veil"></div>
-  <div class="swipe">{{ filmCount }} FILMS JUDGED &middot; SWIPE <span class="arrow">&#10230;</span></div>
 
 </div>
 </body>
