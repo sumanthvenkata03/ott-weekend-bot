@@ -27,7 +27,9 @@
     "news": "tsx src/jobs/news-edition.ts",
     "render:news": "tsx src/rendering/render-news-samples.ts",
     "test": "vitest run --dir src/discovery",
-    "test:discovery": "vitest run --dir src/discovery"
+    "test:discovery": "vitest run --dir src/discovery",
+    "machine-room": "tsx scripts/machine-room/server.ts",
+    "machine-room:check": "vitest run --config scripts/machine-room/vitest.config.ts"
   },
   "keywords": [],
   "author": "",

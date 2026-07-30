@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>TBSI · Machine Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<style>
+  /* Local-only surface: no webfont fetch, so it works with the network down.
+     The stacks name TBSI's faces first and fall back to system equivalents. */
+  :root{
+    --ink:#1A1614; --ink-2:#241f1c; --ink-3:#2f2926;
+    --cream:#F4EFE7; --cream-dim:#cdc4b8;
+    --vermillion:#C1440E; --vermillion-soft:#e0693a;
+    --brass:#C49A3F; --bottle:#2E5742; --rust:#A33223;
+    --serif:"Playfair Display",Georgia,"Times New Roman",serif;
+    --sans:Inter,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:"JetBrains Mono","Cascadia Mono",Consolas,"Courier New",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink);color:var(--cream);font-family:var(--sans);font-size:14px;line-height:1.5}
+  a{color:var(--vermillion-soft)}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 22px 80px}
+  header{display:flex;align-items:baseline;gap:14px;border-bottom:1px solid var(--ink-3);padding-bottom:14px;margin-bottom:22px}
+  header h1{font-family:var(--serif);font-weight:700;font-size:30px;margin:0;letter-spacing:.01em}
+  header .sub{font-family:var(--mono);font-size:11px;color:var(--cream-dim);text-transform:uppercase;letter-spacing:.14em}
+  header .spacer{flex:1}
+  .prov{font-family:var(--mono);font-size:11px;color:var(--cream-dim)}
+  h2{font-family:var(--serif);font-size:19px;margin:26px 0 12px;font-weight:600}
+  .card{background:var(--ink-2);border:1px solid var(--ink-3);border-radius:4px;padding:18px}
+  .hidden{display:none !important}
+
+  /* login */
+  #login{max-width:440px;margin:70px auto}
+  #login p{color:var(--cream-dim);margin:0 0 16px}
+  input[type=password],input[type=text]{width:100%;padding:10px 12px;background:var(--ink);border:1px solid var(--ink-3);
+    border-radius:3px;color:var(--cream);font-family:var(--mono);font-size:13px}
+  input:focus{outline:2px solid var(--vermillion);outline-offset:-1px}
+  button{font-family:var(--sans);font-weight:600;font-size:13px;padding:10px 16px;border-radius:3px;cursor:pointer;
+    border:1px solid var(--vermillion);background:var(--vermillion);color:#fff}
+  button:hover:not(:disabled){background:var(--vermillion-soft)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.ghost{background:transparent;color:var(--cream);border-color:var(--ink-3)}
+  button.ghost:hover:not(:disabled){border-color:var(--cream-dim);background:var(--ink-3)}
+
+  /* banners */
+  .banner{border-left:3px solid;padding:10px 14px;border-radius:3px;margin-bottom:12px;font-size:13px}
+  .banner.warn{border-color:var(--brass);background:rgba(196,154,63,.10)}
+  .banner.bad{border-color:var(--rust);background:rgba(163,50,35,.12)}
+  .banner.good{border-color:var(--bottle);background:rgba(46,87,66,.14)}
+  .banner code{font-family:var(--mono);font-size:12px}
+
+  /* job grid */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:12px}
+  .job{background:var(--ink-2);border:1px solid var(--ink-3);border-radius:4px;padding:14px;display:flex;flex-direction:column;gap:9px}
+  .job .top{display:flex;align-items:center;gap:9px}
+  .job h3{font-family:var(--serif);font-size:17px;margin:0;font-weight:600}
+  .pill{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.09em;padding:3px 7px;border-radius:2px;white-space:nowrap}
+  .pill.gated{background:rgba(196,154,63,.18);color:var(--brass)}
+  .pill.dry{background:rgba(46,87,66,.22);color:#7fbf9c}
+  .pill.live{background:rgba(193,68,14,.2);color:var(--vermillion-soft)}
+  .job .will{font-size:12px;color:var(--cream-dim)}
+  .job .will b{color:var(--cream);font-weight:600}
+  .job .spend{font-family:var(--mono);font-size:11px;color:var(--brass)}
+  .job .confirm{display:flex;gap:7px}
+  .job .confirm input{flex:1}
+
+  /* preflight */
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--ink-3);vertical-align:top}
+  th{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--cream-dim)}
+  td.st{width:74px;font-family:var(--mono);font-size:11px;white-space:nowrap}
+  .ok{color:#7fbf9c} .red{color:#e2705c} .yellow{color:var(--brass)}
+  td.nm{width:170px;font-family:var(--mono);font-size:12px}
+  td.dt{color:var(--cream-dim)}
+
+  /* log */
+  #logpane{background:#100d0c;border:1px solid var(--ink-3);border-radius:4px;padding:12px 14px;height:400px;overflow:auto;
+    font-family:var(--mono);font-size:12px;line-height:1.62;white-space:pre-wrap;word-break:break-word}
+  #logpane .ln{display:flex;gap:12px}
+  #logpane .n{color:#4c4340;user-select:none;min-width:38px;text-align:right}
+  #logpane .t{flex:1}
+  #logpane .t.err{color:#e2705c}
+  #logpane .t.warn{color:var(--brass)}
+  #logpane .t.ok{color:#7fbf9c}
+  #logpane .t.meta{color:#8d817a}
+  .logbar{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+  .logbar .status{font-family:var(--mono);font-size:11px;color:var(--cream-dim)}
+  label.auto{font-size:12px;color:var(--cream-dim);display:flex;align-items:center;gap:6px;cursor:pointer}
+
+  .muted{color:var(--cream-dim);font-size:12px}
+  .kv{font-family:var(--mono);font-size:12px}
+  ul.notes{margin:8px 0 0;padding-left:18px;color:var(--cream-dim);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Machine Room</h1>
+    <span class="sub">TBSI</span>
+    <span class="spacer"></span>
+    <span class="prov" id="prov"></span>
+    <button class="ghost hidden" id="logout" style="margin-left:14px;padding:5px 11px">Sign out</button>
+  </header>
+
+  <!-- ── LOGIN ─────────────────────────────────────────────────────────── -->
+  <section id="login" class="card">
+    <h2 style="margin-top:0">Sign in</h2>
+    <p>This surface runs jobs that spend money and publish. It is bound to
+       127.0.0.1 and requires <code>MACHINE_ROOM_TOKEN</code>.</p>
+    <form id="loginForm">
+      <input type="password" id="token" placeholder="MACHINE_ROOM_TOKEN" autocomplete="off" autofocus />
+      <div style="margin-top:12px;display:flex;gap:10px;align-items:center">
+        <button type="submit">Unlock</button>
+        <span id="loginErr" class="muted"></span>
+      </div>
+    </form>
+  </section>
+
+  <!-- ── APP ───────────────────────────────────────────────────────────── -->
+  <main id="app" class="hidden">
+
+    <div id="lockBanner" class="banner bad hidden"></div>
+    <div id="schedBanner" class="banner warn hidden"></div>
+
+    <h2>Jobs</h2>
+    <p class="muted" style="margin-top:-4px">
+      M1 forces the safest mode each job supports. There are no dials and no approve field here.
+    </p>
+    <div class="grid" id="jobs"></div>
+
+    <h2>Preflight</h2>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <button id="pfBtn" class="ghost">Run preflight</button>
+        <span class="muted" id="pfWhen">not run yet</span>
+      </div>
+      <p class="muted" style="margin:0 0 10px">
+        Checks the cheap things first and stops at the first red, so a full disk or a held
+        lock aborts before the one <code>claude</code> call is spent.
+      </p>
+      <table id="pfTable" class="hidden"><thead>
+        <tr><th>state</th><th>check</th><th>detail</th></tr>
+      </thead><tbody id="pfBody"></tbody></table>
+    </div>
+
+    <h2>Live log</h2>
+    <div class="logbar">
+      <span class="status" id="runStatus">idle</span>
+      <span class="spacer" style="flex:1"></span>
+      <label class="auto"><input type="checkbox" id="autoscroll" checked /> autoscroll</label>
+      <button class="ghost" id="clearLog" style="padding:5px 11px">Clear</button>
+    </div>
+    <div id="logpane"></div>
+
+    <h2>After the run</h2>
+    <div class="card" id="summaryCard">
+      <p class="muted" style="margin:0">No run yet. A summary is built from the artifacts on disk, not from the exit code.</p>
+    </div>
+
+  </main>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let STATE = null, ES = null, CURRENT = null;
+
+async function api(path, opts) {
+  const r = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+  let body = null;
+  try { body = await r.json(); } catch (_) { body = null; }
+  return { status: r.status, body };
+}
+
+/* ── login ─────────────────────────────────────────────────────────────── */
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("loginErr").textContent = "";
+  const r = await api("/login", { method: "POST", body: JSON.stringify({ token: $("token").value }) });
+  if (r.status === 200) { $("token").value = ""; boot(); }
+  else $("loginErr").textContent = "Rejected.";
+});
+
+$("logout").addEventListener("click", async () => {
+  await api("/logout", { method: "POST" });
+  location.reload();
+});
+
+async function boot() {
+  const r = await api("/api/status");
+  if (r.status === 401) { $("login").classList.remove("hidden"); $("app").classList.add("hidden"); $("logout").classList.add("hidden"); return; }
+  STATE = r.body;
+  $("login").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  $("logout").classList.remove("hidden");
+  $("prov").textContent = STATE.provenance + "  ·  " + STATE.today;
+  renderLock(); renderSchedule(); renderJobs();
+  if (STATE.preflight) renderPreflight(STATE.preflight.report, STATE.preflight.at);
+}
+
+/* ── lock + scheduler advisory ──────────────────────────────────────────── */
+function renderLock() {
+  const b = $("lockBanner"), l = STATE.lock;
+  if (!l || !l.held) { b.classList.add("hidden"); return; }
+  b.classList.remove("hidden");
+  b.className = "banner " + (l.alive ? "bad" : "warn");
+  b.innerHTML = l.alive
+    ? "<b>Publish lock HELD.</b> pid <code>" + l.holder.pid + "</code> is running <b>" +
+      (l.holder.jobName || "(unnamed)") + "</b> since <code>" + l.holder.startedAt + "</code>. New runs are refused."
+    : "<b>Stale publish lock</b> from dead pid <code>" + l.holder.pid + "</code>. The next run will take it over.";
+}
+
+/* Owner's ruling: ADVISE, do not detect. The window is stated, not probed. */
+function renderSchedule() {
+  const b = $("schedBanner");
+  const now = new Date();
+  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const mins = et.getHours() * 60 + et.getMinutes();
+  if (mins >= 6 * 60 + 45 && mins <= 7 * 60 + 30) {
+    b.classList.remove("hidden");
+    b.innerHTML = "<b>06:45–07:30 ET.</b> News Desk may be running via Task Scheduler right now. " +
+                  "The publish lock will refuse a clashing run, but check before you start one.";
+  } else b.classList.add("hidden");
+}
+
+/* ── jobs ──────────────────────────────────────────────────────────────── */
+function pillClass(mode) { return mode === "live" ? "live" : mode === "gated" ? "gated" : "dry"; }
+function pillText(j) {
+  if (j.mode === "live") return "LIVE — no dry run";
+  if (j.mode === "gated") return "gated";
+  return j.flags.join(" ");
+}
+
+function renderJobs() {
+  const host = $("jobs");
+  host.innerHTML = "";
+  const specs = STATE.jobs.slice();
+  if (STATE.allowFake) specs.push({ id: "__fake", label: "FAKE child", mode: "no-deliver", flags: ["(verification)"],
+    requiresLiveConfirm: false, willSend: "nothing — synthetic child", willNotSend: "everything", spend: "nothing" });
+
+  for (const j of specs) {
+    const el = document.createElement("div");
+    el.className = "job";
+    el.innerHTML =
+      '<div class="top"><h3></h3><span class="pill ' + pillClass(j.mode) + '"></span></div>' +
+      '<div class="will">Will send: <b class="ws"></b></div>' +
+      '<div class="will">Will NOT: <span class="wn"></span></div>' +
+      '<div class="spend"></div>' +
+      (j.requiresLiveConfirm ? '<div class="confirm"><input type="text" placeholder="type LIVE" /></div>' : "") +
+      '<button></button>';
+    el.querySelector("h3").textContent = j.label;
+    el.querySelector(".pill").textContent = pillText(j);
+    el.querySelector(".ws").textContent = j.willSend;
+    el.querySelector(".wn").textContent = j.willNotSend;
+    el.querySelector(".spend").textContent = j.spend;
+    const btn = el.querySelector("button");
+    btn.textContent = "Run " + j.label;
+    if (j.requiresLiveConfirm) btn.className = "";
+    else btn.className = "ghost";
+    btn.addEventListener("click", () => runJob(j, el));
+    host.appendChild(el);
+  }
+}
+
+async function runJob(j, el) {
+  const input = el.querySelector(".confirm input");
+  const payload = { job: j.id };
+  if (input) payload.liveConfirm = input.value.trim();
+  setStatus("starting " + j.label + "…");
+  const r = await api("/api/run", { method: "POST", body: JSON.stringify(payload) });
+
+  if (r.status === 200) { attach(r.body.runId, j.label); boot(); return; }
+  if (r.status === 409) { alert("Refused — " + r.body.error); boot(); return; }
+  if (r.status === 428) { alert(r.body.error); return; }
+  if (r.status === 412) { renderPreflight(r.body.report, new Date().toISOString()); alert("Preflight failed — nothing was spent. See the preflight panel."); return; }
+  alert("Failed: " + ((r.body && r.body.error) || r.status));
+  setStatus("idle");
+}
+
+/* ── preflight ─────────────────────────────────────────────────────────── */
+$("pfBtn").addEventListener("click", async () => {
+  $("pfBtn").disabled = true; $("pfWhen").textContent = "running… (the claude probe can take a few seconds)";
+  const r = await api("/api/preflight", { method: "POST" });
+  $("pfBtn").disabled = false;
+  if (r.status === 200) renderPreflight(r.body, new Date().toISOString());
+  else $("pfWhen").textContent = "failed";
+});
+
+function renderPreflight(report, at) {
+  $("pfTable").classList.remove("hidden");
+  const body = $("pfBody"); body.innerHTML = "";
+  for (const c of report.checks) {
+    const tr = document.createElement("tr");
+    const cls = c.ok ? "ok" : (c.level === "red" ? "red" : "yellow");
+    const label = c.ok ? "PASS" : (c.level === "red" ? "RED" : "WARN");
+    tr.innerHTML = '<td class="st"></td><td class="nm"></td><td class="dt"></td>';
+    tr.children[0].textContent = label; tr.children[0].classList.add(cls);
+    tr.children[1].textContent = c.name;
+    tr.children[2].textContent = c.detail;
+    body.appendChild(tr);
+  }
+  $("pfWhen").textContent = (report.ok ? "all clear" : "STOPPED at " + (report.stoppedAt || "a red check")) +
+                            " · " + new Date(at).toLocaleTimeString();
+}
+
+/* ── live log ──────────────────────────────────────────────────────────── */
+function setStatus(s) { $("runStatus").textContent = s; }
+$("clearLog").addEventListener("click", () => { $("logpane").innerHTML = ""; });
+
+function classify(text) {
+  if (/^\s*[■▶]/.test(text) || /^\s{3}(cwd|mode|tee)=/.test(text)) return "meta";
+  if (/✗|ERR |FAIL|⛔|failed/i.test(text)) return "err";
+  if (/⚠|WARN/.test(text)) return "warn";
+  if (/✓|✅|OK  /.test(text)) return "ok";
+  return "";
+}
+
+function addLine(n, text) {
+  const pane = $("logpane");
+  const div = document.createElement("div");
+  div.className = "ln";
+  div.innerHTML = '<span class="n"></span><span class="t"></span>';
+  div.children[0].textContent = n;
+  div.children[1].textContent = text;
+  const c = classify(text); if (c) div.children[1].classList.add(c);
+  pane.appendChild(div);
+  if ($("autoscroll").checked) pane.scrollTop = pane.scrollHeight;
+}
+
+function attach(runId, label) {
+  if (ES) { ES.close(); ES = null; }
+  CURRENT = runId;
+  $("logpane").innerHTML = "";
+  setStatus("running · " + label + " · " + runId);
+  ES = new EventSource("/api/stream/" + encodeURIComponent(runId));
+  ES.addEventListener("line", (e) => { const d = JSON.parse(e.data); addLine(d.n, d.text); });
+  ES.addEventListener("exit", (e) => {
+    const d = JSON.parse(e.data);
+    setStatus("exited " + d.exitCode + " · " + runId);
+    renderSummary(d.summary, d.exitCode);
+    ES.close(); ES = null;
+    boot();
+  });
+  ES.onerror = () => { setStatus("stream lost · " + runId); };
+}
+
+/* ── artifact summary ──────────────────────────────────────────────────── */
+function renderSummary(s, exitCode) {
+  const card = $("summaryCard");
+  if (!s) { card.innerHTML = '<p class="muted" style="margin:0">No summary.</p>'; return; }
+  let h = '<div class="banner ' + (s.looksPublished ? "good" : "warn") + '" style="margin-bottom:14px">' +
+          "<b>" + esc(s.verdict) + "</b></div>";
+  h += '<div class="kv">exit code <b>' + exitCode + "</b> · artifacts for <b>" + esc(s.date) + "</b> · " +
+       s.freshPngCount + " of " + s.pngCount + " PNG(s) written by THIS run</div>";
+
+  // "this run" marks what the run actually caused; anything unmarked merely
+  // shares the date with it.
+  const tag = (fresh) => fresh ? " <span class='pill dry'>this run</span>" : " <span class='pill' style='background:#2f2926;color:#8d817a'>earlier</span>";
+
+  if (s.manifests.length) {
+    h += "<table style='margin-top:12px'><thead><tr><th>manifest</th><th>issue</th><th>pass</th><th>warn</th><th>fail</th></tr></thead><tbody>";
+    for (const m of s.manifests) {
+      h += "<tr><td class='nm'>" + esc(m.pillar) + tag(m.fresh) + "</td><td>" + esc(m.issue) + "</td><td>" + m.pass +
+           "</td><td class='" + (m.warn ? "yellow" : "") + "'>" + m.warn +
+           "</td><td class='" + (m.fail ? "red" : "") + "'>" + m.fail + "</td></tr>";
+    }
+    h += "</tbody></table>";
+  }
+  if (s.results.length) {
+    h += "<table style='margin-top:12px'><thead><tr><th>reconcile</th><th>total</th><th>green</th><th>yellow</th><th>red</th></tr></thead><tbody>";
+    for (const r of s.results) {
+      h += "<tr><td class='nm'>" + esc(r.pillar) + tag(r.fresh) + "</td><td>" + r.total + "</td><td class='ok'>" + r.green +
+           "</td><td class='yellow'>" + r.yellow + "</td><td class='red'>" + r.red + "</td></tr>";
+    }
+    h += "</tbody></table>";
+  }
+  h += '<ul class="notes">' + s.notes.map((n) => "<li>" + esc(n) + "</li>").join("") + "</ul>";
+  card.innerHTML = h;
+}
+
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+boot();
+setInterval(() => { if (STATE && !CURRENT) boot(); }, 20000);
+</script>
+</body>
+</html>

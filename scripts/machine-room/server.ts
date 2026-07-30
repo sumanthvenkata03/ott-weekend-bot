@@ -1,0 +1,316 @@
+// scripts/machine-room/server.ts
+// THE MACHINE ROOM — a local admin surface for running jobs safely.
+//
+//   npm run machine-room      →  http://127.0.0.1:5179
+//
+// WHAT THIS IS: buttons and safety. Take the publish lock, prove the
+// preconditions before spending, spawn the job, stream its output scrubbed,
+// then account for what actually happened by reading the artifacts.
+//
+// WHAT THIS IS NOT (deliberately, in M1): there is no approve-hash field and no
+// WED_DROP_* dial. Recon established those dials apply POST-gate and are
+// hash-neutral by design, so offering them beside an Approve button would let a
+// valid token publish a set the operator never reviewed. That is a product
+// problem to solve on purpose, not a control to ship early.
+//
+// ── THREE DELIBERATE INVERSIONS OF movie-lookup ─────────────────────────────
+//   1. BINDS 127.0.0.1, HARDCODED. movie-lookup flips to 0.0.0.0 when PORT is
+//      set, because it is meant to be deployed. This one must never be
+//      reachable off-box, so there is no host flip to get wrong.
+//   2. AUTH FAILS CLOSED. movie-lookup runs open when unconfigured. Here a
+//      missing MACHINE_ROOM_TOKEN is a startup refusal.
+//   3. NOT DEPLOYED. render.yaml runs exactly one file and this is not it.
+//
+// ZERO NEW DEPENDENCIES: node:http, as movie-lookup already proves is enough.
+// Nothing here reaches package.json, so nothing reaches the public Render build.
+
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+// Importing config does two necessary things: it fails fast when a required key
+// is missing, and — the reason it must be FIRST — it populates the M0 redaction
+// registry in THIS process, so the server-side scrub of child output has the
+// real values to match against.
+import { config } from "../../src/shared/config.js";
+import { readRunContext, provenanceLine } from "../../src/shared/run-context.js";
+import { registerSecrets } from "../../src/shared/redact.js";
+import { editorialTodayStamp } from "../../src/shared/editorial-clock.js";
+
+import {
+  SESSION_COOKIE,
+  SessionStore,
+  clearedCookie,
+  parseCookies,
+  readAdminToken,
+  sessionCookie,
+  tokenMatches,
+} from "./auth.js";
+import { JOBS, isJobId, type JobSpec } from "./jobs.js";
+import { PUBLISH_LOCK, inspectLock } from "./lock.js";
+import { HERE } from "./paths.js";
+import { runLivePreflight, type PreflightReport } from "./preflight.js";
+import { activeRunId, getRun, killAll, recentRuns, startRun, subscribe } from "./runner.js";
+import { sseFrame } from "./stream.js";
+import { buildSummary } from "./summary.js";
+
+// ── Startup gate: FAIL CLOSED ───────────────────────────────────────────────
+const admin = readAdminToken();
+if (!admin.ok) {
+  console.error("\n⛔ machine room refused to start.\n");
+  console.error(admin.message);
+  process.exit(1);
+}
+const ADMIN_TOKEN = admin.token;
+
+const PORT = Number.parseInt(process.env.MACHINE_ROOM_PORT ?? "5179", 10);
+/** HARDCODED. There is no environment variable that can widen this. */
+const HOST = "127.0.0.1";
+
+const sessions = new SessionStore();
+
+/**
+ * A synthetic job used ONLY to exercise the full spawn → stream → exit path
+ * without running a real job. Off unless MACHINE_ROOM_ALLOW_FAKE=1, so it can
+ * never appear on an operator's grid by accident.
+ */
+const FAKE_SPEC: JobSpec = {
+  id: "wednesday",
+  label: "FAKE child (verification only)",
+  entry: "scripts/machine-room/_fake-job.ts",
+  flags: [],
+  mode: "no-deliver",
+  requiresLiveConfirm: false,
+  willSend: "nothing — this is a test child",
+  willNotSend: "everything",
+  spend: "nothing",
+};
+const ALLOW_FAKE = process.env.MACHINE_ROOM_ALLOW_FAKE === "1";
+
+// Verification-only: register the planted value so the SSE transcript shows a
+// NAMED marker rather than the generic pattern ***. Gated with the fake job, so
+// nothing test-shaped exists in a normal run.
+if (ALLOW_FAKE && process.env.MACHINE_ROOM_FAKE_SECRET) {
+  registerSecrets({ MACHINE_ROOM_FAKE_SECRET: process.env.MACHINE_ROOM_FAKE_SECRET });
+}
+
+// ── Small helpers ───────────────────────────────────────────────────────────
+
+function sendJson(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers });
+  res.end(JSON.stringify(body));
+}
+
+function readBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (c) => {
+      data += c;
+      if (data.length > 64_000) req.destroy();
+    });
+    req.on("end", () => resolve(data));
+    req.on("error", reject);
+  });
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  try {
+    return JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function authed(req: IncomingMessage): boolean {
+  return sessions.isValid(parseCookies(req.headers.cookie)[SESSION_COOKIE]);
+}
+
+let preflightCache: { report: PreflightReport; at: string } | null = null;
+
+function livePreflight(): Promise<PreflightReport> {
+  const ctx = readRunContext();
+  return runLivePreflight({
+    adminTokenPresent: ADMIN_TOKEN.length > 0,
+    // config imported successfully above, or the process would have exited.
+    requiredLoaded: !!config.TMDB_API_KEY,
+    provenance: provenanceLine(ctx),
+    dirty: ctx.dirty,
+  });
+}
+
+// ── Routes ──────────────────────────────────────────────────────────────────
+
+const server = createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url ?? "/", `http://${HOST}:${PORT}`);
+    const path = url.pathname;
+    const method = req.method ?? "GET";
+
+    // The shell. Unauthenticated by necessity — it renders the login card.
+    if (path === "/" && method === "GET") {
+      const html = await readFile(join(HERE, "public", "index.html"), "utf8");
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+      return void res.end(html);
+    }
+
+    if (path === "/login" && method === "POST") {
+      const body = await readJsonBody(req);
+      const supplied = typeof body.token === "string" ? body.token : undefined;
+      if (!tokenMatches(supplied, ADMIN_TOKEN)) {
+        // No detail: a wrong token learns nothing about the right one.
+        return sendJson(res, 401, { error: "invalid token" });
+      }
+      const id = sessions.create();
+      return sendJson(res, 200, { ok: true }, { "Set-Cookie": sessionCookie(id) });
+    }
+
+    if (path === "/logout" && method === "POST") {
+      sessions.destroy(parseCookies(req.headers.cookie)[SESSION_COOKIE]);
+      return sendJson(res, 200, { ok: true }, { "Set-Cookie": clearedCookie() });
+    }
+
+    // ── Everything below requires a session ──
+    if (!authed(req)) return sendJson(res, 401, { error: "not authenticated" });
+
+    if (path === "/api/status" && method === "GET") {
+      const lock = inspectLock(PUBLISH_LOCK);
+      const ctx = readRunContext();
+      return sendJson(res, 200, {
+        jobs: Object.values(JOBS).map((j) => ({
+          id: j.id,
+          label: j.label,
+          mode: j.mode,
+          flags: j.flags,
+          requiresLiveConfirm: j.requiresLiveConfirm,
+          willSend: j.willSend,
+          willNotSend: j.willNotSend,
+          spend: j.spend,
+        })),
+        lock,
+        provenance: provenanceLine(ctx),
+        activeRunId: activeRunId(),
+        preflight: preflightCache,
+        recent: recentRuns(8),
+        today: editorialTodayStamp(),
+        allowFake: ALLOW_FAKE,
+      });
+    }
+
+    if (path === "/api/preflight" && method === "POST") {
+      const report = await livePreflight();
+      preflightCache = { report, at: new Date().toISOString() };
+      return sendJson(res, 200, report);
+    }
+
+    if (path === "/api/run" && method === "POST") {
+      const body = await readJsonBody(req);
+      const job = body.job;
+      const liveConfirm = typeof body.liveConfirm === "string" ? body.liveConfirm : undefined;
+
+      const useFake = ALLOW_FAKE && job === "__fake";
+      if (!useFake && !isJobId(job)) return sendJson(res, 400, { error: "unknown job" });
+
+      const outcome = await startRun({
+        job: useFake ? "wednesday" : (job as never),
+        ...(liveConfirm !== undefined ? { liveConfirm } : {}),
+        ...(useFake ? { specOverride: FAKE_SPEC } : {}),
+        // The fake child exists to prove the plumbing, so it skips the probes
+        // that would spend money; a real job never can.
+        preflight: useFake
+          ? async () => ({ ok: true, checks: [], ranAt: new Date().toISOString() })
+          : livePreflight,
+      });
+
+      if (outcome.ok) return sendJson(res, 200, { ok: true, runId: outcome.runId });
+      if (outcome.code === "locked")
+        return sendJson(res, 409, { error: outcome.reason, holder: outcome.holder, code: "locked" });
+      if (outcome.code === "confirm") return sendJson(res, 428, { error: outcome.reason, code: "confirm" });
+      preflightCache = { report: outcome.report, at: new Date().toISOString() };
+      return sendJson(res, 412, { error: "preflight failed", code: "preflight", report: outcome.report });
+    }
+
+    const stream = path.match(/^\/api\/stream\/([A-Za-z0-9._-]+)$/);
+    if (stream && method === "GET") {
+      const runId = stream[1]!;
+      const rec = getRun(runId);
+      if (!rec) return sendJson(res, 404, { error: "no such run" });
+
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-store",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+
+      // Replay the backlog so a client that attaches late sees the whole run.
+      for (const l of rec.lines) res.write(sseFrame("line", l));
+      if (rec.status !== "running") {
+        res.write(sseFrame("exit", { exitCode: rec.exitCode ?? null, endedAt: rec.endedAt, summary: rec.summary }));
+      }
+
+      const unsubscribe = subscribe(runId, (frame) => res.write(frame));
+      const ping = setInterval(() => res.write(": ping\n\n"), 15_000);
+      req.on("close", () => {
+        clearInterval(ping);
+        unsubscribe();
+      });
+      return;
+    }
+
+    const summary = path.match(/^\/api\/runs\/([A-Za-z0-9._-]+)\/summary$/);
+    if (summary && method === "GET") {
+      const rec = getRun(summary[1]!);
+      if (!rec) return sendJson(res, 404, { error: "no such run" });
+      return sendJson(res, 200, {
+        runId: rec.runId,
+        label: rec.label,
+        mode: rec.mode,
+        display: rec.display,
+        startedAt: rec.startedAt,
+        endedAt: rec.endedAt,
+        exitCode: rec.exitCode,
+        status: rec.status,
+        logFile: rec.logFile,
+        summary: rec.summary ?? buildSummary(editorialTodayStamp()),
+      });
+    }
+
+    sendJson(res, 404, { error: `no route ${path}` });
+  } catch (e) {
+    // Same discipline as the M0.5 movie-lookup fix: never echo a raw message.
+    console.error("[machine-room]", e instanceof Error ? (e.stack ?? e.message) : String(e));
+    sendJson(res, 500, { error: "internal error — see the machine-room console" });
+  }
+});
+
+server.on("error", (e: NodeJS.ErrnoException) => {
+  if (e.code === "EADDRINUSE") {
+    console.error(`\n⛔ port ${PORT} is already in use on ${HOST}.`);
+    console.error("   Likely another machine-room instance in a second terminal.");
+    console.error("   (5178 is the movie-lookup tool; this server uses 5179 to stay clear of it.)");
+    console.error(`   Free it, or start with:  MACHINE_ROOM_PORT=5180 npm run machine-room\n`);
+    process.exit(1);
+  }
+  throw e;
+});
+
+server.listen(PORT, HOST, () => {
+  const lock = inspectLock(PUBLISH_LOCK);
+  console.log(`\n🛠  TBSI Machine Room`);
+  console.log(`   ▶ http://${HOST}:${PORT}`);
+  console.log(`   Auth: REQUIRED (fails closed) · bound to ${HOST} only`);
+  console.log(`   Publish lock: ${lock.held ? `HELD by pid ${lock.holder?.pid} (${lock.alive ? "live" : "STALE"})` : "free"}`);
+  if (ALLOW_FAKE) console.log(`   ⚠ MACHINE_ROOM_ALLOW_FAKE=1 — the synthetic "__fake" job is exposed`);
+  console.log(`   Stop with Ctrl+C\n`);
+});
+
+function shutdown(sig: NodeJS.Signals): void {
+  console.log(`\n${sig} — stopping. Killing any live child and releasing the publish lock…`);
+  const n = killAll();
+  console.log(`   ${n} child process(es) signalled.`);
+  server.close(() => process.exit(0));
+  // Do not wait forever on lingering keep-alive SSE sockets.
+  setTimeout(() => process.exit(0), 1500).unref();
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
