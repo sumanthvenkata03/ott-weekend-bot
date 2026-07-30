@@ -167,10 +167,32 @@
     color: var(--ink);
     font-weight: 500;
   }
-  /* Reserve the bottom-right corner for the TBSI seal: wrap the blurb before
-     the stamp's left edge (x≈858) so no text runs under it. Only applied when a
-     seal is present (tbsiScore set) so rating-less cards keep a full-width blurb. */
-  .why-body.has-seal { margin-right: 170px; }
+  /* ── SEAL RESERVE (ISSUE 032) ───────────────────────────────────────────────
+     Reserve the bottom-right corner for the TBSI seal so no text runs under it.
+     Gated on `hasSeal` (a real key in WedDropCardContext). The previous gate
+     tested `tbsiScore` — a key that is NOT in that context — so this rule had
+     NEVER applied on any shipped card, and the blurb ran under the seal.
+     (Do not write nunjucks tag syntax in these comments: the template is parsed
+     before CSS comments mean anything, so a tag here becomes a real unclosed
+     block. That mistake broke this render once already.)
+
+     186px is MEASURED, not guessed. .why-body's right edge is x=1056; the seal's
+     ink is a circle of r=70.5 centred at (957, 830), so its leftmost extent is
+     x=886.5. A margin of 169.5 lands the text edge exactly ON that extent — zero
+     slack — so it is not a candidate. Measured at 1080x1350 over both editions'
+     8 cards, as-shipped copy AND every blurb forced to the full truncate(180)
+     cap, against the TRUE circular boundary (not the wrap's rotated bbox):
+
+         M       worst-case seal clearance   worst-case footer clearance
+         169.5   6.4px                       87.3px
+         186     25.2px                      87.3px
+         194     25.2px                      87.3px
+
+     186 and 194 are identical in the worst case, so the extra 8px buys nothing —
+     while costing an extra wrapped line on 3 of 8 cards at today's copy. 186 it
+     is. Footer clearance never drops below 57.7px (as-shipped) / 87.3px (worst
+     case), so the widened column cannot reach the footer rule. ── */
+  .why-body.has-seal { margin-right: 186px; }
   /* Phase 5.5 — platform color set inline; .is-gradient handles JioHotstar.
      Post-review: font + tracking reduced (26/4 → 22/3) to stay single-row in
      the narrower text column that came with wider posters. */
@@ -353,7 +375,7 @@
 
       <div class="why-block">
         <div class="why-label">★ WHY THIS WEEKEND</div>
-        <div class="why-body{% if tbsiScore %} has-seal{% endif %}">{{ body | truncate(180) }}</div>
+        <div class="why-body{% if hasSeal %} has-seal{% endif %}">{{ body | truncate(180) }}</div>
       </div>
     </div>
 

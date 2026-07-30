@@ -236,6 +236,22 @@ export interface WedDropCardContext extends RenderBase, PlatformStyle {
   totalSlots: number;
   /** Phase 5.5 — body-density tier (compact/standard/dense) */
   density: CardDensity;
+  /**
+   * True when a seal is drawn, so .why-body reserves the bottom-right pocket it
+   * occupies. ISSUE 032: the template gated that reserve on `{% if tbsiScore %}`
+   * — a key never present in THIS context — so `margin-right` had NEVER applied
+   * on any Wed Drop card ever shipped, and the blurb ran under the seal (Gatta
+   * Kusthi 2 and Balan - The Boy, +102.7px and +140.2px of measured overlap).
+   * Sat Verdict hit the identical bug and fixed it the same way; see
+   * SatVerdictCardContext.hasSeal.
+   *
+   * DIVERGENCE FROM SAT VERDICT, deliberate: Sat sets this for scored seals only
+   * (tbsi/tmdb) because its seal is IN FLOW. Wed's seal is absolutely positioned
+   * and _tbsi-stamp.html draws it for ALL THREE stampKinds, so Wed must reserve
+   * for "new" too — otherwise every unscored theatrical card stays unreserved,
+   * which is exactly the hole a score-based gate would leave.
+   */
+  hasSeal: boolean;
   /** Display-only seal — see StampContext. Resolved by buildStampContext() for
    *  every card: "tbsi" (curated blend), "tmdb" (community-avg fallback), "new". */
   stampKind: "tbsi" | "tmdb" | "new";

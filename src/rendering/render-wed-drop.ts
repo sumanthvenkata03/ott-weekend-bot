@@ -169,6 +169,14 @@ export async function renderWedDrop(
       hasReleased: hasReleasedSection(enrichedRelease),
       hasLanguages: hasLanguagesSection(enrichedRelease),
     });
+    const stamp = buildStampContext(release);
+    // ISSUE 032 — the seal reserve. buildStampContext ALWAYS resolves a kind, and
+    // _tbsi-stamp.html draws a seal for all three ("tbsi" / "tmdb" / "new"), so a
+    // seal is always present and the blurb must always reserve its pocket. Derived
+    // from stampKind, NOT from a score: a score-based gate would leave every
+    // "new"-seal card (all five theatrical cards this issue) unreserved — which is
+    // how the old `{% if tbsiScore %}` gate shipped 31 issues of overlap.
+    const hasSeal = stamp.stampKind === "tbsi" || stamp.stampKind === "tmdb" || stamp.stampKind === "new";
     const cardCtx: WedDropCardContext = {
       ...baseCtx,
       title: slide.title,
@@ -178,7 +186,8 @@ export async function renderWedDrop(
       totalSlots: releaseSlides.length,
       ...platformStyle,
       density,
-      ...buildStampContext(release),
+      hasSeal,
+      ...stamp,
     };
     const cardPath = `${outputDir}/wed-drop-${meta.slug}-${baseCtx.date}-card-${String(i + 1).padStart(2, "0")}.png`;
     const cardArtifact = await renderToPNG({
