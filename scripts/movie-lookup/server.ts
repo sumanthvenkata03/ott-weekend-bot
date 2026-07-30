@@ -34,6 +34,7 @@ import {
 } from "./lookup.js";
 import { rankedSearch, DEFAULT_SEARCH_LIMIT } from "./search.js";
 import { authConfigFromEnv, authEnabled, checkBasicAuth, wwwAuthenticateHeader } from "./auth.js";
+import { errBody, redactSecrets, registerLookupSecrets } from "./errors.js";
 import { TtlCache } from "./cache.js";
 import { movieReleases } from "./releases.js";
 import { tmdbGet, img, langName } from "./sources.js";
@@ -41,6 +42,9 @@ import { createWatchlistBackend, isWatchType, MemoryWatchlist, type WatchlistBac
 import { createLimiter } from "./ratelimit.js";
 import { safeReadVerdicts } from "./verdicts-export.js";
 import pg from "pg";
+
+// Arm the log/response redaction registry BEFORE anything can serve or log.
+registerLookupSecrets();
 
 // In-memory TTL+LRU cache for API responses (tool-only; NOT cache.sqlite). Makes
 // repeat lookups of the same query/id instant within the TTL window. Live calls
@@ -105,9 +109,10 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
   res.end(JSON.stringify(body));
 }
-function errBody(e: unknown): { error: string } {
-  return { error: e instanceof Error ? e.message : String(e) };
-}
+// errBody now lives in ./errors.js: it returns a GENERIC message + an incident
+// id, and logs the real (redacted) error server-side. A raw e.message must never
+// reach a response body — this process holds 8 keys and three upstreams put
+// theirs in the request URL.
 
 // Static app-shell assets served from ./public. Each maps a URL path to a file
 // plus its content type and cache policy (the service-worker script + manifest
@@ -144,7 +149,7 @@ async function serveStatic(asset: Asset, res: ServerResponse, transform?: (html:
       res.end(body);
     }
   } catch (e) {
-    sendJson(res, 500, errBody(e));
+    sendJson(res, 500, errBody(e, "static"));
   }
 }
 
@@ -473,7 +478,7 @@ const server = createServer(async (req, res) => {
 
     sendJson(res, 404, { error: `no route ${path}` });
   } catch (e) {
-    sendJson(res, 500, errBody(e));
+    sendJson(res, 500, errBody(e, "request"));
   }
 });
 
@@ -498,7 +503,8 @@ server.listen(PORT, HOST, () => {
       if (watchlist.kind === "postgres") console.log(`   Watchlist: PostgreSQL ✓ (persistent, cross-device — DATABASE_URL)`);
       else console.warn(`   ⚠️  Watchlist: in-memory (NOT persisted) — set DATABASE_URL to a Render PostgreSQL to sync across devices & survive redeploys`);
     } catch (e) {
-      console.warn(`   ⚠️  Watchlist DB init failed — using in-memory fallback: ${(e as Error).message}`);
+      // A pg failure quotes the connection string, which embeds the password.
+      console.warn(redactSecrets(`   ⚠️  Watchlist DB init failed — using in-memory fallback: ${(e as Error).message}`));
       watchlist = new MemoryWatchlist();
       await watchlist.init();
     }

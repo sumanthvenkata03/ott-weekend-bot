@@ -2,6 +2,7 @@
 import { ofetch } from "ofetch";
 import { config } from "../shared/config.js";
 import { log } from "../shared/logger.js";
+import { redactSecrets } from "../shared/redact.js";
 
 /**
  * The ONE Slack webhook POST — the single source of the request shape. No-op
@@ -12,6 +13,13 @@ import { log } from "../shared/logger.js";
  * `webhookUrl` routes a post to a non-default channel (the News Desk uses it for
  * #tbsi-news-desk). It DEFAULTS to config.SLACK_WEBHOOK_URL, so every existing
  * call site keeps byte-identical behaviour — including the unconfigured no-op.
+ *
+ * NOT SCRUBBED HERE, on purpose. Redaction happens where the ERROR-DERIVED
+ * strings are built (below, and in reconcile/gate.ts), not over the whole
+ * serialised body. Blanket-scrubbing every block would run the pattern backstop
+ * across News Desk story links and Reddit permalinks — third-party URLs that can
+ * legitimately carry a `?token=` tracking parameter — and would silently corrupt
+ * operator-facing links to guard content that never holds our secrets.
  */
 export async function postToWebhook(
   blocks: unknown[],
@@ -47,12 +55,22 @@ export interface DraftNotification {
 /**
  * Send a richly formatted notification to the Slack channel.
  * No-op if SLACK_WEBHOOK_URL isn't set — Slack is optional.
+ *
+ * REDACTION BOUNDARY. Four fields can carry a string derived from a caught
+ * error and are scrubbed here, once, for all six pillars rather than at six call
+ * sites: `subtitle`, `validation.metaValue`, `validation.issuesBlock` (the
+ * landing/contract reasons, plus Wednesday's folded-in enforcement + copy-guard
+ * audit lines) and `deckZip` (whose documented degraded form is
+ * "📦 deck zip failed: <reason>"). Titles, metadata, hashtags and the image/Notion
+ * URLs are structural or data-derived and are left byte-identical.
  */
 export async function notifyDraftReady(payload: DraftNotification): Promise<void> {
   if (!config.SLACK_WEBHOOK_URL) {
     log.info("Slack webhook not configured — skipping notification");
     return;
   }
+
+  const subtitle = payload.subtitle === undefined ? undefined : redactSecrets(payload.subtitle);
 
   const blocks: unknown[] = [
     {
@@ -67,7 +85,7 @@ export async function notifyDraftReady(payload: DraftNotification): Promise<void
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*${payload.title}*${payload.subtitle ? `\n${payload.subtitle}` : ""}`,
+        text: `*${payload.title}*${subtitle ? `\n${subtitle}` : ""}`,
       },
     },
   ];
@@ -83,16 +101,22 @@ export async function notifyDraftReady(payload: DraftNotification): Promise<void
   }
 
   if (payload.validation) {
-    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: payload.validation.metaValue }] });
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: redactSecrets(payload.validation.metaValue) }],
+    });
     if (payload.validation.issuesBlock) {
-      blocks.push({ type: "section", text: { type: "mrkdwn", text: payload.validation.issuesBlock } });
+      blocks.push({
+        type: "section",
+        text: { type: "mrkdwn", text: redactSecrets(payload.validation.issuesBlock) },
+      });
     }
   }
 
   // IG-ready deck zip — one context line (convenience deliverable; degrades to a
   // "failed: <reason>" line when the zip step couldn't complete).
   if (payload.deckZip) {
-    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: payload.deckZip }] });
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: redactSecrets(payload.deckZip) }] });
   }
 
   if (payload.coverImageUrl) {
@@ -147,16 +171,39 @@ export async function notifyDraftReady(payload: DraftNotification): Promise<void
 }
 
 /**
+ * Build the job-failure payload. Extracted from notifyJobFailure so the
+ * redaction is assertable in a unit test with no webhook and no network.
+ *
+ * THIS IS THE CLASS-D FIX. Every job's catch does
+ * `notifyJobFailure(pillar, err.message)`, and for any query-string-keyed client
+ * (TMDb, OMDb, MDBList) that message is ofetch's `[GET] "<url incl. key>": 401`.
+ * Unscrubbed, a single expired key posted the key itself into the channel — a
+ * leak to a wider audience than the log ever had.
+ *
+ * Redaction runs BEFORE the 1500-char clamp, so the clamp still bounds what is
+ * actually emitted (and a redacted key, being shorter than the raw one, leaves
+ * marginally more real diagnostic text inside the budget).
+ */
+export function buildJobFailureBlocks(
+  jobName: string,
+  errorMessage: string
+): { blocks: unknown[]; text: string } {
+  const text = `🚨 ${jobName} failed`;
+  const safe = redactSecrets(errorMessage);
+  const blocks: unknown[] = [
+    { type: "header", text: { type: "plain_text", text, emoji: true } },
+    { type: "section", text: { type: "mrkdwn", text: `\`\`\`${safe.slice(0, 1500)}\`\`\`` } },
+  ];
+  return { blocks, text };
+}
+
+/**
  * Send a job-failure notification. Used when something goes wrong in cron.
  */
 export async function notifyJobFailure(jobName: string, errorMessage: string): Promise<void> {
   if (!config.SLACK_WEBHOOK_URL) return;
 
-  const text = `🚨 ${jobName} failed`;
-  const blocks = [
-    { type: "header", text: { type: "plain_text", text, emoji: true } },
-    { type: "section", text: { type: "mrkdwn", text: `\`\`\`${errorMessage.slice(0, 1500)}\`\`\`` } },
-  ];
+  const { blocks, text } = buildJobFailureBlocks(jobName, errorMessage);
   try {
     await postToWebhook(blocks, text);
   } catch {

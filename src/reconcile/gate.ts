@@ -25,15 +25,38 @@
 //   feeds nothing here. Its actionable outputs do: f.aiDemoted (contradicted /
 //   unconfirmed / platform failure) is folded into the hash (filmFingerprint) and
 //   removes the film from renderableFor; f.aiPromoted marks a search-corroborated
-//   single-net 🟡 as effective-🟢 for the auto-publish predicate (it never adds a
-//   film to the rendered SET). So the review the human approves and the set that
-//   renders stay identical, and the Slack audit reports what enforcement did.
+//   single-net 🟡 as effective-🟢 for the auto-publish predicate. So the review the
+//   human approves and the set that renders stay identical, and the Slack audit
+//   reports what enforcement did.
+//
+// ── SECRET REDACTION AT THE OUTBOUND BOUNDARY ────────────────────────────────
+// This module writes to Notion and POSTs to Slack DIRECTLY (its own ofetch call,
+// not delivery/slack.ts's postToWebhook), so it carries its own boundary. Three
+// funnels cover every string it emits, which is why the scrub lives in them
+// rather than sprinkled through the twelve builders above them:
+//
+//   textRun()  → EVERY Notion rich-text run (filmLine, aiReviewRuns,
+//                demotedBlocks, paragraph, heading). Full scrub: prose.
+//   section()  → EVERY Slack mrkdwn section in the review ping. Full scrub: prose.
+//   linkRun() / imageBlock() → a URL. VALUE-ONLY scrub, deliberately: a
+//                registered secret is still removed, but the pattern backstop is
+//                withheld because these values must stay STRUCTURALLY VALID.
+//                Notion rejects a malformed link.url, which would take down the
+//                whole review page — and a press sourceUrl from Tavily can carry
+//                an unrelated `?token=` tracking parameter that the backstop
+//                would otherwise mangle. Our own secrets never appear in a
+//                third-party article URL, so value-only loses nothing real.
+//
+// filmFingerprint / computeDropHash are UNTOUCHED by any of this — they hash the
+// reconciled data, never a rendered string, so the pinned --approve hash is
+// value-stable across this change.
 
 import { createHash } from "node:crypto";
 import { Client } from "@notionhq/client";
 import { ofetch } from "ofetch";
 import { config } from "../shared/config.js";
 import { log } from "../shared/logger.js";
+import { redactSecrets, redactSecretValues } from "../shared/redact.js";
 import type { Release } from "../shared/types.js";
 import type { WedDropEdition } from "../shared/wed-drop-edition.js";
 import { EDITION_META } from "../shared/wed-drop-edition.js";
@@ -241,11 +264,13 @@ function filmLine(f: ReconciledFilm): string {
   return `${parts.filter(Boolean).join(" ")}${flags.length ? ` — ${flags.join(" | ")}` : ""}`;
 }
 
+/** THE Notion prose funnel — full scrub, then the existing 1900-char clamp. */
 function textRun(content: string) {
-  return { text: { content: content.slice(0, 1900) } };
+  return { text: { content: redactSecrets(content).slice(0, 1900) } };
 }
+/** A Notion link run. Label: full scrub (prose). URL: value-only — see header. */
 function linkRun(label: string, url: string) {
-  return { text: { content: label.slice(0, 200), link: { url } } };
+  return { text: { content: redactSecrets(label).slice(0, 200), link: { url: redactSecretValues(url) } } };
 }
 
 function paragraph(text: string) {
@@ -263,7 +288,11 @@ function heading(text: string) {
   };
 }
 function imageBlock(url: string) {
-  return { object: "block" as const, type: "image" as const, image: { type: "external" as const, external: { url } } };
+  return {
+    object: "block" as const,
+    type: "image" as const,
+    image: { type: "external" as const, external: { url: redactSecretValues(url) } },
+  };
 }
 
 /** AI-review rich-text runs appended to a film's line: " · 🛑 AI-review: … [source]". */
@@ -374,7 +403,7 @@ async function createReviewPageChunked(title: string, allChildren: unknown[], no
   const createArgs = {
     parent: { database_id: config.NOTION_RELEASES_DB_ID },
     properties: {
-      Name: { title: [{ text: { content: title.slice(0, 1900) } }] },
+      Name: { title: [{ text: { content: redactSecrets(title).slice(0, 1900) } }] },
       Status: { status: { name: "Draft" } },
       Pillar: { select: { name: notionPillar } },
       Verdict: { select: { name: "Pending" } },
@@ -502,8 +531,9 @@ function truncList(names: string[], max = 8): string {
   return `${names.slice(0, max).join(", ")} +${names.length - max} more`;
 }
 
+/** THE Slack prose funnel — full scrub, then the existing 2900-char clamp. */
 function section(text: string) {
-  return { type: "section", text: { type: "mrkdwn", text: text.slice(0, SLACK_TEXT_MAX) } };
+  return { type: "section", text: { type: "mrkdwn", text: redactSecrets(text).slice(0, SLACK_TEXT_MAX) } };
 }
 
 /**
@@ -552,7 +582,7 @@ async function postReviewToSlack(
         {
           type: "button",
           text: { type: "plain_text", text: "Open review in Notion", emoji: true },
-          url: notionUrl,
+          url: redactSecretValues(notionUrl),
           style: "primary",
         },
       ],

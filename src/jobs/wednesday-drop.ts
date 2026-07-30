@@ -26,6 +26,7 @@ import { assertPublishableTree, provenanceLine, type RunContext } from "../share
 import { confirmAutoPublish, applyAutoConfirmation, buildRedPing, editionOutcome } from "../reconcile/autonomy.js";
 import { auditRender, auditBlockers, type AuditSubject } from "../rendering/render-audit.js";
 import { saveRunArtifact, runArtifactPath } from "../shared/run-artifacts.js";
+import { redactSecrets } from "../shared/redact.js";
 
 /**
  * Manual one-off exclusion hook. WED_DROP_EXCLUDE is a comma-separated list of
@@ -359,8 +360,14 @@ async function produceEdition(
   // name-discipline flags — into the existing landing-verifier issues block,
   // where the operator already looks. (Blocked runs carry the audit in the
   // review Slack ping instead.)
+  // REDACTION BOUNDARY (M0). These three arrays are the operator-audit lines —
+  // enforcement, LANG override, copy name-discipline — and they are prose built
+  // from upstream reasons, so they are scrubbed before being folded into the
+  // outbound issues block. notifyDraftReady scrubs the block again at the Slack
+  // boundary (redactSecrets is idempotent); doing it here too keeps the intent
+  // legible at the site that assembles the audit.
   const validation = manifestToSlack(manifest);
-  const extraIssues = [...auditLines, ...langAuditLines, ...draft.nameFlags];
+  const extraIssues = [...auditLines, ...langAuditLines, ...draft.nameFlags].map(redactSecrets);
   if (extraIssues.length > 0) {
     validation.issuesBlock = [validation.issuesBlock, ...extraIssues].filter(Boolean).join("\n");
   }

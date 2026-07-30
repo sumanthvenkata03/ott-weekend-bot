@@ -1,6 +1,7 @@
 // src/shared/config.ts
 import "dotenv/config";
 import { z } from "zod";
+import { registerSecrets } from "./logger.js";
 
 // Parse a boolean-ish env string WITHOUT z.coerce.boolean (which treats any
 // non-empty string — including "false" — as true). Only "true"/"1" are truthy.
@@ -60,6 +61,41 @@ const ConfigSchema = z.object({
 
 export type Config = z.infer<typeof ConfigSchema>;
 
+/**
+ * Hand every SECRET-BEARING value to the log sinks' redaction registry (see
+ * shared/redact.ts). Called the instant the parse succeeds, before any consumer
+ * can hold a key — registration is PUSHED from here precisely so the logger
+ * never has to import this module.
+ *
+ * WHAT IS REGISTERED: bearer credentials and API keys, including
+ * SLACK_WEBHOOK_URL and SLACK_NEWS_WEBHOOK_URL — for an incoming webhook the URL
+ * path IS the credential, so the URL itself is the secret.
+ *
+ * WHAT IS DELIBERATELY NOT: R2_PUBLIC_URL / R2_BUCKET_NAME / R2_S3_ENDPOINT, and
+ * the two NOTION_*_DB_ID values. None is a credential, and R2_PUBLIC_URL is the
+ * prefix of every cover link the operator clicks out of Slack — registering it
+ * would rewrite those links into <REDACTED:…> and break the review workflow.
+ * R2_ACCOUNT_ID IS registered: it is the account identifier embedded in the S3
+ * endpoint, is never a link a human follows, and belongs with the credentials.
+ */
+function registerConfigSecrets(c: Config): void {
+  registerSecrets({
+    TMDB_API_KEY: c.TMDB_API_KEY,
+    OMDB_API_KEY: c.OMDB_API_KEY,
+    MDBLIST_API_KEY: c.MDBLIST_API_KEY,
+    TAVILY_API_KEY: process.env.TAVILY_API_KEY,
+    YOUTUBE_API_KEY: c.YOUTUBE_API_KEY,
+    NOTION_TOKEN: c.NOTION_TOKEN,
+    SLACK_WEBHOOK_URL: c.SLACK_WEBHOOK_URL,
+    SLACK_NEWS_WEBHOOK_URL: c.SLACK_NEWS_WEBHOOK_URL,
+    REDDIT_CLIENT_ID: c.REDDIT_CLIENT_ID,
+    REDDIT_CLIENT_SECRET: c.REDDIT_CLIENT_SECRET,
+    R2_ACCOUNT_ID: c.R2_ACCOUNT_ID,
+    R2_ACCESS_KEY_ID: c.R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY: c.R2_SECRET_ACCESS_KEY,
+  });
+}
+
 function loadConfig(): Config {
   const parsed = ConfigSchema.safeParse(process.env);
   if (!parsed.success) {
@@ -67,6 +103,7 @@ function loadConfig(): Config {
     console.error(parsed.error.flatten().fieldErrors);
     process.exit(1);
   }
+  registerConfigSecrets(parsed.data);
   return parsed.data;
 }
 
