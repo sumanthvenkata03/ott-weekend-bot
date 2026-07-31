@@ -200,6 +200,38 @@ export function releaseLock(
   }
 }
 
+/**
+ * FORCE-remove the lock, regardless of who holds it. The operator's fallback for
+ * the case liveness cannot resolve: a pid that was recycled onto an unrelated
+ * process looks alive forever, and without this the machine room would be
+ * permanently wedged with no route back but hand-deleting a file.
+ *
+ * Deliberately dumb — it does NOT decide whether breaking is safe. The caller
+ * owns that judgement (server.ts refuses when the holder is a live child it
+ * spawned itself) because only the caller knows what it is running.
+ */
+export function breakLock(
+  name: string,
+  opts: LockOptions = {}
+): { broken: boolean; was: LockHolder | null; reason: string } {
+  const dir = opts.dir ?? DEFAULT_LOCK_DIR;
+  const was = readLock(name, { dir });
+  try {
+    unlinkSync(lockPath(name, dir));
+    return { broken: true, was, reason: was ? `broke a lock held by pid ${was.pid}` : "removed an unreadable lock file" };
+  } catch (e) {
+    if (errCode(e) === "ENOENT") return { broken: false, was: null, reason: "no lock file present" };
+    throw e;
+  }
+}
+
+/** Age of a holder in ms, or null when startedAt is missing/unparseable. */
+export function holderAgeMs(holder: LockHolder | null, nowMs: number = Date.now()): number | null {
+  if (!holder?.startedAt) return null;
+  const t = Date.parse(holder.startedAt);
+  return Number.isNaN(t) ? null : nowMs - t;
+}
+
 /** Current holder for display, with a liveness verdict attached. */
 export function inspectLock(
   name: string,

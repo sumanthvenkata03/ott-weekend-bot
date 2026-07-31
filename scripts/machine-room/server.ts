@@ -26,6 +26,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 // Importing config does two necessary things: it fails fast when a required key
@@ -47,10 +48,10 @@ import {
   tokenMatches,
 } from "./auth.js";
 import { JOBS, isJobId, type JobSpec } from "./jobs.js";
-import { PUBLISH_LOCK, inspectLock } from "./lock.js";
-import { HERE } from "./paths.js";
-import { runLivePreflight, type PreflightReport } from "./preflight.js";
-import { activeRunId, getRun, killAll, recentRuns, startRun, subscribe } from "./runner.js";
+import { PUBLISH_LOCK, breakLock, holderAgeMs, inspectLock } from "./lock.js";
+import { HERE, MR_RUN_LOGS } from "./paths.js";
+import { probeDisk, runLivePreflight, runPreflight, type PreflightReport } from "./preflight.js";
+import { activeRunId, getRun, isOwnLiveHolder, killAll, recentRuns, startRun, subscribe } from "./runner.js";
 import { sseFrame } from "./stream.js";
 import { buildSummary } from "./summary.js";
 
@@ -127,15 +128,58 @@ function authed(req: IncomingMessage): boolean {
 
 let preflightCache: { report: PreflightReport; at: string } | null = null;
 
-function livePreflight(): Promise<PreflightReport> {
+/**
+ * `selfHolderPid` is supplied by the RUN path only. Without it the run path's
+ * own lock — taken moments earlier, by design, so two clicks cannot both pass —
+ * reads as a foreign holder and REDs the run it is checking for. The standalone
+ * Preflight button passes nothing and keeps its free/held reporting.
+ */
+/**
+ * Verification-only, and gated behind ALLOW_FAKE so it cannot be reached in a
+ * normal run: stub the two EXPENSIVE probes while leaving the rest of preflight
+ * — ordering, keys, tree, disk and crucially the LOCK check — completely real.
+ *
+ * This is a narrow exception to "never let the harness bypass the code under
+ * test", and it is drawn deliberately: the M1.1 bug lives in the lock check,
+ * which runs BEFORE both probes, so stubbing them removes no coverage of it.
+ * Without this the permanent suite would spend a Max-plan claude call and launch
+ * Chromium on every single run. The end-to-end acceptance transcript runs with
+ * this OFF, so the real path is still proven once, properly.
+ */
+const SKIP_PROBES = ALLOW_FAKE && process.env.MACHINE_ROOM_SKIP_PROBES === "1";
+
+function livePreflight(selfHolderPid?: number): Promise<PreflightReport> {
   const ctx = readRunContext();
+  if (SKIP_PROBES) {
+    return runPreflight({
+      adminTokenPresent: ADMIN_TOKEN.length > 0,
+      keys: { requiredLoaded: !!config.TMDB_API_KEY, tavily: !!process.env.TAVILY_API_KEY, mdblist: !!process.env.MDBLIST_API_KEY },
+      tree: { provenance: provenanceLine(ctx), dirty: ctx.dirty },
+      lock: inspectLock(PUBLISH_LOCK),
+      ...(selfHolderPid !== undefined ? { selfHolderPid } : {}),
+      diskFreeBytes: probeDisk(),
+      claude: async () => ({ kind: "ok", ms: 0 }),
+      chromium: async () => ({ ok: true }),
+    });
+  }
   return runLivePreflight({
     adminTokenPresent: ADMIN_TOKEN.length > 0,
     // config imported successfully above, or the process would have exited.
     requiredLoaded: !!config.TMDB_API_KEY,
     provenance: provenanceLine(ctx),
     dirty: ctx.dirty,
+    ...(selfHolderPid !== undefined ? { selfHolderPid } : {}),
   });
+}
+
+/** Append a break-lock audit line next to the run logs. Never throws. */
+function auditBreakLock(line: string): void {
+  try {
+    mkdirSync(MR_RUN_LOGS, { recursive: true });
+    appendFileSync(join(MR_RUN_LOGS, "lock-audit.log"), `${line}\n`, "utf8");
+  } catch {
+    /* an unwritable audit must not block the operator's escape hatch */
+  }
 }
 
 // ── Routes ──────────────────────────────────────────────────────────────────
@@ -175,6 +219,7 @@ const server = createServer(async (req, res) => {
     if (path === "/api/status" && method === "GET") {
       const lock = inspectLock(PUBLISH_LOCK);
       const ctx = readRunContext();
+      const ageMs = holderAgeMs(lock.holder);
       return sendJson(res, 200, {
         jobs: Object.values(JOBS).map((j) => ({
           id: j.id,
@@ -186,7 +231,11 @@ const server = createServer(async (req, res) => {
           willNotSend: j.willNotSend,
           spend: j.spend,
         })),
-        lock,
+        lock: {
+          ...lock,
+          ageMs,
+          ownLiveHolder: lock.holder ? isOwnLiveHolder(lock.holder.pid) : false,
+        },
         provenance: provenanceLine(ctx),
         activeRunId: activeRunId(),
         preflight: preflightCache,
@@ -214,11 +263,11 @@ const server = createServer(async (req, res) => {
         job: useFake ? "wednesday" : (job as never),
         ...(liveConfirm !== undefined ? { liveConfirm } : {}),
         ...(useFake ? { specOverride: FAKE_SPEC } : {}),
-        // The fake child exists to prove the plumbing, so it skips the probes
-        // that would spend money; a real job never can.
-        preflight: useFake
-          ? async () => ({ ok: true, checks: [], ranAt: new Date().toISOString() })
-          : livePreflight,
+        // The fake child runs the REAL preflight. In M1 it was given a stubbed
+        // one "to avoid spending", and that is precisely why the self-deadlock
+        // shipped: the acceptance test skipped the code path that was broken.
+        // A harness that bypasses the thing under test proves nothing.
+        preflight: (selfHolderPid: number) => livePreflight(selfHolderPid),
       });
 
       if (outcome.ok) return sendJson(res, 200, { ok: true, runId: outcome.runId });
@@ -227,6 +276,38 @@ const server = createServer(async (req, res) => {
       if (outcome.code === "confirm") return sendJson(res, 428, { error: outcome.reason, code: "confirm" });
       preflightCache = { report: outcome.report, at: new Date().toISOString() };
       return sendJson(res, 412, { error: "preflight failed", code: "preflight", report: outcome.report });
+    }
+
+    if (path === "/api/lock/break" && method === "POST") {
+      const body = await readJsonBody(req);
+      if (body.confirm !== "CONFIRM") {
+        return sendJson(res, 428, { error: 'type CONFIRM to break the publish lock', code: "confirm" });
+      }
+      const state = inspectLock(PUBLISH_LOCK);
+      if (!state.held || !state.holder) return sendJson(res, 409, { error: "the lock is not held" });
+
+      // THE ONE CASE BREAKING IS NEVER RIGHT: the holder is a run THIS server is
+      // still running. Forcing it would let a second job start alongside a live
+      // one — the exact collision the lock exists to prevent.
+      if (isOwnLiveHolder(state.holder.pid)) {
+        return sendJson(res, 409, {
+          error:
+            `refusing to break — pid ${state.holder.pid} is a run THIS machine room is still executing ` +
+            `(${state.holder.jobName}). Let it finish, or stop the server.`,
+          code: "own-live-run",
+          holder: state.holder,
+        });
+      }
+
+      const result = breakLock(PUBLISH_LOCK);
+      const age = holderAgeMs(state.holder);
+      auditBreakLock(
+        `${new Date().toISOString()} BREAK-LOCK by operator session · was pid ${state.holder.pid} ` +
+        `job="${state.holder.jobName}" startedAt=${state.holder.startedAt} ` +
+        `ageMs=${age ?? "unknown"} alive=${state.alive} · ${result.reason}`
+      );
+      console.warn(`[machine-room] BREAK-LOCK — ${result.reason} (job "${state.holder.jobName}")`);
+      return sendJson(res, 200, { ok: result.broken, was: result.was, reason: result.reason });
     }
 
     const stream = path.match(/^\/api\/stream\/([A-Za-z0-9._-]+)$/);

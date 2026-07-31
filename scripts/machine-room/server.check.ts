@@ -144,6 +144,90 @@ describe("login", () => {
   });
 });
 
+/**
+ * M1.1 acceptance, at the HTTP layer: a run must survive its OWN lock, and
+ * Break Lock must refuse while that run is live. Uses the fake child with the
+ * expensive probes stubbed (MACHINE_ROOM_SKIP_PROBES) — the lock check runs
+ * BEFORE those probes, so nothing about the bug under test is bypassed.
+ */
+describe("M1.1 — a run does not deadlock on its own lock", () => {
+  let cookie = "";
+  let proc2: ChildProcess | null = null;
+  let base2 = "";
+
+  beforeAll(async () => {
+    const p = await freePort();
+    base2 = `http://127.0.0.1:${p}`;
+    const started = await startServer({
+      MACHINE_ROOM_TOKEN: TOKEN,
+      MACHINE_ROOM_PORT: String(p),
+      MACHINE_ROOM_ALLOW_FAKE: "1",
+      MACHINE_ROOM_SKIP_PROBES: "1",
+      MACHINE_ROOM_FAKE_SECRET: "planted-fake-secret-0123456789",
+    });
+    proc2 = started.child;
+    const login = await fetch(base2 + "/login", { method: "POST", body: JSON.stringify({ token: TOKEN }) });
+    cookie = (login.headers.getSetCookie?.() ?? [])[0]?.split(";")[0] ?? "";
+  });
+
+  afterAll(() => killTree(proc2?.pid));
+
+  it("the run STARTS — before the fix this returned 412 stoppedAt=publish lock", async () => {
+    const r = await fetch(base2 + "/api/run", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ job: "__fake" }),
+    });
+    const body = (await r.json()) as { runId?: string; report?: { stoppedAt?: string } };
+    expect(r.status).toBe(200);
+    expect(body.runId).toBeTruthy();
+    expect(body.report?.stoppedAt).toBeUndefined();
+  });
+
+  it("its preflight records the lock as self-held rather than a conflict", async () => {
+    const st = (await (await fetch(base2 + "/api/status", { headers: { cookie } })).json()) as {
+      recent: { preflight?: { checks: { name: string; ok: boolean; detail: string }[] } }[];
+    };
+    const lockCheck = st.recent[0]?.preflight?.checks.find((c) => c.name === "publish lock");
+    expect(lockCheck?.ok).toBe(true);
+    expect(lockCheck?.detail).toContain("THIS run");
+  });
+
+  it("BREAK LOCK REFUSES while that run is this server's own live child", async () => {
+    const r = await fetch(base2 + "/api/lock/break", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ confirm: "CONFIRM" }),
+    });
+    expect(r.status).toBe(409);
+    const body = (await r.json()) as { code: string; error: string };
+    expect(body.code).toBe("own-live-run");
+    expect(body.error).toContain("still executing");
+  });
+
+  it("a second run is refused by the lock while the first is live", async () => {
+    const r = await fetch(base2 + "/api/run", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ job: "__fake" }),
+    });
+    expect(r.status).toBe(409);
+    expect(((await r.json()) as { code: string }).code).toBe("locked");
+  });
+
+  it("and the lock is released once the run finishes", async () => {
+    for (let i = 0; i < 60; i++) {
+      const st = (await (await fetch(base2 + "/api/status", { headers: { cookie } })).json()) as {
+        lock: { held: boolean };
+        activeRunId: string | null;
+      };
+      if (!st.lock.held && st.activeRunId === null) return;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    throw new Error("lock was still held after the run finished");
+  });
+});
+
 describe("with a session", () => {
   let cookie = "";
 
@@ -191,6 +275,26 @@ describe("with a session", () => {
       body: JSON.stringify({ job: "__fake" }),
     });
     expect(r.status).toBe(400);
+  });
+
+  it("break-lock demands the typed CONFIRM", async () => {
+    const r = await fetch(BASE + "/api/lock/break", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ confirm: "yes" }),
+    });
+    expect(r.status).toBe(428);
+    expect(((await r.json()) as { code: string }).code).toBe("confirm");
+  });
+
+  it("break-lock reports honestly when the lock is not held", async () => {
+    const r = await fetch(BASE + "/api/lock/break", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ confirm: "CONFIRM" }),
+    });
+    expect(r.status).toBe(409);
+    expect(((await r.json()) as { error: string }).error).toContain("not held");
   });
 
   it("logging out revokes the session", async () => {

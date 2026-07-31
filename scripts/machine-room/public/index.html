@@ -202,15 +202,57 @@ async function boot() {
 }
 
 /* ── lock + scheduler advisory ──────────────────────────────────────────── */
+function humanAge(ms) {
+  if (ms === null || ms === undefined) return "unknown age";
+  const s = Math.floor(ms / 1000);
+  if (s < 90) return s + "s";
+  const m = Math.floor(s / 60);
+  if (m < 90) return m + "m";
+  return Math.floor(m / 60) + "h " + (m % 60) + "m";
+}
+
 function renderLock() {
   const b = $("lockBanner"), l = STATE.lock;
   if (!l || !l.held) { b.classList.add("hidden"); return; }
+  const h = l.holder, age = humanAge(l.ageMs);
+  const STALE_H = 6 * 3600 * 1000;
+  const probablyStale = l.alive && l.ageMs !== null && l.ageMs > STALE_H;
+
   b.classList.remove("hidden");
-  b.className = "banner " + (l.alive ? "bad" : "warn");
-  b.innerHTML = l.alive
-    ? "<b>Publish lock HELD.</b> pid <code>" + l.holder.pid + "</code> is running <b>" +
-      (l.holder.jobName || "(unnamed)") + "</b> since <code>" + l.holder.startedAt + "</code>. New runs are refused."
-    : "<b>Stale publish lock</b> from dead pid <code>" + l.holder.pid + "</code>. The next run will take it over.";
+  b.className = "banner " + (l.alive ? (probablyStale ? "warn" : "bad") : "warn");
+
+  let msg;
+  if (!l.alive) {
+    msg = "<b>Stale publish lock</b> from dead pid <code>" + h.pid + "</code>. The next run will take it over.";
+  } else if (probablyStale) {
+    msg = "<b>Publish lock held for " + age + " — PROBABLY STALE.</b> pid <code>" + h.pid +
+          "</code> · <b>" + esc(h.jobName || "(unnamed)") + "</b> · started <code>" + esc(h.startedAt) +
+          "</code>. Liveness here is only kill(pid,0), and pids get recycled. New runs are refused.";
+  } else {
+    msg = "<b>Publish lock HELD (" + age + ").</b> pid <code>" + h.pid + "</code> is running <b>" +
+          esc(h.jobName || "(unnamed)") + "</b> · started <code>" + esc(h.startedAt) + "</code>. New runs are refused.";
+  }
+
+  // The escape hatch. Hidden when the holder is a run THIS server is executing —
+  // there is no legitimate reason to force it then, and the server refuses too.
+  if (l.held && !l.ownLiveHolder) {
+    msg += '<div style="margin-top:10px;display:flex;gap:8px;align-items:center">' +
+           '<input type="text" id="breakConfirm" placeholder="type CONFIRM" style="max-width:180px" />' +
+           '<button id="breakBtn">Break lock</button>' +
+           '<span class="muted" id="breakMsg"></span></div>';
+  } else if (l.ownLiveHolder) {
+    msg += '<div class="muted" style="margin-top:8px">This is a run the machine room is executing now, ' +
+           'so it cannot be broken. Let it finish, or stop the server.</div>';
+  }
+  b.innerHTML = msg;
+
+  const btn = $("breakBtn");
+  if (btn) btn.addEventListener("click", async () => {
+    const v = ($("breakConfirm").value || "").trim();
+    const r = await api("/api/lock/break", { method: "POST", body: JSON.stringify({ confirm: v }) });
+    $("breakMsg").textContent = r.status === 200 ? "broken." : ((r.body && r.body.error) || "failed");
+    if (r.status === 200) boot();
+  });
 }
 
 /* Owner's ruling: ADVISE, do not detect. The window is stated, not probed. */

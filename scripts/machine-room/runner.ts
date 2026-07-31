@@ -126,8 +126,12 @@ export interface StartOptions {
   job: JobId;
   /** Typed confirmation for a job with no dry-run mode. */
   liveConfirm?: string;
-  /** Injected so preflight can be faked in tests / skipped for the fake child. */
-  preflight: () => Promise<PreflightReport>;
+  /**
+   * Injected so preflight can be faked in tests. Receives the pid that ALREADY
+   * holds the lock on this run's behalf, so the lock check can recognise itself
+   * instead of REDing on the file it just wrote (the M1.1 self-deadlock).
+   */
+  preflight: (selfHolderPid: number) => Promise<PreflightReport>;
   /** Test seam: an alternative spec (the fake child). */
   specOverride?: JobSpec;
 }
@@ -166,7 +170,9 @@ export async function startRun(opts: StartOptions): Promise<StartOutcome> {
   };
 
   try {
-    const report = await opts.preflight();
+    // Pass our own holder identity: we took the lock two lines ago, so a lock
+    // check that does not know that would refuse the run it is checking for.
+    const report = await opts.preflight(lock.holder.pid);
     if (!report.ok) {
       release();
       return { ok: false, code: "preflight", report };
@@ -270,6 +276,23 @@ export function killAll(signal: NodeJS.Signals = "SIGTERM"): number {
   children.clear();
   releaseLock(PUBLISH_LOCK);
   return n;
+}
+
+/**
+ * Is `pid` a live child THIS server spawned, or this server itself while it
+ * still tracks a running child? Break Lock refuses in both cases: the lock is
+ * doing its job, and forcing it would let a second run start alongside a real
+ * one — the exact collision the lock exists to prevent.
+ */
+export function isOwnLiveHolder(pid: number): boolean {
+  if (pid === process.pid && activeRunId() !== null) return true;
+  for (const [runId, child] of children) {
+    if (child.pid === pid) {
+      const rec = runs.get(runId);
+      if (rec && rec.status === "running") return true;
+    }
+  }
+  return false;
 }
 
 /** Test seam — drop all in-memory run state. */

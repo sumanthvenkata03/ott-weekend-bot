@@ -162,9 +162,46 @@ export function classifyDisk(freeBytes: number | null, minBytes = MIN_FREE_BYTES
       };
 }
 
-export function classifyLock(state: { held: boolean; holder: LockHolder | null; alive: boolean }): Check {
+/**
+ * Beyond this age, a lock whose only evidence of life is kill(pid,0) is
+ * suspect: pids are recycled, so an long-dead holder can be impersonated by an
+ * unrelated process that inherited its number.
+ */
+export const STALE_AGE_MS = 6 * 60 * 60 * 1000;
+
+export interface LockCheckOptions {
+  /**
+   * The pid that ALREADY legitimately holds the lock on behalf of the caller.
+   *
+   * THE SELF-DEADLOCK THIS EXISTS TO KILL. The run path takes the lock and only
+   * then runs preflight — deliberately, so two simultaneous clicks cannot both
+   * pass preflight and both spawn. But preflight then read the lockfile the run
+   * had just written and REDed on it, so the very first real Run click was
+   * refused with "HELD by live pid N running Reddit Radar" — the job it was
+   * starting. Passing the holder identity in is the structural fix; reordering
+   * preflight before acquire would fix the symptom and reopen the race.
+   */
+  selfHolderPid?: number;
+  /** Injectable clock for the age test. */
+  nowMs?: number;
+}
+
+export function classifyLock(
+  state: { held: boolean; holder: LockHolder | null; alive: boolean },
+  opts: LockCheckOptions = {}
+): Check {
   if (!state.held) return { name: "publish lock", ok: true, level: "red", detail: "free" };
   const h = state.holder;
+
+  if (h && opts.selfHolderPid !== undefined && h.pid === opts.selfHolderPid) {
+    return {
+      name: "publish lock",
+      ok: true,
+      level: "red",
+      detail: `held by THIS run (pid ${h.pid}) — acquired before preflight, not a conflict`,
+    };
+  }
+
   if (!state.alive) {
     return {
       name: "publish lock",
@@ -173,12 +210,24 @@ export function classifyLock(state: { held: boolean; holder: LockHolder | null; 
       detail: `a STALE lock from dead pid ${h?.pid ?? "?"} will be taken over`,
     };
   }
-  return {
-    name: "publish lock",
-    ok: false,
-    level: "red",
-    detail: `HELD by live pid ${h?.pid} running ${h?.jobName || "(unnamed)"} since ${h?.startedAt || "?"}`,
-  };
+
+  const startedMs = h?.startedAt ? Date.parse(h.startedAt) : NaN;
+  const ageMs = Number.isNaN(startedMs) ? NaN : (opts.nowMs ?? Date.now()) - startedMs;
+  const who = `pid ${h?.pid} running ${h?.jobName || "(unnamed)"} since ${h?.startedAt || "?"}`;
+
+  if (!Number.isNaN(ageMs) && ageMs > STALE_AGE_MS) {
+    const hours = Math.floor(ageMs / 3_600_000);
+    return {
+      name: "publish lock",
+      ok: false,
+      level: "red",
+      detail:
+        `held for ${hours}h by ${who} — PROBABLY STALE (pid may be recycled; ` +
+        `liveness here is only kill(pid,0)). If you know that job is not running, use Break Lock.`,
+    };
+  }
+
+  return { name: "publish lock", ok: false, level: "red", detail: `HELD by live ${who}` };
 }
 
 export type ClaudeProbe =
@@ -321,6 +370,8 @@ export interface PreflightDeps {
   keys: KeyStatus;
   tree: { provenance: string; dirty: boolean | null };
   lock: { held: boolean; holder: LockHolder | null; alive: boolean };
+  /** See LockCheckOptions.selfHolderPid — set by the RUN path, absent for the standalone button. */
+  selfHolderPid?: number;
   diskFreeBytes: number | null;
   claude: () => Promise<ClaudeProbe>;
   chromium: () => Promise<{ ok: boolean; message?: string }>;
@@ -356,7 +407,11 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
   s = stop();
   if (s) return s;
 
-  checks.push(classifyLock(deps.lock));
+  checks.push(
+    classifyLock(deps.lock, {
+      ...(deps.selfHolderPid !== undefined ? { selfHolderPid: deps.selfHolderPid } : {}),
+    })
+  );
   s = stop();
   if (s) return s;
 
@@ -378,9 +433,16 @@ export async function runLivePreflight(opts: {
   requiredLoaded: boolean;
   provenance: string;
   dirty: boolean | null;
+  /**
+   * Set by the RUN path to the pid that already holds the lock on its behalf.
+   * Omitted by the standalone Preflight button, which keeps reporting the lock
+   * as free/held exactly as before.
+   */
+  selfHolderPid?: number;
 }): Promise<PreflightReport> {
   return runPreflight({
     adminTokenPresent: opts.adminTokenPresent,
+    ...(opts.selfHolderPid !== undefined ? { selfHolderPid: opts.selfHolderPid } : {}),
     keys: {
       requiredLoaded: opts.requiredLoaded,
       tavily: !!process.env.TAVILY_API_KEY,
