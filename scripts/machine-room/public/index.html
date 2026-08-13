@@ -90,6 +90,21 @@
   label.auto{font-size:12px;color:var(--cream-dim);display:flex;align-items:center;gap:6px;cursor:pointer}
 
   .muted{color:var(--cream-dim);font-size:12px}
+
+  /* gallery */
+  .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:12px}
+  .shot{background:var(--ink);border:1px solid var(--ink-3);border-radius:3px;padding:8px;display:flex;flex-direction:column;gap:7px}
+  .shot img{width:100%;height:150px;object-fit:contain;object-position:center;background:#0d0b0a;border-radius:2px;display:block}
+  .shot .fn{font-family:var(--mono);font-size:10px;color:var(--cream-dim);word-break:break-all;line-height:1.35}
+  .shot .row{display:flex;align-items:center;gap:8px;justify-content:space-between}
+  .shot a.dl{font-family:var(--mono);font-size:11px;color:var(--vermillion-soft);text-decoration:none;border:1px solid var(--ink-3);
+    border-radius:2px;padding:3px 8px}
+  .shot a.dl:hover{border-color:var(--vermillion-soft)}
+  .shot .sz{font-family:var(--mono);font-size:10px;color:#6f635c}
+  details.earlier{margin-top:16px}
+  details.earlier summary{cursor:pointer;font-size:12px;color:var(--cream-dim);font-family:var(--mono)}
+  .galhead{display:flex;align-items:center;gap:12px;margin-top:18px}
+  .galhead h4{font-family:var(--serif);font-size:15px;margin:0;font-weight:600}
   .kv{font-family:var(--mono);font-size:12px}
   ul.notes{margin:8px 0 0;padding-left:18px;color:var(--cream-dim);font-size:12px}
 </style>
@@ -420,7 +435,46 @@ function renderSummary(s, exitCode) {
     h += "</tbody></table>";
   }
   h += '<ul class="notes">' + s.notes.map((n) => "<li>" + esc(n) + "</li>").join("") + "</ul>";
+  h += renderGallery(s);
   card.innerHTML = h;
+}
+
+/* ── gallery ───────────────────────────────────────────────────────────────
+   Thumbnails are plain <img> against the auth-gated artifact endpoint: the
+   session cookie rides an image request the same as any other same-origin GET,
+   so no token handling is needed in the markup. No resizing pass and no cache
+   files — CSS constrains the box and the browser does the rest. */
+function kb(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB"; }
+
+function shot(runId, p) {
+  const src = "/api/artifacts?run=" + encodeURIComponent(runId) + "&f=" + encodeURIComponent(p.name);
+  return '<div class="shot">' +
+    '<a href="' + src + '" target="_blank" rel="noopener"><img loading="lazy" src="' + src + '" alt="' + esc(p.name) + '" /></a>' +
+    '<div class="fn">' + esc(p.name) + "</div>" +
+    '<div class="row"><span class="sz">' + kb(p.sizeBytes) + "</span>" +
+    '<a class="dl" href="' + src + '" download="' + esc(p.name) + '">Download</a></div>' +
+    "</div>";
+}
+
+function renderGallery(s) {
+  if (!CURRENT || !s.pngs || s.pngs.length === 0) return "";
+  const fresh = s.pngs.filter((p) => p.fresh);
+  const earlier = s.pngs.filter((p) => !p.fresh);
+  let h = "";
+
+  if (fresh.length) {
+    h += '<div class="galhead"><h4>Rendered by this run</h4>' +
+         '<span class="pill dry">this run</span><span style="flex:1"></span>' +
+         '<a class="dl" style="padding:6px 12px" href="/api/artifacts/zip?run=' + encodeURIComponent(CURRENT) +
+         '" download>Download all (zip)</a></div>';
+    h += '<div class="gal">' + fresh.map((p) => shot(CURRENT, p)).join("") + "</div>";
+  }
+  if (earlier.length) {
+    h += '<details class="earlier"><summary>' + earlier.length +
+         " earlier PNG(s) from the same date — not produced by this run</summary>" +
+         '<div class="gal">' + earlier.map((p) => shot(CURRENT, p)).join("") + "</div></details>";
+  }
+  return h;
 }
 
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }

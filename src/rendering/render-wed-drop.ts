@@ -10,6 +10,7 @@ import type { Release } from "../shared/types.js";
 import { EDITION_META, type WedDropEdition } from "../shared/wed-drop-edition.js";
 import { sortWedDropByProminence } from "../content/weekend/wednesday-drop.js";
 import { computeCropPosition } from "./poster-crop.js";
+import { platformLogoStem } from "../shared/platform-logo.js";
 import type {
   WedDropCoverContext,
   WedDropCardContext,
@@ -60,11 +61,7 @@ function buildGridItem(r: Release): WedDropGridItem {
     filmTitle: r.title,
     language: r.language,
     platform: r.platform,
-    platformLogos: r.platform.map(p => p.toLowerCase()
-      .replace(/\s+/g, "-")
-      .replace(/\+/g, "-plus")
-      .replace(/\./g, "")
-      .replace(/jio-?hotstar/g, "jiohotstar")),
+    platformLogos: r.platform.map(platformLogoStem),
     posterUrl: r.posterUrl,
     fallbackColor: LANGUAGE_FALLBACK_COLORS[r.language] ?? "#1A1614",
   };

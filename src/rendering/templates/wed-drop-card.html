@@ -305,8 +305,14 @@
         {% if release.platform and release.platform.length > 0 %}
           <span>NOW ON</span>
           <span>{{ release.platform[0] | upper }}</span>
+          {# WD-042 5a — GRACEFUL DEGRADE. platformLogoSvg returns "" when the
+             asset is missing; emitting the chip anyway shipped an empty white
+             box (Lionsgate Play, Issue 042). Resolve first, and draw the chip
+             ONLY if there is actually a mark to put in it. A platform with no
+             asset renders as text: "★ NOW ON LIONSGATE PLAY". #}
           {% set stem = release.platformLogos[0] %}
-          {% if stem %}<span class="logo-stamp">{{ stem | platformLogoSvg | safe }}</span>{% endif %}
+          {% set logoSvg = stem | platformLogoSvg %}
+          {% if logoSvg %}<span class="logo-stamp">{{ logoSvg | safe }}</span>{% endif %}
         {% else %}
           <span>STREAMING TBA</span>
         {% endif %}

@@ -178,6 +178,19 @@ const ROLE_PREFIX_RE = new RegExp(
   "giu"
 );
 
+// A POSSESSIVE token followed by another capitalised word. Group 1 = the
+// possessive word (kept intact), group 2 = the single space that gets broken.
+// CAP_WORD allows internal apostrophes, so "Santoshi's" is ONE capitalised word
+// and the 2–3 word window would otherwise swallow whatever it owns.
+//
+// The trailing (?=\p{Lu}) is what keeps this surgical: when the possessive owns a
+// LOWERCASE noun ("Govindh Vasantha's music"), the run already ended there and
+// this rewrite must not fire — that path stays byte-identical to before.
+const POSSESSIVE_RE = new RegExp(
+  String.raw`(\p{Lu}[\p{L}'’.\-]*['’][sS])([^\S\r\n])(?=\p{Lu})`,
+  "gu"
+);
+
 /**
  * Turn every SENTENCE boundary into a newline, so the extractors cannot build a
  * candidate that straddles one. LENGTH-PRESERVING: exactly one horizontal space
@@ -216,13 +229,38 @@ export function neutralizeRoleTitles(text: string): string {
 }
 
 /**
- * The scan copy the extractor regexes run against. Both rewrites preserve length
- * and only ever REPLACE a character with "\n", so every offset in the result maps
- * 1:1 onto the original string. nameCandidates relies on that to slice labels out
- * of the original.
+ * Terminate a name-shaped run at a POSSESSIVE. A person's name ends where their
+ * possessive does: what follows is the thing they own, not more of their name.
+ * LENGTH-PRESERVING: the single space after the possessive becomes "\n", which
+ * GAP cannot cross, so the window stops at the pre-possessive n-gram.
+ *
+ * ── ISSUE 041: THE EXTRACTION WAS WRONG AGAIN, THE POLICY WAS STILL RIGHT ────
+ * A live run 2-strike DROPPED "Batwara 1947" — a green, gate-approved film — on
+ * one flag: "Rajkumar Santoshi's Partition". The director IS in the film data and
+ * IS in the allowlist, but CAP_WORD treats "Santoshi's" as an ordinary word, so
+ * the greedy 3-word window fused the man with the noun he owned, and
+ * {rajkumar, santoshi, partition} backs nobody. Same shape as Issue 032: the
+ * two-strike drop behaved correctly on a malformed candidate. The fix is in the
+ * EXTRACTION — the strike count, the drop behaviour and the allowlist source are
+ * all untouched.
+ *
+ * Note this only ever SHORTENS a candidate, and a shorter run is a STRICTER test
+ * (fewer tokens must each be backed by one person). It cannot hide a
+ * hallucination: "Fakename Person's Movie" still yields "Fakename Person's",
+ * whose tokens back nobody, and still flags.
+ */
+export function terminatePossessives(text: string): string {
+  return text.replace(POSSESSIVE_RE, (_m, word: string) => `${word}\n`);
+}
+
+/**
+ * The scan copy the extractor regexes run against. All three rewrites preserve
+ * length and only ever REPLACE a character with "\n", so every offset in the
+ * result maps 1:1 onto the original string. nameCandidates relies on that to
+ * slice labels out of the original.
  */
 export function scanText(text: string): string {
-  return neutralizeRoleTitles(segmentSentences(text));
+  return terminatePossessives(neutralizeRoleTitles(segmentSentences(text)));
 }
 
 /**

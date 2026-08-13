@@ -9,6 +9,7 @@
 
 import { differenceInCalendarDays, parseISO } from "date-fns";
 import type { PlatformStyle, CardDensity, CardEnrichment, StampContext } from "./types.js";
+import { hasRealVoteBase } from "../shared/post-validator.js";
 
 /**
  * Map a platform display name (e.g. "Netflix", "Prime Video") to the
@@ -157,6 +158,8 @@ type StampInput = {
   metacritic?: number;
   letterboxd?: number;
   tmdbVoteAverage?: number;
+  /** Read ONLY by the vote-base guard on the tbsi branch (see hasRealVoteBase). */
+  imdbVotes?: number;
   tmdbVoteCount?: number;
   releaseDate?: string;
 };
@@ -244,7 +247,16 @@ export function buildStampContext(
       stampVariant: rs.confidence === "low" ? "early" : "firm",
     };
   }
-  if (release && release.tbsiScore !== undefined) {
+  // A tbsiScore is necessary but NOT sufficient: the score must also have a real
+  // audience under it (hasRealVoteBase — the same predicate the landing verifier
+  // warns on). Issue 041 shipped 6.3 / 7.0 / 7.5 seals on films with 20, 0 and 2
+  // recorded votes because this branch only checked that the number existed.
+  //
+  // Falling through here provably lands on the "new" branch, never the "tmdb"
+  // one: failing hasRealVoteBase requires tmdbVoteCount < 50, and the tmdb branch
+  // requires tmdbVoteCount >= 50 — the two conditions cannot both hold. Pinned by
+  // seal-vote-base.test.ts so a future edit to either threshold can't open a gap.
+  if (release && release.tbsiScore !== undefined && hasRealVoteBase(release)) {
     return {
       stampKind: "tbsi",
       stampLabel: "TBSI",

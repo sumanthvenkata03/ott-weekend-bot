@@ -22,6 +22,8 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { MANIFESTS_DIR, POSTS_DIR, RUNS_DIR } from "./paths.js";
+import { JOB_ARTIFACTS, classifyRun, type RunVerdict } from "./job-artifacts.js";
+import type { JobId } from "./jobs.js";
 
 export interface ManifestFacts {
   file: string;
@@ -49,6 +51,17 @@ export interface ResultsFacts {
   fresh: boolean;
 }
 
+/**
+ * One rendered card. `name` is the BARE filename and is the ONLY thing the
+ * artifact endpoint will accept — see artifacts.ts for why an exact-match
+ * allowlist replaces any path resolution from request input.
+ */
+export interface PngFacts {
+  name: string;
+  fresh: boolean;
+  sizeBytes: number;
+}
+
 export interface RunSummary {
   date: string;
   manifests: ManifestFacts[];
@@ -56,6 +69,10 @@ export interface RunSummary {
   pngCount: number;
   /** Of pngCount, how many were written since the run started. */
   freshPngCount: number;
+  /** Every same-date PNG, fresh flag attached. THE allowlist for downloads. */
+  pngs: PngFacts[];
+  /** Job-aware verdict, when the caller named a job. */
+  verdictKind?: RunVerdict["kind"];
   /** Did THIS run produce any artifact at all? */
   producedAnything: boolean;
   /** True only when a manifest exists AND cards were rendered AND nothing failed. */
@@ -80,7 +97,18 @@ export interface SummaryPaths {
    * reported as fresh, which is the honest default when the caller cannot say.
    */
   sinceMs?: number;
+  /**
+   * Which job produced this run. With it, the verdict is job-aware (see
+   * job-artifacts.ts). WITHOUT it the legacy generic wording is used unchanged,
+   * so every pre-existing caller and test keeps its exact behaviour.
+   */
+  job?: JobId;
 }
+
+/** Which jobs M1 forces into a dry run — such a run never "publishes". */
+const JOB_DRY: Record<string, boolean> = Object.fromEntries(
+  Object.entries(JOB_ARTIFACTS).map(([k, v]) => [k, v.dryRun])
+);
 
 function listFiles(dir: string): string[] {
   try {
@@ -194,9 +222,14 @@ export function buildSummary(date: string, paths: SummaryPaths = {}): RunSummary
     }
   }
 
-  const pngs = listFiles(postsDir).filter((f) => f.includes(date) && f.endsWith(".png"));
+  const pngFiles = listFiles(postsDir).filter((f) => f.includes(date) && f.endsWith(".png"));
+  const pngs: PngFacts[] = pngFiles.map((name) => {
+    let sizeBytes = 0;
+    try { sizeBytes = statSync(join(postsDir, name)).size; } catch { /* vanished */ }
+    return { name, fresh: isFresh(postsDir, name), sizeBytes };
+  });
   const pngCount = pngs.length;
-  const freshPngCount = pngs.filter((f) => isFresh(postsDir, f)).length;
+  const freshPngCount = pngs.filter((p) => p.fresh).length;
 
   const notes: string[] = [];
   const anyFail = manifests.some((m) => !m.ok);
@@ -204,16 +237,44 @@ export function buildSummary(date: string, paths: SummaryPaths = {}): RunSummary
   const producedAnything =
     manifests.some((m) => m.fresh) || results.some((r) => r.fresh) || freshPngCount > 0;
 
+  const base = {
+    date, manifests, results, pngCount, freshPngCount, pngs, producedAnything,
+  };
+
+  // ── JOB-AWARE VERDICT ────────────────────────────────────────────────────
+  // Only when the caller names a job. This is the path the machine room always
+  // takes; the legacy branch below is kept byte-identical for callers that
+  // cannot say which job ran.
+  if (paths.job !== undefined) {
+    const v = classifyRun(paths.job, {
+      manifests: manifests.filter((m) => m.fresh).length,
+      results: results.filter((r) => r.fresh).length,
+      pngs: freshPngCount,
+    });
+    const jobNotes = ["exit 0 ≠ published — read the artifacts."];
+    if (sinceMs !== undefined) {
+      jobNotes.push("Counts are what THIS run wrote; anything older only shares the date.");
+    }
+    if (pngCount > freshPngCount) {
+      jobNotes.push(`${pngCount - freshPngCount} earlier PNG(s) from the same date are listed separately.`);
+    }
+    return {
+      ...base,
+      verdictKind: v.kind,
+      // A dry run that rendered cards is a SUCCESS, so it must not be painted
+      // with the not-published colour.
+      looksPublished: v.kind === "as-expected" && !JOB_DRY[paths.job],
+      verdict: v.text,
+      notes: jobNotes,
+    };
+  }
+
+  // ── LEGACY generic verdict (no job named) — unchanged wording ────────────
   // A run that produced NOTHING must not be described by artifacts it merely
-  // coexists with. This is the case the first live exercise got wrong.
+  // coexists with.
   if (sinceMs !== undefined && !producedAnything) {
     return {
-      date,
-      manifests,
-      results,
-      pngCount,
-      freshPngCount,
-      producedAnything,
+      ...base,
       looksPublished: false,
       verdict:
         "THIS RUN PRODUCED NO ARTIFACTS — it wrote no manifest, no reconcile results and no cards. " +
@@ -241,5 +302,5 @@ export function buildSummary(date: string, paths: SummaryPaths = {}): RunSummary
 
   notes.push("exit 0 ≠ published — read the artifacts.");
 
-  return { date, manifests, results, pngCount, freshPngCount, producedAnything, looksPublished, verdict, notes };
+  return { ...base, looksPublished, verdict, notes };
 }

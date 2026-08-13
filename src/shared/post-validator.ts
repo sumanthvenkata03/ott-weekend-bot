@@ -12,6 +12,8 @@
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Release } from "./types.js";
+import { hasRealVoteBase as voteBaseOf, awardsNumericSeal } from "./seal-decision.js";
+import { missingPlatformLogos } from "./platform-logo.js";
 
 export type Bucket = "arrival" | "gem" | "theatrical" | "ott" | "verdict" | "spotlight";
 export type CheckStatus = "pass" | "fail" | "warn";
@@ -23,6 +25,11 @@ export const HARD_FAIL_ON_INVALID = false;
 // Theatre->OTT gap beyond this many days is surfaced as a soft warning.
 const THEATRE_OTT_GAP_WARN_DAYS = 365;
 const DAY = 24 * 60 * 60 * 1000;
+
+// THE VOTE-BASE STANDARD and THE SEAL DECISION now live in shared/seal-decision.ts
+// so the renderer and this verifier share one implementation without an import
+// cycle. Re-exported here because callers already import it from this module.
+export { hasRealVoteBase } from "./seal-decision.js";
 
 export interface BucketWindow {
   start: string;  // YYYY-MM-DD inclusive
@@ -146,6 +153,9 @@ export function buildManifest(
     let status: CheckStatus = "pass";
     const fail = (r: string) => { reasons.push(r); status = "fail"; };
     const warn = (r: string) => { reasons.push(r); if (status !== "fail") status = "warn"; };
+    // INFO — recorded in `reason` for the receipt, but never moves `status`. For
+    // things the operator should be able to see happened, that are not problems.
+    const info = (r: string) => { reasons.push(r); };
 
     if (!win) {
       fail(`no window configured for bucket "${bucket}"`);
@@ -173,14 +183,41 @@ export function buildManifest(
       if (gap > THEATRE_OTT_GAP_WARN_DAYS) warn(`theatre->OTT gap ${Math.round(gap)}d`);
     }
 
+    // ── SCORE HONESTY (WD-042 4a) — keyed to the RENDER, not to the data ──────
+    // This used to test "does the record carry a score", which is not what the
+    // reader sees. Issue 041 failed Cocktail 2, Bharat Bhhagya Viddhaata and
+    // Heartin for a vote-base problem their cards had already handled correctly
+    // by printing NEW. The verifier was calling the renderer a liar for telling
+    // the truth.
+    //
+    // It now asks the same question the seal asks (awardsNumericSeal, shared with
+    // buildStampContext):
+    //   data-score + NEW stamp  → PASS, with an info note that it was withheld
+    //   an actual numeric seal without a vote base → FAIL
+    // That second branch is now UNREACHABLE — buildStampContext refuses the seal
+    // (WD-041-FIX-A) — and it is kept deliberately, as a tripwire: if anyone ever
+    // loosens the seal branch, the manifest fails loudly instead of silently
+    // shipping an unearned number.
     const hasScore = typeof film.imdbRating === "number" || typeof film.tbsiScore === "number";
-    const voteBase = (film.imdbVotes ?? 0) > 0 || (film.tmdbVoteCount ?? 0) >= 50;
-    if (hasScore && !voteBase) warn(`score shown with no real vote base`);
+    const showsNumber = awardsNumericSeal(film);
+    if (showsNumber && !voteBaseOf(film)) {
+      fail(`score shown with no real vote base`);
+    } else if (hasScore && !showsNumber) {
+      info(`score withheld — no vote base; card shows the NEW stamp`);
+    }
 
     // ── COMPLETENESS CONTRACT (opt-in per card type) ────────────────────────
     if (contract.cardType === "wed-drop") {
       // POSTER — warn only (R5). The typographic fallback is a designed state.
       if (!film.posterUrl) warn(`contract:poster — no poster art; card ships the typographic fallback`);
+
+      // PLATFORM LOGO — warn only (WD-042 5a). The card degrades to a text-only
+      // "NOW ON <PLATFORM>" header, which is honest; this exists so a missing
+      // mark is VISIBLE in the receipt instead of being discovered on a
+      // published card as an empty white box.
+      for (const stem of missingPlatformLogos(film.platform)) {
+        warn(`platform-logo-missing: ${stem} — card ships the text-only platform line`);
+      }
 
       // BAND: ★ RELEASED. Mirrors hasReleasedSection() exactly.
       if (!film.releaseDates?.theatrical && !film.releaseDates?.ott) {
@@ -225,7 +262,24 @@ export function buildManifest(
       // PRE-RELEASE SEAL (R7). A film whose qualifying date is still in the
       // future has no audience yet, so any fetched rating is noise — it must
       // carry the NEW stamp and no numeric seal, whatever TMDb returned.
-      if (contract.editionDate && date !== null && date > contract.editionDate && hasScore) {
+      //
+      // WD-042 4b — THE DOCUMENTED FALSE POSITIVE. "Pre-release" here means the
+      // OTT date is still ahead, but an OTT arrival that already played cinemas
+      // has a real audience and a legitimately earned score. Issue 041 failed
+      // three such films (theatrical Jun 12 / Jun 19 / Jun 26, OTT Aug 14) as if
+      // nobody had seen them. Skip when a PAST theatrical date exists; the check
+      // now fires only for genuinely never-released films showing a number.
+      //
+      // DELIBERATELY still keyed to `hasScore`, NOT to awardsNumericSeal. R7's
+      // founding fixture (Jana Nayagan: imdbRating 7.1, zero votes, opening
+      // tomorrow) carries a score with no seal, and it must keep failing — the
+      // suppression is about an unreleased film carrying a number AT ALL, which
+      // is a stricter and separate question from which stamp gets drawn.
+      const playedInCinemas =
+        !!film.releaseDates?.theatrical &&
+        !!contract.editionDate &&
+        film.releaseDates.theatrical <= contract.editionDate;
+      if (contract.editionDate && date !== null && date > contract.editionDate && hasScore && !playedInCinemas) {
         fail(
           `contract:pre-release-seal — ${label} ${date} is after the edition date ` +
           `${contract.editionDate}; a pre-release film may not show a numeric score`
@@ -274,6 +328,36 @@ export function manifestToSlack(m: PostManifest): { metaValue: string; issuesBlo
 export function assertOrFlag(m: PostManifest): void {
   if (HARD_FAIL_ON_INVALID && !m.ok)
     throw new Error(`Post validation failed for ${m.pillar} Issue ${m.issue}: ${m.failCount} landing(s) outside window`);
+}
+
+/**
+ * Thrown when a manifest with `ok: false` reaches the render gate (WD-042 4c).
+ * Typed so the job can scope the block to ONE edition and still run the other,
+ * while the process as a whole still ends nonzero.
+ */
+export class EditionBlockedError extends Error {
+  constructor(readonly manifest: PostManifest) {
+    super(
+      `${manifest.pillar} Issue ${manifest.issue} BLOCKED — ${manifest.failCount} contract failure(s). ` +
+      `Nothing rendered, nothing uploaded.`
+    );
+    this.name = "EditionBlockedError";
+  }
+}
+
+/**
+ * THE RENDER GATE (WD-042 4c). A manifest that is not ok stops its edition dead:
+ * no PNGs, no R2, no Notion, no Slack draft. THERE IS NO BYPASS FLAG — the whole
+ * point is that a contract failure cannot be waved through under deadline. To
+ * publish anyway you must fix the data or pull the film (WED_DROP_EXCLUDE),
+ * both of which leave a trace.
+ *
+ * Scope is ONE edition: a blocked theatrical run must not take a clean OTT run
+ * down with it.
+ */
+export function assertRenderable(m: PostManifest): void {
+  if (m.ok) return;
+  throw new EditionBlockedError(m);
 }
 
 export function saveManifest(m: PostManifest, path: string): void {

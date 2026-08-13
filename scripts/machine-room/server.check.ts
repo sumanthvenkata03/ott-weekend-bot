@@ -10,7 +10,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:http";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import AdmZip from "adm-zip";
+import { editorialTodayStamp } from "../../src/shared/editorial-clock.js";
+import { POSTS_DIR } from "./paths.js";
 import { REPO_ROOT } from "./paths.js";
 import { killTree } from "./proc.js";
 
@@ -225,6 +229,119 @@ describe("M1.1 — a run does not deadlock on its own lock", () => {
       await new Promise((r) => setTimeout(r, 250));
     }
     throw new Error("lock was still held after the run finished");
+  });
+});
+
+/**
+ * M1.2 at the HTTP layer. Plants fixture PNGs into output/posts carrying TODAY's
+ * editorial stamp so the fake child's summary picks them up as its own, then
+ * exercises the gallery endpoint, the traversal defences and the zip.
+ * Fixtures are removed in afterAll; no job:* is ever run.
+ */
+describe("M1.2 — artifact gallery, downloads and the zip", () => {
+  let cookie = "";
+  let proc3: ChildProcess | null = null;
+  let base3 = "";
+  let runId = "";
+  let planted: string[] = [];
+
+  beforeAll(async () => {
+    const today = editorialTodayStamp();
+    planted = [
+      `tbsi-archives-${today}-cover.png`,
+      `tbsi-archives-${today}-card-01.png`,
+      `tbsi-archives-${today}-card-02.png`,
+    ];
+    mkdirSync(POSTS_DIR, { recursive: true });
+
+    const p = await freePort();
+    base3 = `http://127.0.0.1:${p}`;
+    const started = await startServer({
+      MACHINE_ROOM_TOKEN: TOKEN,
+      MACHINE_ROOM_PORT: String(p),
+      MACHINE_ROOM_ALLOW_FAKE: "1",
+      MACHINE_ROOM_SKIP_PROBES: "1",
+    });
+    proc3 = started.child;
+    const login = await fetch(base3 + "/login", { method: "POST", body: JSON.stringify({ token: TOKEN }) });
+    cookie = (login.headers.getSetCookie?.() ?? [])[0]?.split(";")[0] ?? "";
+
+    // Written AFTER the server is up but BEFORE the run, so they land inside the
+    // freshness window the run will compute.
+    for (const n of planted) writeFileSync(join(POSTS_DIR, n), `fixture-${n}`, "utf8");
+
+    const r = await fetch(base3 + "/api/run", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ job: "__fake" }),
+    });
+    runId = ((await r.json()) as { runId: string }).runId;
+
+    for (let i = 0; i < 60; i++) {
+      const st = (await (await fetch(base3 + "/api/status", { headers: { cookie } })).json()) as { activeRunId: string | null };
+      if (st.activeRunId === null) break;
+      await new Promise((res) => setTimeout(res, 200));
+    }
+  });
+
+  afterAll(() => {
+    killTree(proc3?.pid);
+    for (const n of planted) { try { rmSync(join(POSTS_DIR, n)); } catch { /* already gone */ } }
+  });
+
+  it("the summary lists the planted PNGs as this run's own", async () => {
+    const s = (await (await fetch(`${base3}/api/runs/${runId}/summary`, { headers: { cookie } })).json()) as {
+      summary: { pngs: { name: string; fresh: boolean; sizeBytes: number }[]; freshPngCount: number };
+    };
+    const fresh = s.summary.pngs.filter((p) => p.fresh).map((p) => p.name);
+    for (const n of planted) expect(fresh).toContain(n);
+    expect(s.summary.freshPngCount).toBeGreaterThanOrEqual(planted.length);
+    expect(s.summary.pngs.find((p) => p.name === planted[0])!.sizeBytes).toBeGreaterThan(0);
+  });
+
+  it("serves an allowlisted PNG as image/png", async () => {
+    const r = await fetch(`${base3}/api/artifacts?run=${runId}&f=${encodeURIComponent(planted[0]!)}`, { headers: { cookie } });
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toBe("image/png");
+    expect(await r.text()).toBe(`fixture-${planted[0]}`);
+  });
+
+  it("REFUSES traversal, foreign files and non-PNGs", async () => {
+    const cases: [string, number][] = [
+      ["../.env", 400],
+      ["..%2F.env", 400],
+      ["sub/dir.png", 400],
+      ["wed-drop-theatrical-2026-01-01-cover.png", 404],
+      ["anything.json", 415],
+      ["", 400],
+    ];
+    for (const [f, status] of cases) {
+      const r = await fetch(`${base3}/api/artifacts?run=${runId}&f=${encodeURIComponent(f)}`, { headers: { cookie } });
+      expect(r.status, `f=${JSON.stringify(f)}`).toBe(status);
+    }
+  });
+
+  it("REFUSES a valid filename against the WRONG run id", async () => {
+    const r = await fetch(`${base3}/api/artifacts?run=not-a-run&f=${encodeURIComponent(planted[0]!)}`, { headers: { cookie } });
+    expect(r.status).toBe(404);
+  });
+
+  it("artifact and zip endpoints require a session", async () => {
+    expect((await fetch(`${base3}/api/artifacts?run=${runId}&f=${encodeURIComponent(planted[0]!)}`)).status).toBe(401);
+    expect((await fetch(`${base3}/api/artifacts/zip?run=${runId}`)).status).toBe(401);
+  });
+
+  it("the zip contains exactly this run's fresh PNGs, as an attachment", async () => {
+    const r = await fetch(`${base3}/api/artifacts/zip?run=${runId}`, { headers: { cookie } });
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toBe("application/zip");
+    expect(r.headers.get("content-disposition")).toContain("attachment");
+    expect(r.headers.get("content-disposition")).toContain("-run.zip");
+
+    const entries = new AdmZip(Buffer.from(await r.arrayBuffer())).getEntries().map((e) => e.entryName);
+    for (const n of planted) expect(entries).toContain(n);
+    expect(entries.every((e) => e.endsWith(".png"))).toBe(true);
+    expect(entries.some((e) => e.includes("/") || e.includes(".."))).toBe(false);
   });
 });
 

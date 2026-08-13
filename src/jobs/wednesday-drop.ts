@@ -14,7 +14,7 @@ import { getIssueNumberForToday } from "../shared/issue-number.js";
 import { editorialDateUTC, editorialTodayStamp, utcStamp, warnIfNotPostingDay } from "../shared/editorial-clock.js";
 import { EDITION_META, type WedDropEdition } from "../shared/wed-drop-edition.js";
 import { excludedKeysFor, recordFeatured, filmKey, type PillarKey } from "../shared/featured-ledger.js";
-import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
+import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag, assertRenderable, EditionBlockedError } from "../shared/post-validator.js";
 import { editionWindow, RECONCILE_LANGUAGES } from "../reconcile/run.js";
 import { verifyCandidates } from "../reconcile/verify.js";
 import { annotateWithAiReview, enforceVerification } from "../reconcile/ai-review.js";
@@ -27,29 +27,18 @@ import { confirmAutoPublish, applyAutoConfirmation, buildRedPing, editionOutcome
 import { auditRender, auditBlockers, type AuditSubject } from "../rendering/render-audit.js";
 import { saveRunArtifact, runArtifactPath } from "../shared/run-artifacts.js";
 import { redactSecrets } from "../shared/redact.js";
-
 /**
  * Manual one-off exclusion hook. WED_DROP_EXCLUDE is a comma-separated list of
  * TMDb ids and/or exact titles to pull from a renderable pool — for a film the
  * operator has verified shouldn't run (e.g. no real release this week). Applied
  * POST-GATE inside produceEdition (like the dedup), so it never feeds the gate
  * fingerprint: the --approve token stays valid and only the rendered set shrinks.
+ *
+ * The two helpers moved VERBATIM to shared/exclude-list.ts so Sat Verdict can
+ * reuse the identical token grammar (SAT_VERDICT_EXCLUDE). Behaviour unchanged.
  */
-function parseExcludeList(raw: string | undefined): { ids: Set<number>; titles: Set<string> } {
-  const ids = new Set<number>();
-  const titles = new Set<string>();
-  for (const tok of (raw ?? "").split(",").map(s => s.trim()).filter(Boolean)) {
-    const n = Number(tok);
-    if (Number.isInteger(n) && String(n) === tok) ids.add(n);
-    else titles.add(tok.toLowerCase());
-  }
-  return { ids, titles };
-}
-
-function isManuallyExcluded(r: Release, ex: { ids: Set<number>; titles: Set<string> }): boolean {
-  if (r.tmdbId !== undefined && ex.ids.has(r.tmdbId)) return true;
-  return ex.titles.has(r.title.trim().toLowerCase());
-}
+import { parseExcludeList, isManuallyExcluded } from "../shared/exclude-list.js";
+import { parsePosterOverrides, applyPosterOverrides } from "../shared/poster-override.js";
 
 /**
  * Manual platform override hook. WED_DROP_PLATFORM is a ';'-separated list of
@@ -190,13 +179,29 @@ async function produceEdition(
     langAuditLines.push(line);
   }
 
+  // Manual poster override (WED_DROP_POSTER) — operator dial mirroring
+  // WED_DROP_PLATFORM/LANG, same chain position: post-gate, post-FORCE, BEFORE
+  // the LLM + render. Supplies official key art for a film TMDb has no poster
+  // for, inlined as a data URI (see shared/poster-override.ts for why). Setting
+  // it also clears the manifest's contract:poster warn. A bad path THROWS —
+  // the operator typed it on purpose, so a typo must not degrade silently.
+  const { pool: posterPool, applied: postersSet } = applyPosterOverrides(
+    langPool,
+    parsePosterOverrides(process.env.WED_DROP_POSTER)
+  );
+  if (postersSet > 0) {
+    const line = `POSTER override by operator: set key art on ${postersSet} film(s) in the ${edition} pool`;
+    log.warn(`  ${line}`);
+    langAuditLines.push(line);
+  }
+
   // Per-edition candidate cap (capPoolForSelector): the popularity slice applies
   // ONLY to the TMDb-pool portion — AI-net finds are CAP-EXEMPT so they always
   // reach the LLM selector instead of being amputated by the popularity sort
   // (they carry no tmdbPopularity and would otherwise sink below the cut). The
   // LLM remains the editorial filter (picks up to MAX or skips); this only
   // guarantees AI finds reach its INPUT, not that they get published.
-  const featured = capPoolForSelector(langPool);
+  const featured = capPoolForSelector(posterPool);
   log.info(`  Feeding ${featured.length} ${edition} candidates to the LLM (picks up to ${MAX_WED_DROP_FILMS} or skips)`);
 
   // Generate the edition's draft via Claude. `nameFlags` carries any copy
@@ -244,6 +249,13 @@ async function produceEdition(
   log.info("\n" + manifestToLog(manifest));
   saveManifest(manifest, `output/manifests/wed-drop-${meta.slug}-${dateStr}.json`);
   assertOrFlag(manifest);
+
+  // ── THE RENDER GATE (WD-042 4c) ──────────────────────────────────────────
+  // ok:false stops THIS edition here: nothing renders, nothing uploads, nothing
+  // posts. The manifest is already printed above and persisted, so the operator
+  // has the full receipt. No bypass flag exists by design — fix the data or pull
+  // the film with WED_DROP_EXCLUDE; both leave a trace.
+  assertRenderable(manifest);
 
   // ── CHECKPOINT 2 (R9) — COMPLETENESS CONFIRMATION ────────────────────────
   // decideGate ran BEFORE the LLM picked these films, so it could not know
@@ -634,6 +646,20 @@ async function main() {
   // Optional edition scope: WED_DROP_ONLY=ott|theatrical runs just that edition
   // (leaving the other's live assets/copy untouched) — e.g. re-publishing one
   // edition after a manual exclude without re-billing/re-posting the other.
+  // Contract-gate blocks, collected so ONE blocked edition cannot abort the
+  // other. Any entry makes the run exit nonzero at the end (WD-042 4c).
+  const blockedEditions: string[] = [];
+  const runEdition = async (fn: () => Promise<void>): Promise<void> => {
+    try {
+      await fn();
+    } catch (err) {
+      if (!(err instanceof EditionBlockedError)) throw err;   // real failures still abort
+      log.error(`⛔ ${err.message}`);
+      log.error("\n" + manifestToLog(err.manifest));
+      blockedEditions.push(err.message);
+    }
+  };
+
   const onlyEdition = process.env.WED_DROP_ONLY?.trim().toLowerCase();
   const runThe = !onlyEdition || onlyEdition === "theatrical";
   const runOtt = !onlyEdition || onlyEdition === "ott";
@@ -642,7 +668,7 @@ async function main() {
   if (!runThe) {
     log.info("In Theaters: skipped (WED_DROP_ONLY).");
   } else if (thePool.length > 0) {
-    await produceEdition("theatrical", thePool, issueNumber, startDate, endDate, auditLines, runCtx, { mode: decision.mode, hash: decision.hash });
+    await runEdition(() => produceEdition("theatrical", thePool, issueNumber, startDate, endDate, auditLines, runCtx, { mode: decision.mode, hash: decision.hash }));
   } else {
     log.info("In Theaters: no approved/renderable films this week — edition skipped.");
   }
@@ -650,9 +676,18 @@ async function main() {
   if (!runOtt) {
     log.info("Now Streaming: skipped (WED_DROP_ONLY).");
   } else if (ottPool.length > 0) {
-    await produceEdition("ott", ottPool, issueNumber, ottStartDate, endDate, auditLines, runCtx, { mode: decision.mode, hash: decision.hash });
+    await runEdition(() => produceEdition("ott", ottPool, issueNumber, ottStartDate, endDate, auditLines, runCtx, { mode: decision.mode, hash: decision.hash }));
   } else {
     log.info("Now Streaming: no approved/renderable films this week — edition skipped.");
+  }
+
+  // A blocked edition ends the RUN nonzero, but only after the other edition has
+  // had its chance — the block is per-edition, the exit code is per-run.
+  if (blockedEditions.length > 0) {
+    throw new Error(
+      `Wed Drop Issue №${issueNumber}: ${blockedEditions.length} edition(s) BLOCKED by the contract gate — ` +
+      `${blockedEditions.join("; ")}. Nothing was rendered or delivered for those editions.`
+    );
   }
 
   log.success(`\n✅ Wed Drop run complete (Issue №${issueNumber}).`);

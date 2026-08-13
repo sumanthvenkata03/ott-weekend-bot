@@ -50,6 +50,7 @@ import {
 import { JOBS, isJobId, type JobSpec } from "./jobs.js";
 import { PUBLISH_LOCK, breakLock, holderAgeMs, inspectLock } from "./lock.js";
 import { HERE, MR_RUN_LOGS } from "./paths.js";
+import { buildArtifactZip, pickArtifact, readArtifact, zipFilename } from "./artifacts.js";
 import { probeDisk, runLivePreflight, runPreflight, type PreflightReport } from "./preflight.js";
 import { activeRunId, getRun, isOwnLiveHolder, killAll, recentRuns, startRun, subscribe } from "./runner.js";
 import { sseFrame } from "./stream.js";
@@ -76,7 +77,10 @@ const sessions = new SessionStore();
  * never appear on an operator's grid by accident.
  */
 const FAKE_SPEC: JobSpec = {
-  id: "wednesday",
+  // Attributed to ARCHIVES on purpose: archives is the job whose dry run
+  // produced the self-contradicting verdict M1.2 repairs, so the fake child
+  // stands in for exactly that case (pngs expected, no manifest ever).
+  id: "archives",
   label: "FAKE child (verification only)",
   entry: "scripts/machine-room/_fake-job.ts",
   flags: [],
@@ -260,7 +264,7 @@ const server = createServer(async (req, res) => {
       if (!useFake && !isJobId(job)) return sendJson(res, 400, { error: "unknown job" });
 
       const outcome = await startRun({
-        job: useFake ? "wednesday" : (job as never),
+        job: useFake ? "archives" : (job as never),
         ...(liveConfirm !== undefined ? { liveConfirm } : {}),
         ...(useFake ? { specOverride: FAKE_SPEC } : {}),
         // The fake child runs the REAL preflight. In M1 it was given a stubbed
@@ -276,6 +280,45 @@ const server = createServer(async (req, res) => {
       if (outcome.code === "confirm") return sendJson(res, 428, { error: outcome.reason, code: "confirm" });
       preflightCache = { report: outcome.report, at: new Date().toISOString() };
       return sendJson(res, 412, { error: "preflight failed", code: "preflight", report: outcome.report });
+    }
+
+    // ── ARTIFACTS: this run's rendered cards ───────────────────────────────
+    // The allowlist is whatever the run's OWN summary listed. The request can
+    // only select from it by exact equality — it never contributes to a path.
+    if (path === "/api/artifacts" && method === "GET") {
+      const rec = getRun(url.searchParams.get("run") ?? "");
+      if (!rec?.summary) return sendJson(res, 404, { error: "no such run" });
+      const picked = pickArtifact(rec.summary.pngs.map((p) => p.name), url.searchParams.get("f"));
+      if (!picked.ok) return sendJson(res, picked.status, { error: picked.reason });
+      try {
+        const bytes = readArtifact(picked.name);
+        res.writeHead(200, {
+          "Content-Type": "image/png",
+          "Content-Length": String(bytes.length),
+          "Cache-Control": "no-store",
+          "Content-Disposition": `inline; filename="${picked.name}"`,
+        });
+        return void res.end(bytes);
+      } catch {
+        return sendJson(res, 410, { error: "artifact no longer on disk" });
+      }
+    }
+
+    if (path === "/api/artifacts/zip" && method === "GET") {
+      const rec = getRun(url.searchParams.get("run") ?? "");
+      if (!rec?.summary) return sendJson(res, 404, { error: "no such run" });
+      // FRESH only: "download all" means this run's output, not the day's.
+      const names = rec.summary.pngs.filter((p) => p.fresh).map((p) => p.name);
+      if (names.length === 0) return sendJson(res, 409, { error: "this run rendered no cards" });
+      const buf = buildArtifactZip(names);
+      const filename = zipFilename(rec.job, rec.summary.date);
+      res.writeHead(200, {
+        "Content-Type": "application/zip",
+        "Content-Length": String(buf.length),
+        "Cache-Control": "no-store",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      });
+      return void res.end(buf);
     }
 
     if (path === "/api/lock/break" && method === "POST") {

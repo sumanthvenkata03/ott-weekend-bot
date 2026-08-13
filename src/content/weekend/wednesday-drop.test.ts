@@ -199,16 +199,34 @@ describe("name sweep v2 — production fixtures + strict backing", () => {
     expect(draft.nameFlags).toEqual([]);
   });
 
-  it("NAMESUSED OMISSION: a real cast member named in copy but left out of namesUsed → retry (self-report can't launder)", async () => {
+  // WD-042 Option 1 — BEHAVIOUR CHANGED ON PURPOSE. This previously asserted that
+  // an undeclared-but-backed name forced a retry. It no longer does: the name IS
+  // in the film data (the only thing that governs accuracy), and the old rule cost
+  // Issue 042 five false strikes and — on a second miss — whole films, reported
+  // with the flatly false message "not in film data". It is now an info log line.
+  it("NAMESUSED OMISSION: a real cast member left out of namesUsed → NO retry, no flag, film kept", async () => {
     const film = mkRelease({ title: "Jawan", cast: ["Nayanthara", "Vijay Sethupathi"], leadCast: ["Nayanthara"] });
-    mockCall
-      .mockResolvedValueOnce(llmOut([{ title: "Jawan", body: "Vijay Sethupathi makes a magnetic villain." }], { namesUsed: [] }))
-      .mockResolvedValueOnce(llmOut([{ title: "Jawan", body: "Vijay Sethupathi makes a magnetic villain." }], { namesUsed: ["Vijay Sethupathi"] }));
+    mockCall.mockResolvedValue(
+      llmOut([{ title: "Jawan", body: "Vijay Sethupathi makes a magnetic villain." }], { namesUsed: [] })
+    );
 
     const draft = await generateWednesdayDrop([film], "theatrical", "2026-06-24", "2026-06-28");
 
-    expect(mockCall).toHaveBeenCalledTimes(2);                       // undeclared real name forced a retry
-    expect(draft.nameFlags).toEqual([]);                            // declaring it on the retry clears it
+    expect(mockCall).toHaveBeenCalledTimes(1);                       // no retry — nothing unverified was said
+    expect(draft.nameFlags).toEqual([]);
+    expect(draft.releases.map((r) => r.title)).toEqual(["Jawan"]);   // film survives
+  });
+
+  it("NAMESUSED OMISSION is still caught when the name is NOT backed — self-report cannot launder", async () => {
+    const film = mkRelease({ title: "Jawan", cast: ["Nayanthara"], leadCast: ["Nayanthara"] });
+    mockCall
+      .mockResolvedValueOnce(llmOut([{ title: "Jawan", body: "Vijay Sethupathi makes a magnetic villain." }], { namesUsed: [] }))
+      .mockResolvedValueOnce(llmOut([{ title: "Jawan", body: "Nayanthara commands every frame." }], { namesUsed: ["Nayanthara"] }));
+
+    const draft = await generateWednesdayDrop([film], "theatrical", "2026-06-24", "2026-06-28");
+
+    expect(mockCall).toHaveBeenCalledTimes(2);                       // unbacked name still forces the retry
+    expect(draft.nameFlags).toEqual([]);
   });
 });
 

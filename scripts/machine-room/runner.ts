@@ -228,7 +228,9 @@ export async function startRun(opts: StartOptions): Promise<StartOutcome> {
       rec.status = "finished";
       rec.exitCode = exitCode;
       rec.endedAt = new Date().toISOString();
-      rec.summary = buildSummary(editorialTodayStamp(), { sinceMs: startedMs });
+      // job: makes the verdict job-aware — "no manifest" is not a failure for
+      // Archives, which never writes one. See job-artifacts.ts.
+      rec.summary = buildSummary(editorialTodayStamp(), { sinceMs: startedMs, job: spec.id });
       children.delete(runId);
       release();
       appendLine(rec, `■ exited ${exitCode ?? "?"} — ${rec.summary.verdict}`);

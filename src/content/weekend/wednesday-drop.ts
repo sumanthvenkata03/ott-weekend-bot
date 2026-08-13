@@ -9,6 +9,7 @@ import type { WednesdayDropDraft } from "../../delivery/notion.js";
 import type { WedDropEdition } from "../../shared/wed-drop-edition.js";
 import { notableComposersBlock, enrichmentBlock } from "./_shared.js";
 import { compareByProminence } from "../../shared/prominence.js";
+import { hasRealVoteBase } from "../../shared/post-validator.js";
 // THE Name Sweep — one implementation, shared with Archives + the News Desk.
 // Wed keeps its OWN vocabulary (WED_DROP_NON_PERSON_WORDS below) and its own
 // self-report/superlative rules; only the sweep mechanics are shared.
@@ -63,6 +64,37 @@ type LLMOutput = z.infer<typeof WedDropSchema>;
 /**
  * Format a release for the LLM in a compact, structured way.
  */
+/**
+ * Every score-bearing field on a Release. Listed explicitly (not pattern-matched)
+ * so adding a new rating source is a deliberate decision about whether the LLM
+ * may see it.
+ */
+const SCORE_FIELDS = [
+  "tbsiScore", "tbsiSourceCount", "imdbRating", "imdbVotes",
+  "rottenTomatoes", "rtAudience", "metacritic", "letterboxd",
+  "tmdbVoteAverage", "tmdbVoteCount",
+] as const satisfies readonly (keyof Release)[];
+
+/**
+ * THE LLM NEVER SEES WHAT IT MAY NOT PRINT (WD-042 Part 3).
+ *
+ * A film whose score has no real audience behind it renders a NEW stamp, not a
+ * number — buildStampContext refuses the seal (see rendering/_shared.ts). But
+ * the copy model was still handed the number, and a model handed "IMDb 8.3"
+ * will write about 8.3. Prompt instructions are not a control surface; absence
+ * is. So: if a film fails hasRealVoteBase — the SAME predicate that governs the
+ * seal and the landing verifier — every score field is stripped before the
+ * payload is built. Films that pass keep theirs untouched.
+ *
+ * The predicate is evaluated BEFORE stripping, because it reads vote counts.
+ */
+export function stripScoresForPrompt(r: Release): Release {
+  if (hasRealVoteBase(r)) return r;
+  const out = { ...r };
+  for (const f of SCORE_FIELDS) delete out[f];
+  return out;
+}
+
 function releaseForPrompt(r: Release): string {
   const lines = [
     `Title: ${r.title}`,
@@ -226,6 +258,15 @@ export const WED_DROP_NON_PERSON_WORDS: readonly string[] = [
   "watch", "watching", "must", "binge", "hidden", "gem", "arrival", "arrivals",
   "pick", "picks", "save", "dm", "us", "start", "starting", "south", "north",
   "indian", "india", "film", "films", "movie", "movies", "series", "show",
+  // Genre/subject staples that read as capitalised nouns in editorial copy and
+  // get owned by a possessive ("Rajkumar Santoshi's Partition" — Issue 041).
+  // The sweep-unit fix in shared/copy-guard.ts already handles that shape; this
+  // is the belt-and-braces half, and it also covers the non-possessive phrasings
+  // ("a Partition love story") where no possessive terminates the run.
+  // "yakshini" joins it for the same reason: Issue 042's copy called Aroopi's
+  // spirit "A Yakshini", a capitalised folklore noun the sweep read as a person,
+  // and it 2-struck the film out of the deck.
+  "partition", "yakshini",
   "in", "on", "at", "of", "and", "or", "for", "with", "to", "from",
   "starring", "featuring", "alongside", "feat",
   "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
@@ -289,12 +330,40 @@ function copyTexts(output: LLMOutput): Array<{ text: string; where: string }> {
  *  • SUPERLATIVE GUARD — a "top/highest/best-rated" phrase on a film that is not the
  *    strict, UNIQUE-max tbsiScore film among the edition's scored picks.
  */
-function findCopyViolations(output: LLMOutput, allow: NameAllowlist, releases: Release[]): CopyViolation[] {
+function findCopyViolations(
+  output: LLMOutput,
+  allow: NameAllowlist,
+  releases: Release[]
+): { violations: CopyViolation[]; undeclared: string[] } {
   const violations: CopyViolation[] = [];
+  const undeclared: string[] = [];
+  const undeclaredSeen = new Set<string>();
   const seen = new Set<string>();
+  // Trailing sentence punctuation carries no identity, so "Gopi Sundar." (swept
+  // from a sentence-final position) and "Gopi Sundar" (the model's namesUsed
+  // entry) are ONE violation, not two. Issue 041/042 both showed the same name
+  // striking twice this way, which double-counts a single problem in the retry
+  // prompt and in the operator-facing flags.
+  //
+  // KEY ONLY — the label stays the ORIGINAL slice, per the module's hard rule
+  // that reported strings come from the source text (see copy-guard.ts). This
+  // changes nothing about which films drop: an offender still drops, on the same
+  // strike, keyed by the same `where`.
+  const stripTail = (s: string) => s.replace(/[.,;:!?"'’]+$/u, "").trim();
+  const dedupeName = (s: string) => stripTail(s).toLowerCase();
+  const seenAt = new Map<string, number>();
   const push = (v: CopyViolation) => {
-    const key = `${v.kind}:${v.name.toLowerCase()}:${v.where.toLowerCase()}`;
-    if (seen.has(key)) return;
+    const key = `${v.kind}:${dedupeName(v.name)}:${v.where.toLowerCase()}`;
+    const prev = seenAt.get(key);
+    if (prev !== undefined) {
+      // Same violation, two spellings. Keep the punctuation-free one: it reads
+      // correctly in the retry prompt ("Tabu", not "Tabu.") and in the operator
+      // flag. Still an ORIGINAL slice either way, never a scan-copy artefact.
+      const held = violations[prev]!;
+      if (held.name !== stripTail(held.name) && v.name === stripTail(v.name)) violations[prev] = v;
+      return;
+    }
+    seenAt.set(key, violations.length);
     seen.add(key);
     violations.push(v);
   };
@@ -306,7 +375,23 @@ function findCopyViolations(output: LLMOutput, allow: NameAllowlist, releases: R
       const toks = personTokens(raw, allow);
       if (toks.length === 0) continue;                              // fully boilerplate → not a name
       if (!isPersonBacked(toks, allow.persons)) { push({ kind: "name", name: raw, where }); continue; }
-      if (!isDeclared(toks, declared)) push({ kind: "name", name: raw, where }); // undeclared
+      // ── BACKED BUT UNDECLARED — INFO ONLY (WD-042 Option 1) ────────────────
+      // The name IS in this edition's film data (cast / leadCast / director /
+      // musicDirector — every field the card prints). The model merely failed to
+      // list it in its self-reported namesUsed. That is a bookkeeping slip in the
+      // LLM's own paperwork, NOT an accuracy risk: nothing unverified reached the
+      // copy. It used to be a full violation, which meant a retry and — on a
+      // second miss — a DROPPED FILM, reported with the flatly false message
+      // "not in film data". Issue 042 struck Vaani Kapoor, Ishwak Singh, Pritam,
+      // Rajesh Murugesan and Gopi Sundar this way, all five backed.
+      // It is now an info line and nothing more: no violation, no retry, no drop.
+      if (!isDeclared(toks, declared)) {
+        const key = dedupeName(raw);
+        if (!undeclaredSeen.has(key)) {
+          undeclaredSeen.add(key);
+          undeclared.push(`"${raw}" @${where} — backed but undeclared in namesUsed`);
+        }
+      }
     }
   }
   // Self-report cannot launder: a declared name that is not film-data-backed is a
@@ -336,7 +421,7 @@ function findCopyViolations(output: LLMOutput, allow: NameAllowlist, releases: R
       push({ kind: "superlative", name: m[0]!, where: s.title, ...(leader ? { leader } : {}) });
     }
   }
-  return violations;
+  return { violations, undeclared };
 }
 
 /** Build the one-retry prompt naming the exact violations (unbacked names + false ratings). */
@@ -404,7 +489,12 @@ export async function generateWednesdayDrop(
 
   log.info(`Generating Wednesday Drop [${edition}] for ${weekendDates} (${releases.length} releases)`);
   
-  const releaseBlocks = releases.map((r, i) => `--- RELEASE ${i + 1} ---\n${releaseForPrompt(r)}`).join("\n\n");
+  // Score-strip BEFORE serialising: a film with no real vote base reaches the
+  // model with no number to repeat (WD-042 Part 3). The un-stripped `releases`
+  // stays the source of truth for the allowlist, the selector and the cards.
+  const releaseBlocks = releases
+    .map((r, i) => `--- RELEASE ${i + 1} ---\n${releaseForPrompt(stripScoresForPrompt(r))}`)
+    .join("\n\n");
   
   const prompt = `You are the head social media strategist for a Pan-Indian OTT + film industry Instagram page.
 
@@ -497,13 +587,21 @@ Be specific. Take stands. Lean South-heavy where the films justify it.`;
   // whole run). A caption-only violation is kept-but-flagged (can't drop a film).
   const allow = buildNameAllowlist(releases);
   const nameFlags: string[] = [];
-  let violations = findCopyViolations(output, allow, releases);
+  let { violations, undeclared } = findCopyViolations(output, allow, releases);
+  // Backed-but-undeclared names are INFO ONLY — logged, never acted on. They do
+  // not gate the retry and they never reach nameFlags or a drop (WD-042).
+  const logUndeclared = (lines: string[]) => {
+    if (lines.length === 0) return;
+    log.info(`Wed Drop [${edition}]: name bookkeeping — ${lines.join("; ")}`);
+  };
+  logUndeclared(undeclared);
   if (violations.length > 0) {
     log.warn(
       `Wed Drop [${edition}]: copy self-policing violation(s), retrying once — ${violations.map(v => `${v.kind}:"${v.name}" @${v.where}`).join("; ")}`
     );
     output = await callClaudeJSON(retryPromptFor(prompt, violations), WedDropSchema, "sonnet");
-    violations = findCopyViolations(output, allow, releases);
+    ({ violations, undeclared } = findCopyViolations(output, allow, releases));
+    logUndeclared(undeclared);
   }
   if (violations.length > 0) {
     const dropTitles = new Set(violations.filter(v => v.where !== "caption").map(v => v.where));

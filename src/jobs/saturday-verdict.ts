@@ -31,6 +31,7 @@ import { editorialDateUTC, editorialTodayStamp, utcStamp, warnIfNotPostingDay } 
 import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag } from "../shared/post-validator.js";
 import { selectVerdictCards, type VerdictEntry } from "../content/weekend/verdict-select.js";
 import { archiveRawResearch, appendVerdictLog } from "../content/weekend/research-archive.js";
+import { parseExcludeList, isManuallyExcluded } from "../shared/exclude-list.js";
 
 // ── Grounded-research dials (Phase 1) ──
 /** Deep-research (web search) only the top N films by importance; the rest get
@@ -151,14 +152,41 @@ async function main(deliver = true) {
     return;
   }
 
+  // ── Manual one-off exclusion (SAT_VERDICT_EXCLUDE) ─────────────────────────
+  // Same token grammar as WED_DROP_EXCLUDE — integer token = TMDb id, anything
+  // else = lowercased exact title. See shared/exclude-list.ts. Match by TMDb id,
+  // never by title.
+  //
+  // PLACEMENT IS LOAD-BEARING: this runs immediately after ingestReleases and
+  // BEFORE the popularity sort/cap below, so an excluded film never occupies one
+  // of the MAX_RESEARCH_FILMS billed deep-research slots. Moving it later would
+  // still drop the card but would pay for the film first. Pinned by
+  // sat-verdict-exclude.test.ts ("placement pin").
+  //
+  // Issue 038 editorial ruling (operator-verified, applied via the env var):
+  //   1649061  Rehmat                     — festival-only premiere (repeat of the Issue 036 ruling)
+  //   1396778  Ayogya 2                   — evidence floor: 2.8 on 2 critics
+  //   1735283  Yaar Jigree Kasooti Degree — evidence floor: 3.2 on 1 critic
+  const manualExcluded = parseExcludeList(process.env.SAT_VERDICT_EXCLUDE);
+  const dropped = releases.filter(r => isManuallyExcluded(r, manualExcluded));
+  const included = releases.filter(r => !isManuallyExcluded(r, manualExcluded));
+  if (dropped.length > 0) {
+    log.info(`  Manual exclude (SAT_VERDICT_EXCLUDE): removed ${dropped.length} film(s) from the verdict pool`);
+    for (const r of dropped) log.info(`    – ${r.title} (tmdb-${r.tmdbId ?? "unknown"})`);
+  }
+  if (included.length === 0) {
+    log.warn("Every release in this window was manually excluded — aborting");
+    return;
+  }
+
   // Importance-sorted pool. A generous safety ceiling keeps a huge window
   // bounded; the deep-research cap below is the real spend control.
   const MAX_POOL = 40;
-  const pool = [...releases]
+  const pool = [...included]
     .sort((a, b) => (b.tmdbPopularity ?? 0) - (a.tmdbPopularity ?? 0))
     .slice(0, MAX_POOL);
-  if (releases.length > MAX_POOL) {
-    log.warn(`Window has ${releases.length} releases; capping pool to ${MAX_POOL} by popularity`);
+  if (included.length > MAX_POOL) {
+    log.warn(`Window has ${included.length} releases; capping pool to ${MAX_POOL} by popularity`);
   }
 
   // ── GROUNDED RESEARCH: real review aggregation per film (billed web search). ──
