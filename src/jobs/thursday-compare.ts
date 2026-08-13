@@ -66,8 +66,16 @@ const sunday = addDays(friday, 2);
   log.success(`\n🎉 Thursday Compare draft is in Notion:\n   ${url}\n   Review and post manually.`);
 }
 
-main().catch(async (err) => {
-  log.error("Thursday Compare job failed", err);
-  await notifyJobFailure("Thu Compare", err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});
+
+// Hardened truthiness guard — endsWith("") is vacuously true, so the argv1.length
+// clause stops a bare import from running main (the runs-main-on-import landmine).
+const argv1 = (process.argv[1] ?? "").replace(/\\/g, "/");
+const isMainModule = argv1.length > 0 && import.meta.url.endsWith(argv1);
+
+if (isMainModule) {
+  main().catch(async (err) => {
+    log.error("Thursday Compare job failed", err);
+    await notifyJobFailure("Thu Compare", err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
+}

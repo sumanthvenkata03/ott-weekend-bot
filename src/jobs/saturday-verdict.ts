@@ -430,9 +430,9 @@ async function main(deliver = true) {
 // Only run the pipeline when invoked directly (npm run job:saturday). Guarding
 // on isMainModule lets tests import selectVerdictCards without firing main()
 // (and its live API calls). Mirrors the render scripts' standalone-mode check.
-const isMainModule = import.meta.url.endsWith(
-  (process.argv[1] ?? "").replace(/\\/g, "/")
-);
+// WD-ENG-04: hardened to the argv1.length form (endsWith("") is vacuously true).
+const argv1 = (process.argv[1] ?? "").replace(/\\/g, "/");
+const isMainModule = argv1.length > 0 && import.meta.url.endsWith(argv1);
 
 if (isMainModule) {
   // `npm run job:saturday -- --no-deliver` (or DELIVER=false) → render + score +

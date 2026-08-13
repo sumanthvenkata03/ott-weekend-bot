@@ -1,9 +1,21 @@
 // WED_DROP_ALWAYS_GATE — the autonomy kill-switch default (ships dark).
 //
-// wednesday-drop.ts pulls config.ts transitively, which process.exit()s on a
-// missing key, so config is mocked to keep this import-safe with keys blanked —
-// the same guard ott-candidates.test.ts uses. Only the pure resolver is exercised.
-import { describe, it, expect, vi } from "vitest";
+// ── WD-ENG-04: THIS FILE USED TO RUN A REAL WEDNESDAY DROP ──────────────────
+// wednesday-drop.ts invoked main() at MODULE SCOPE, so the import below executed
+// the whole job on every suite run: two discovery sweeps, IMDb resolution, live
+// OMDb requests (with the fake key this file mocks, retried twice each), credit
+// enrichment and the country gate — none of which this file tests. Worse, the
+// module-scope invocation ended in `.catch(… process.exit(1))`, so a rejection
+// would have taken the vitest WORKER down with it, and the job was still running
+// when the worker tore down (its run log stopped mid-enrichment while these eight
+// assertions had long since finished).
+//
+// The job now carries the hardened entry guard every other job module has, so
+// importing it executes NOTHING. main() is exported and, below, called
+// DELIBERATELY with its first network seam mocked — the test owns the rejection,
+// so no code path can reach process.exit.
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -11,14 +23,48 @@ vi.mock("../../shared/config.js", () => ({
   config: { NOTION_TOKEN: "test", TMDB_API_KEY: "test", OMDB_API_KEY: "test", MDBLIST_API_KEY: "" },
 }));
 
-// wednesday-drop.ts calls main() BARE at module scope (the landmine this file's
-// header describes), so the import below runs a real job — and since WD-ENG-01
-// Part 4 that job starts a run log. Point the tee at the OS temp dir BEFORE the
-// import so a test suite never writes run logs into the developer's output/runs/.
-// This exercises startRunLog's documented operator-override branch.
-process.env.TBSI_LOG_FILE = join(tmpdir(), `tbsi-test-${process.pid}.log`);
+// THE NETWORK SEAM. main()'s first outbound work is getCandidates(); mocking it
+// to throw means the run is over before a single request is made, and what the
+// test exercises is the part that matters here — that main() is callable, that
+// its failure is a plain rejected promise, and that nothing kills the worker.
+const BOOM = "getCandidates blocked by test — no network in this suite";
+vi.mock("../../discovery/candidates.js", () => ({
+  getCandidates: vi.fn(async () => { throw new Error(BOOM); }),
+}));
 
-const { resolveAlwaysGate } = await import("../wednesday-drop.js");
+// Deterministic provenance. assertPublishableTree shells out to git and REFUSES a
+// scheduled run on a dirty tree, so on CI (where GITHUB_ACTIONS is set) the real
+// one would make this test's outcome depend on the checkout's cleanliness.
+vi.mock("../../shared/run-context.js", async (orig) => ({
+  ...(await orig<typeof import("../../shared/run-context.js")>()),
+  assertPublishableTree: () => ({ headSha: "testsha", dirty: false, scheduled: false }),
+}));
+
+// purgeExpired writes to the developer's real cache.sqlite. Harmless (it only
+// deletes already-expired rows) but a test has no business mutating it.
+vi.mock("../../shared/cache.js", async (orig) => ({
+  ...(await orig<typeof import("../../shared/cache.js")>()),
+  purgeExpired: vi.fn(),
+}));
+
+const { resolveAlwaysGate, main } = await import("../wednesday-drop.js");
+
+const RUNS_DIR = join(process.cwd(), "output", "runs");
+const runsSnapshot = () => (existsSync(RUNS_DIR) ? readdirSync(RUNS_DIR).sort() : []);
+
+let prevTee: string | undefined;
+beforeEach(() => {
+  prevTee = process.env.TBSI_LOG_FILE;
+  // The run log must land in temp, not in the repo's output/runs/.
+  process.env.TBSI_LOG_FILE = join(tmpdir(), `tbsi-test-${process.pid}.log`);
+  vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "error").mockImplementation(() => {});
+});
+afterEach(() => {
+  if (prevTee === undefined) delete process.env.TBSI_LOG_FILE;
+  else process.env.TBSI_LOG_FILE = prevTee;
+  vi.restoreAllMocks();
+});
 
 describe("resolveAlwaysGate — gate is ON unless explicitly disarmed", () => {
   it("DEFAULT (unset) ⇒ gate ON — autonomy ships dark", () => {
@@ -55,5 +101,55 @@ describe("resolveAlwaysGate — gate is ON unless explicitly disarmed", () => {
     for (const v of ["yes", "no", "off", "on", "2", "gate"]) {
       expect(resolveAlwaysGate(v)).toBe(true);
     }
+  });
+});
+
+describe("WD-ENG-04 — importing this job executes nothing", () => {
+  // FIRST in file order on purpose: it asserts state that only holds before any
+  // deliberate main() call below has run.
+  it("the import above ran NO job: no run log, no artifacts, no network", async () => {
+    // The module has been imported for the whole file. If the entry guard were
+    // broken, a run log would exist by now (main()'s second statement writes one)
+    // and getCandidates would already have been reached.
+    expect(existsSync(process.env.TBSI_LOG_FILE!)).toBe(false);
+    const { getCandidates } = await import("../../discovery/candidates.js");
+    expect(vi.mocked(getCandidates)).not.toHaveBeenCalled();
+  });
+});
+
+describe("WD-ENG-04 — main() is called deliberately and its rejection is OURS", () => {
+  it("main() rejects into the test; the worker survives; process.exit is never reached", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code}) reached — the worker would have died`);
+    }) as never);
+
+    // THE POINT: the rejection is handled HERE. Under the old module-scope
+    // invocation this same failure ran into `.catch(… process.exit(1))` inside a
+    // vitest worker, which is the "all files failed / no tests" signature.
+    await expect(main()).rejects.toThrow(BOOM);
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    // …and this assertion running at all is the proof the worker is still alive.
+    expect(true).toBe(true);
+  });
+
+  it("a deliberate run performs NO network I/O — it stops at the mocked seam", async () => {
+    const { getCandidates } = await import("../../discovery/candidates.js");
+    await expect(main()).rejects.toThrow(BOOM);
+    // Both editions asked; neither reached a real fetch.
+    expect(vi.mocked(getCandidates).mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it("a deliberate run writes NOTHING into the repo's output/runs/", async () => {
+    const before = runsSnapshot();
+    await expect(main()).rejects.toThrow(BOOM);
+    expect(runsSnapshot()).toEqual(before);
+  });
+
+  it("the WD-ENG-01 log tee DOES fire on real execution — guarded, not disabled", async () => {
+    // The tee is unconditional at the entry point; the guard only stops IMPORT
+    // from being an execution. Running main() for real must still persist a log.
+    await expect(main()).rejects.toThrow(BOOM);
+    expect(existsSync(process.env.TBSI_LOG_FILE!)).toBe(true);
   });
 });

@@ -274,7 +274,13 @@ async function main(deliver = true) {
 
 // Only run when invoked directly (npm run job:archives). Guarding on isMainModule
 // lets tests import the selection/ledger helpers without firing main().
-const isMainModule = import.meta.url.endsWith((process.argv[1] ?? "").replace(/\\/g, "/"));
+//
+// WD-ENG-04: hardened to the argv1.length form news-edition/reddit-radar already
+// use. endsWith("") is vacuously TRUE, so the old one-clause guard fired main on
+// any import made with an empty process.argv[1] — the same landmine, one edge
+// case away. Every job now carries the identical hardened guard.
+const argv1 = (process.argv[1] ?? "").replace(/\\/g, "/");
+const isMainModule = argv1.length > 0 && import.meta.url.endsWith(argv1);
 
 if (isMainModule) {
   const deliver = !process.argv.includes("--no-deliver") && process.env.DELIVER !== "false";

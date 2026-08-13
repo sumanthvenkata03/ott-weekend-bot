@@ -232,12 +232,20 @@ async function main() {
   log.success(`   Cover: ${cover.publicUrl}`);
 }
 
-main()
-  .catch(async (err) => {
-    log.error("Monday Movement job failed", err);
-    await notifyJobFailure("Mon Movement", err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  })
-  .finally(async () => {
-    await closeBrowser();
-  });
+
+// Hardened truthiness guard — endsWith("") is vacuously true, so the argv1.length
+// clause stops a bare import from running main (the runs-main-on-import landmine).
+const argv1 = (process.argv[1] ?? "").replace(/\\/g, "/");
+const isMainModule = argv1.length > 0 && import.meta.url.endsWith(argv1);
+
+if (isMainModule) {
+  main()
+    .catch(async (err) => {
+      log.error("Monday Movement job failed", err);
+      await notifyJobFailure("Mon Movement", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    })
+    .finally(async () => {
+      await closeBrowser();
+    });
+}

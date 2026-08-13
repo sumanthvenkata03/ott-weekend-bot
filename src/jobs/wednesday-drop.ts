@@ -448,7 +448,15 @@ export function resolveAlwaysGate(raw: string | undefined): boolean {
   return !["false", "0"].includes((raw ?? "").trim().toLowerCase());
 }
 
-async function main() {
+/**
+ * The job. EXPORTED (WD-ENG-04) so a test can invoke it deliberately and own its
+ * rejection, instead of the module invoking itself on import and leaving an
+ * unhandled job running past the end of the test that imported it.
+ *
+ * Exporting is safe precisely because of the entry guard at the bottom of this
+ * file: an import still executes nothing.
+ */
+export async function main() {
   log.info("🎬 Wednesday Drop job — starting");
   startRunLog("wed-drop");
 
@@ -739,12 +747,20 @@ async function main() {
   log.success(`\n✅ Wed Drop run complete (Issue №${issueNumber}).`);
 }
 
-main()
-  .catch(async (err) => {
-    log.error("Wednesday Drop job failed", err);
-    await notifyJobFailure("Wed Drop", err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  })
-  .finally(async () => {
-    await closeBrowser();
-  });
+
+// Hardened truthiness guard — endsWith("") is vacuously true, so the argv1.length
+// clause stops a bare import from running main (the runs-main-on-import landmine).
+const argv1 = (process.argv[1] ?? "").replace(/\\/g, "/");
+const isMainModule = argv1.length > 0 && import.meta.url.endsWith(argv1);
+
+if (isMainModule) {
+  main()
+    .catch(async (err) => {
+      log.error("Wednesday Drop job failed", err);
+      await notifyJobFailure("Wed Drop", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    })
+    .finally(async () => {
+      await closeBrowser();
+    });
+}
