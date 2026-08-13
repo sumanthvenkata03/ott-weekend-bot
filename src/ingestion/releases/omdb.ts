@@ -75,6 +75,37 @@ function parseMetacritic(ratings: { Source: string; Value: string }[] | undefine
   return m ? parseInt(m[1], 10) : undefined;
 }
 
+/**
+ * Credentials that are present but obviously not real. config.ts enforces
+ * `min(1)`, so an EMPTY key never reaches production — but a placeholder does,
+ * and a placeholder is exactly what test/CI environments carry.
+ *
+ * Deliberately an exact list, not a shape heuristic: OMDb keys are 8 hex
+ * characters, and a length/charset rule would reject a valid key the day OMDb
+ * changes format — silently disabling ratings for everyone. A known-placeholder
+ * list can only ever produce a false NEGATIVE (a weird real key still fires),
+ * which is the safe direction to be wrong in.
+ */
+const PLACEHOLDER_KEYS = new Set([
+  "test", "testing", "changeme", "change_me", "placeholder", "dummy", "fake",
+  "none", "null", "undefined", "todo", "xxx", "xxxxxxxx", "your_key_here",
+  "your_api_key", "api_key", "secret",
+]);
+
+/** True when the key is absent, blank, or a recognised placeholder. */
+export function isPlaceholderOmdbKey(key: string | undefined): boolean {
+  const k = (key ?? "").trim();
+  return k.length === 0 || PLACEHOLDER_KEYS.has(k.toLowerCase());
+}
+
+/** One warn per process, mirroring MDBList's warnedNoKey. */
+let warnedBadKey = false;
+
+/** Test seam — reset the once-only warn between cases. */
+export function __resetOmdbKeyWarning(): void {
+  warnedBadKey = false;
+}
+
 // Throttle only the actual HTTP call, so cache hits return instantly.
 const throttledOfetch = throttle((imdbId: string) =>
   ofetch(BASE_URL, {
@@ -90,6 +121,30 @@ const throttledOfetch = throttle((imdbId: string) =>
  * Returns null if not found / no data available.
  */
 export async function fetchOmdbByImdbId(imdbId: string): Promise<OmdbData | null> {
+  // ── WD-ENG-10 PART 3 — REFUSE TO FIRE WITHOUT A REAL KEY ──────────────────
+  // This client was the only one that called out unconditionally. TMDb THROWS a
+  // named error when its key is unset; MDBList short-circuits with a log line
+  // and returns null. OMDb did neither: it handed whatever `config.OMDB_API_KEY`
+  // held straight to ofetch with `retry: 2`, so a placeholder key meant three
+  // doomed round-trips to a third party PER FILM, each 401, each swallowed by
+  // the catch below — invisible, and for weeks it was happening on every test
+  // run with the fake key "test".
+  //
+  // Short-circuiting here is correct regardless of tests: burning retries and
+  // someone else's rate limit on a credential we can see is wrong is not
+  // resilience, it is noise. Logged ONCE (like MDBList) so a misconfigured
+  // environment says so plainly instead of degrading in silence.
+  if (isPlaceholderOmdbKey(config.OMDB_API_KEY)) {
+    if (!warnedBadKey) {
+      warnedBadKey = true;
+      log.warn(
+        `OMDb: OMDB_API_KEY is missing or a placeholder (${JSON.stringify(config.OMDB_API_KEY ?? "")}) — ` +
+        `skipping all OMDb enrichment. No request was attempted. Set a real key in .env to restore ratings/cast/language backfill.`
+      );
+    }
+    return null;
+  }
+
   try {
     const raw = await cached(
       `omdb:${imdbId}`,

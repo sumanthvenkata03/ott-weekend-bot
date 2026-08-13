@@ -47,5 +47,11 @@
   },
   // One-off offline runners live outside rootDir 'src' and are executed via tsx
   // (own transpile); excluded so they don't trip TS6059 on the src build.
-  "exclude": ["scripts"]
+  //
+  // WD-ENG-10 adds the vitest root config + setup file on the same footing:
+  // both live outside rootDir and are transpiled by vitest, never by `tsc
+  // --build`. Without this, TS6059 fires on them and — worse — tsc STOPS THERE,
+  // so the src program is never checked at all and every real error disappears
+  // from the report. Same reason, same remedy, same list.
+  "exclude": ["scripts", "vitest.config.ts", "vitest.setup.ts"]
 }
