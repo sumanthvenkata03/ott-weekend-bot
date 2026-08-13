@@ -10,7 +10,7 @@ import { buildHashtags } from "../shared/hashtags.js";
 import { renderWedDrop } from "../rendering/render-wed-drop.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngsToR2 } from "../delivery/r2-upload.js";
-import { getIssueNumberForToday } from "../shared/issue-number.js";
+import { resolveIssueNumber } from "../shared/issue-anchor.js";
 import { editorialDateUTC, editorialTodayStamp, utcStamp, warnIfNotPostingDay } from "../shared/editorial-clock.js";
 import { EDITION_META, type WedDropEdition } from "../shared/wed-drop-edition.js";
 import { excludedKeysFor, recordFeatured, filmKey, type PillarKey } from "../shared/featured-ledger.js";
@@ -502,10 +502,11 @@ async function main() {
   ]);
   log.info(`Candidates: ${theatrical.length} theatrical (In Theaters) + ${ott.length} OTT (Now Streaming)`);
 
-  // 2. Both editions share ONE issue number (it's a pure function of today's
-  //    date — see issue-number.ts — so calling the producer twice can't
-  //    double-increment it).
-  const issueNumber = getIssueNumberForToday();
+  // 2. THE ISSUE NUMBER IS RESOLVED AFTER THE GATE (WD-ENG-02), because it is
+  //    keyed by the approve hash and the hash does not exist until decideGate
+  //    has run. It used to be computed here, from the wall clock, once per
+  //    PROCESS — which meant the review run and its --approve re-run could
+  //    disagree across IST midnight. See step 5b below and shared/issue-anchor.ts.
 
   // 3. RECONCILE — augment each TMDb pool with the AI-search net, resolve every
   //    lead to a TMDb id, and emit one provenance-tagged, tiered list per
@@ -588,6 +589,28 @@ async function main() {
     alwaysGate,
   });
   log.info(`\n🚦 Gate: ${decision.mode} — ${decision.reason}`);
+
+  // 5b. ANCHOR THE ISSUE NUMBER TO THE EDITION (WD-ENG-02).
+  //
+  //     This runs for EVERY decision mode, immediately after the hash exists and
+  //     BEFORE the blocked-run return, because the blocked run is exactly the one
+  //     that must leave the anchor behind for the --approve run to find.
+  //
+  //     Write-once by construction: an anchor is created only when none exists
+  //     for this hash, so the approve re-run reads phase 1's number rather than
+  //     re-stamping it with phase 2's clock. Same hash ⇒ same number, forever.
+  //
+  //     Hash-neutral: the anchor is a separate artifact, and computeDropHash has
+  //     already run above over film fingerprints only.
+  const issueAnchor = resolveIssueNumber({
+    hash: decision.hash,
+    isApprove: approveHash !== undefined,
+    windows: {
+      theatrical: { start: startDate, end: endDate },
+      ott: { start: ottStartDate, end: endDate },
+    },
+  });
+  const issueNumber = issueAnchor.issueNumber;
 
   if (!decision.proceed) {
     // writeReview delivers Notion + Slack independently and fails soft; it

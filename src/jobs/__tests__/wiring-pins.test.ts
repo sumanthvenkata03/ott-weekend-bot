@@ -115,6 +115,61 @@ describe("WIRING PIN — HARD_FAIL_ON_INVALID stays false (R1)", () => {
   });
 });
 
+// WD-ENG-02 — the anchored number must actually REACH every consumer. The type
+// system cannot express "this value came from the anchor and not from the clock",
+// and a single stray getIssueNumberForToday() inside produceEdition would restore
+// the bug invisibly. So the threading is pinned at source.
+describe("WIRING PIN — the issue number is anchored, then threaded", () => {
+  const src = code(read("src/jobs/wednesday-drop.ts"));
+
+  it("resolved from the anchor, and the wall-clock helper is gone from this job", () => {
+    expect(src).toContain("resolveIssueNumber(");
+    expect(src).not.toContain("getIssueNumberForToday");
+  });
+
+  it("resolution happens AFTER decideGate — the hash is its key, so it cannot precede it", () => {
+    const gateAt = src.indexOf("const decision = decideGate(");
+    const anchorAt = src.indexOf("resolveIssueNumber({");
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(anchorAt).toBeGreaterThan(gateAt);
+  });
+
+  it("resolution happens BEFORE the blocked-run return — the gate run must leave the anchor", () => {
+    const anchorAt = src.indexOf("resolveIssueNumber({");
+    const blockedAt = src.indexOf("if (!decision.proceed)");
+    expect(blockedAt).toBeGreaterThan(anchorAt);
+  });
+
+  it("it is keyed by the gate hash and knows whether this run is an --approve", () => {
+    const call = src.slice(src.indexOf("resolveIssueNumber({"), src.indexOf("const issueNumber = issueAnchor"));
+    expect(call).toContain("hash: decision.hash");
+    expect(call).toContain("isApprove: approveHash !== undefined");
+  });
+
+  it("ONE value flows to every consumer — render, ledger, dedup, manifest, run-complete", () => {
+    expect(src).toContain("const issueNumber = issueAnchor.issueNumber;");
+    // The four consumers the packet names, plus the manifest receipt.
+    expect(src).toContain("renderWedDrop(draft, issueNumber, edition,");
+    expect(src).toContain("recordFeatured(draft.releases, pillarKey, issueNumber)");
+    expect(src).toContain("excludedKeysFor(pillarKey, { excludeIssue: issueNumber })");
+    expect(src).toContain("buildManifest(`Wed Drop · ${meta.slackLabel}`, issueNumber,");
+    expect(src).toContain("Wed Drop run complete (Issue №${issueNumber})");
+  });
+
+  it("produceEdition takes the number as a PARAMETER — it never recomputes one", () => {
+    // Boundaries must be CODE, not comments: `code()` strips comments, so a
+    // comment endpoint yields indexOf -1 and slices to end-of-file.
+    const from = src.indexOf("async function produceEdition(");
+    const to = src.indexOf("function parseApproveArg(");
+    expect(from).toBeGreaterThan(-1);
+    expect(to).toBeGreaterThan(from);
+    const fn = src.slice(from, to);
+    expect(fn).toContain("issueNumber: string,");
+    expect(fn).not.toContain("getIssueNumber");
+    expect(fn).not.toContain("resolveIssueNumber");
+  });
+});
+
 // WD-ENG-01 PART 4 — "small, unconditional, EVERY job entry point that renders
 // or delivers". That is a statement about where a call sits, which is exactly
 // what a wiring pin is for: a types-only check would pass while a job quietly
