@@ -20,5 +20,10 @@ export default defineConfig({
     // Runs before every test FILE, in the same worker — this is what makes the
     // guard apply to all 84 without editing any of them.
     setupFiles: ["./vitest.setup.ts"],
+    // WD-ENG-10B — "default" keeps the normal console output; the count guard
+    // rides alongside it and fails the run when the total case count differs
+    // from the pinned expectation. Without it, a run that silently skipped part
+    // of the suite prints "passed" (observed at 1249 and 1228).
+    reporters: ["default", "./vitest.count-guard.ts"],
   },
 });

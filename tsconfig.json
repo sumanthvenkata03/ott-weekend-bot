@@ -53,5 +53,5 @@
   // --build`. Without this, TS6059 fires on them and — worse — tsc STOPS THERE,
   // so the src program is never checked at all and every real error disappears
   // from the report. Same reason, same remedy, same list.
-  "exclude": ["scripts", "vitest.config.ts", "vitest.setup.ts"]
+  "exclude": ["scripts", "vitest.config.ts", "vitest.setup.ts", "vitest.count-guard.ts"]
 }
