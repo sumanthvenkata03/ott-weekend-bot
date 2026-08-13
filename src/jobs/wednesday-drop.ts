@@ -18,6 +18,7 @@ import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFl
 import { editionWindow, RECONCILE_LANGUAGES } from "../reconcile/run.js";
 import { verifyCandidates } from "../reconcile/verify.js";
 import { annotateWithAiReview, enforceVerification } from "../reconcile/ai-review.js";
+import { fillConfirmedPlatforms } from "../reconcile/platform-seam.js";
 import { decideGate, writeReview, enforcementAuditLines, WED_DROP_LABELS } from "../reconcile/gate.js";
 import { capPoolForSelector } from "../reconcile/select.js";
 import type { ReconcileResult } from "../reconcile/types.js";
@@ -542,6 +543,20 @@ async function main() {
   //    call) → identical verdicts → identical demotion → identical hash. Fails
   //    soft to "unavailable", which demotes nothing.
   await annotateWithAiReview(results);
+
+  // 4a-bis. PLATFORM CONFIRMATION SEAM (WD-ENG-03, "seam #3").
+  //     A film whose AI-review CONFIRMED a streaming home, but whose confirmation
+  //     only ever lived in the reconcile entry's platform STRING, gets that value
+  //     copied into an empty release.platform — the field 4b's no-platform check
+  //     reads and the card renders. Kattalan (ManoramaMAX) and Aakhri Sawal
+  //     (Lionsgate Play) were both demoted for "no OTT platform confirmed by any
+  //     net" while carrying exactly that confirmation in writing.
+  //
+  //     MUST sit here: after the verdicts exist, before enforcement classifies.
+  //     Fills only when release.platform is EMPTY, so JustWatch/TMDb data is
+  //     never overwritten, and WED_DROP_PLATFORM still overrides everything
+  //     downstream. Copies an existing verified value; relaxes no check.
+  fillConfirmedPlatforms(results);
 
   // 4b. ENFORCE (Phase 2) — act on the annotated verdicts, post-annotate/pre-gate.
   //     PROMOTE a search-corroborated single-net 🟡 to effective-🟢; DEMOTE any

@@ -115,6 +115,88 @@ describe("WIRING PIN — HARD_FAIL_ON_INVALID stays false (R1)", () => {
   });
 });
 
+// WD-ENG-03 — the platform seam's whole correctness is its POSITION in the
+// pipeline. One line moved and it either reads verdicts that do not exist yet,
+// or fills a field enforcement has already judged. Ordering is not expressible
+// in types, so it is pinned at source.
+describe("WIRING PIN — the platform seam sits between AI-review and enforcement", () => {
+  const src = code(read("src/jobs/wednesday-drop.ts"));
+
+  it("runs AFTER annotateWithAiReview — it reads the verdicts", () => {
+    const review = src.indexOf("await annotateWithAiReview(results)");
+    const seam = src.indexOf("fillConfirmedPlatforms(results)");
+    expect(review).toBeGreaterThan(-1);
+    expect(seam).toBeGreaterThan(review);
+  });
+
+  it("runs BEFORE enforceVerification — it must fill before no-platform is classified", () => {
+    const seam = src.indexOf("fillConfirmedPlatforms(results)");
+    const enforce = src.indexOf("enforceVerification(results,");
+    expect(enforce).toBeGreaterThan(seam);
+  });
+
+  it("runs BEFORE decideGate — the approved hash covers the filled deck", () => {
+    const seam = src.indexOf("fillConfirmedPlatforms(results)");
+    const gate = src.indexOf("const decision = decideGate(");
+    expect(gate).toBeGreaterThan(seam);
+  });
+
+  it("is called exactly once", () => {
+    expect(src.split("fillConfirmedPlatforms(").length - 1).toBe(1);
+  });
+
+  // SCOPE GUARDS from the packet: fill the field, change nothing else.
+  it("the operator dials are untouched — WED_DROP_PLATFORM still overrides downstream", () => {
+    expect(src).toContain("parsePlatformOverrides(process.env.WED_DROP_PLATFORM)");
+    expect(src).toContain("applyPlatformOverrides(renderablePool, platformOverrides)");
+    expect(src).toContain("parseExcludeList(process.env.WED_DROP_FORCE)");
+  });
+
+  it("WED_DROP_PLATFORM is still the LAST word — it applies inside produceEdition, post-gate", () => {
+    // Positional care: produceEdition is DEFINED above main(), so comparing the
+    // override's definition offset against decideGate's would compare a
+    // definition to a call and prove nothing. The real invariant is structural —
+    // the override lives inside produceEdition, and produceEdition is only ever
+    // INVOKED after the gate.
+    const from = src.indexOf("async function produceEdition(");
+    const to = src.indexOf("function parseApproveArg(");
+    expect(to).toBeGreaterThan(from);
+    expect(src.slice(from, to)).toContain("applyPlatformOverrides(renderablePool, platformOverrides)");
+
+    const gate = src.indexOf("const decision = decideGate(");
+    for (let i = src.indexOf("produceEdition(\""); i !== -1; i = src.indexOf("produceEdition(\"", i + 1)) {
+      expect(i, "produceEdition invoked before the gate").toBeGreaterThan(gate);
+    }
+  });
+
+  it("the seam module touches no demotion, no override parsing, no rendering", () => {
+    const seamSrc = code(read("src/reconcile/platform-seam.ts"));
+    // Real identifiers only. A bare "render" would match the English word in the
+    // seam's own warn text ("no logo could render") — a substring pin has to name
+    // things that are actually code.
+    for (const forbidden of [
+      "aiDemoted", "aiPromoted", "demote(", "platformSuppressed", "aiReview.trust",
+      "WED_DROP_PLATFORM", "WED_DROP_FORCE", "WED_DROP_REQUIRE_PLATFORM",
+    ]) {
+      expect(seamSrc, forbidden).not.toContain(forbidden);
+    }
+    // …and it imports nothing from the rendering or delivery layers.
+    for (const line of seamSrc.split("\n").filter((l) => l.trimStart().startsWith("import"))) {
+      expect(line).not.toContain("/rendering/");
+      expect(line).not.toContain("/delivery/");
+    }
+  });
+
+  it("enforceVerification's demotion logic is unchanged — the seam did not edit it", () => {
+    const ai = code(read("src/reconcile/ai-review.ts"));
+    expect(ai).not.toContain("fillConfirmedPlatforms");
+    expect(ai).not.toContain("platformFilled");
+    // The no-platform branch still reads release.platform.length === 0, verbatim.
+    expect(ai).toContain("opts.requireOttPlatform && f.release && f.release.platform.length === 0");
+    expect(ai).toContain('demote(f, "no-platform", "no OTT platform confirmed by any net")');
+  });
+});
+
 // WD-ENG-02 — the anchored number must actually REACH every consumer. The type
 // system cannot express "this value came from the anchor and not from the clock",
 // and a single stray getIssueNumberForToday() inside produceEdition would restore

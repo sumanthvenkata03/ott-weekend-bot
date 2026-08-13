@@ -260,6 +260,17 @@ function filmLine(f: ReconciledFilm): string {
   if (f.ambiguousMatch) flags.push("ambiguous-match");
   if (f.possibleDuplicate) flags.push("possible-duplicate");
   if (f.conflictDetail) flags.push(`conflict(${f.conflictDetail})`);
+  // WD-ENG-03 item 4 — THE OPERATOR APPROVES WHAT WILL RENDER. The line above
+  // shows the reconcile entry's platform STRING, which is not necessarily what
+  // reaches the card: the seam writes only exact-spelling Platform members, so
+  // "Prime Video, SimplySouth, Lionsgate Play" renders two chips, not three. Say
+  // so here, where approval happens, rather than letting the gap surface on a post.
+  if (f.platformFilled) {
+    const skipped = f.platformFilled.skipped.length
+      ? `; skipped ${f.platformFilled.skipped.map((s) => `"${s}"`).join(", ")}`
+      : "";
+    flags.push(`platform-seam: AI-review-confirmed → ${f.platformFilled.platforms.join(", ")}${skipped}`);
+  }
   if (f.reasons.length) flags.push(f.reasons.join("; "));
   return `${parts.filter(Boolean).join(" ")}${flags.length ? ` — ${flags.join(" | ")}` : ""}`;
 }

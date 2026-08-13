@@ -7,7 +7,7 @@
 // match stays "unverified" and carries title + source only (no fabricated
 // fields), and is hard-pinned 🔴 (cannot pass the gate, even in auto mode).
 
-import type { Release } from "../shared/types.js";
+import type { Platform, Release } from "../shared/types.js";
 
 /** Review tier. green = clean + cross-net corroborated, yellow = one issue, red = blocked. */
 export type Tier = "green" | "yellow" | "red";
@@ -224,6 +224,24 @@ export interface ReconciledFilm {
   platformSuppressed?: {
     was: string;
     pressPlatform: string;
+  };
+
+  /**
+   * PLATFORM CONFIRMATION FILL (WD-ENG-03, "seam #3"). Set when this entry's
+   * platform STRING was AI-review-confirmed and copied into an empty
+   * release.platform, before enforcement classified the film. The counterpart to
+   * platformSuppressed above: that one clears a contradicted platform, this one
+   * lands a confirmed one that never crossed the field boundary.
+   *
+   * `skipped` records tokens that are not Platform members ("SimplySouth") —
+   * they are never coerced, and their absence from the card is visible here and
+   * in the gate review rather than being discovered on a published post.
+   */
+  platformFilled?: {
+    /** The entry string the platforms were parsed out of. */
+    from: string;
+    platforms: Platform[];
+    skipped: string[];
   };
 
   // The renderer-bound record (absent for unverified / series).
