@@ -174,7 +174,13 @@ describe("discoverWikipedia — fetch + coverage status", () => {
       wikiOfetch({ "List of Telugu films of 2026": loadWikiResponse("telugu-2026.json") }) as never
     );
     const { films, coverage } = await discoverWikipedia(["Telugu"], "2026-01-01", "2026-01-02");
-    expect(coverage).toEqual([{ language: "Telugu", year: 2026, status: "ok", count: 6 }]);
+    // WD-ENG-05 widens WikiCoverage with parser-health fields. Asserted with
+    // toMatchObject on the pre-existing keys PLUS explicit assertions on the new
+    // ones — strictly more than the old whole-object toEqual checked.
+    expect(coverage).toHaveLength(1);
+    expect(coverage[0]).toMatchObject({ language: "Telugu", year: 2026, status: "ok", count: 6 });
+    expect(coverage[0]!.parsed).toBeGreaterThan(0);      // the parser read the page
+    expect(coverage[0]!.unparsed).toBe(0);               // and lost nothing
     expect(films.length).toBe(6);
   });
 
@@ -226,6 +232,12 @@ describe("discoverWikipedia — fetch + coverage status", () => {
     mockOfetch.mockImplementation(wikiOfetch({ "List of Telugu films of 2026": resp }) as never);
     const { films, coverage } = await discoverWikipedia(["Telugu"], ...FULL_2026);
     expect(films).toEqual([]);
-    expect(coverage).toEqual([{ language: "Telugu", year: 2026, status: "ok", count: 0 }]);
+    expect(coverage).toHaveLength(1);
+    expect(coverage[0]).toMatchObject({ language: "Telugu", year: 2026, status: "ok", count: 0 });
+    // THE DISCRIMINATOR (WD-ENG-05): this page has no date table at all, so the
+    // parser read NOTHING. parsed:0 is what makes this a real parser break —
+    // as opposed to a page that parses fine and simply has no films this week.
+    expect(coverage[0]!.parsed).toBe(0);
+    expect(coverage[0]!.rowsSeen).toBe(0);
   });
 });

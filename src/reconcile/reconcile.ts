@@ -30,6 +30,7 @@ import type { TmdbTitleHit, TmdbTitleSearch } from "../ingestion/releases/tmdb.j
 import { qualifyingDate, inWindow } from "../shared/post-validator.js";
 import type { BucketWindow, ManifestRow } from "../shared/post-validator.js";
 import { normalizeTitle } from "../discovery/normalize.js";
+import { wikiLanguageFor } from "../discovery/sources/wikiLanguageIndex.js";
 import { resolveTitleToTmdb, languageForCode, INDIAN_LANG_CODES } from "../discovery/sources/resolveTitle.js";
 import { isIndianFilm, countryGateLine, type CountryFields } from "../shared/country-gate.js";
 import { log } from "../shared/logger.js";
@@ -74,6 +75,14 @@ export interface ReconcileInput {
   manifestRows?: ManifestRow[];
   /** Series / non-film items the LLM already rejected (surfaced in the review). */
   aiRejected?: RejectedExtraction[];
+  /**
+   * WD-ENG-06 — normalizedTitle → language, built from the Wikipedia list pages
+   * the discovery run already fetched (buildWikiLanguageIndex). Consulted ONLY to
+   * answer "is this film Indian" when TMDb.original_language says otherwise or
+   * says nothing. Never overwrites a resolved language. Omit ⇒ the guard falls
+   * back to the TMDb country evidence alone, which is today plus the fix.
+   */
+  wikiLanguageIndex?: ReadonlyMap<string, string>;
 }
 
 // ── Pure date helpers ───────────────────────────────────────────────────────
@@ -453,6 +462,8 @@ export async function reconcile(input: ReconcileInput, deps: ReconcileDeps): Pro
   const nonIndianCountry: AiResolution[] = [];
   const unverified: AiResolution[] = [];
   const seriesRejected: AiResolution[] = [];
+  // WD-ENG-06 — films whose language could not be established either way.
+  const languageUnresolved: AiResolution[] = [];
   for (const res of resolutions) {
     if (res.kind === "movie" && res.hit) {
       if (poolByTmdbId.has(res.hit.id)) {
@@ -466,14 +477,64 @@ export async function reconcile(input: ReconcileInput, deps: ReconcileDeps): Pro
         // "what language is it", the second "where is it from". Mastul passes a
         // bn-shaped language check and fails the country check; that gap is
         // exactly what let it through before.
+        //
+        // ── WD-ENG-06: UNKNOWN IS NOT FOREIGN, AND ONE FIELD IS NOT A VERDICT ──
+        // This branch used to be `if (!(iso && INDIAN_LANG_CODES.has(iso)))
+        // nonIndian.push(res)` — a single TMDb field, consulted alone, failing
+        // CLOSED. Two separate faults lived in that line:
+        //
+        //   1. A MISSING iso was condemned as "non-Indian-language". Absence of
+        //      evidence is not evidence of foreignness, and the country gate
+        //      three lines below has always said so (it fail-OPENS on missing
+        //      country data, precisely so TMDb gaps cannot eat a real film).
+        //      Two guards, opposite philosophies, and the strict one ran first
+        //      on the least reliable field.
+        //
+        //   2. A PROVISIONAL iso was condemned just as confidently. This is what
+        //      actually happened: Agadha (tmdb 1747034) is a Telugu film opening
+        //      2026-08-14, listed in the List of Telugu films of 2026, and named
+        //      in TBSI's own first comment — and TMDb carries it as `"en"` with
+        //      `origin_country: ["IN"]` on the same record. The guard rejected it
+        //      on the wrong half of a record whose other half said India, and it
+        //      never reached the country gate that would have passed it.
+        //
+        // So a non-Indian language code no longer ends the question; it opens
+        // it. Two pieces of evidence are consulted, both already available:
+        // a Wikipedia list that names the title, and INDIA STATED ON THE TMDB
+        // RECORD ITSELF. Only when neither supports India does the film reject —
+        // with today's label, so genuinely foreign films are untouched.
         const iso = res.hit.originalLanguage;
-        if (!(iso && INDIAN_LANG_CODES.has(iso))) {
-          nonIndian.push(res);
-        } else {
+        if (iso && INDIAN_LANG_CODES.has(iso)) {
           const verdict = isIndianFilm(res.countries ?? {});
           log.info(countryGateLine("reconcile", res.hit.title, res.hit.id, verdict));
           if (verdict.ok) newMovies.push(res);
           else nonIndianCountry.push(res);
+        } else {
+          // EVIDENCE 1 — a Wikipedia "List of <Language> films of <year>" names it.
+          const wikiLang = wikiLanguageFor(input.wikiLanguageIndex, res.ai.title)
+            ?? wikiLanguageFor(input.wikiLanguageIndex, res.hit.title);
+          // EVIDENCE 2 — TMDb itself states India. `present` is required: the
+          // country gate fail-opens on EMPTY country data, and an absence must
+          // not be read as an endorsement here.
+          const verdict = isIndianFilm(res.countries ?? {});
+          const indiaStated = verdict.present && verdict.ok;
+
+          if (wikiLang || indiaStated) {
+            log.info(
+              `  [lang-guard] "${res.ai.title}": TMDb original_language=${iso ?? "<absent>"} is not an Indian code, ` +
+              `but ${wikiLang ? `the List of ${wikiLang} films names it` : `TMDb states origin ${verdict.countries.join(",")}`}` +
+              ` — treated as Indian, country gate decides.`
+            );
+            log.info(countryGateLine("reconcile", res.hit.title, res.hit.id, verdict));
+            if (verdict.ok) newMovies.push(res);
+            else nonIndianCountry.push(res);
+          } else if (!iso) {
+            // NO language code and no corroboration. Honest and DISTINCT: we do
+            // not know, rather than "it is foreign".
+            languageUnresolved.push(res);
+          } else {
+            nonIndian.push(res);
+          }
         }
       }
     } else if (res.kind === "series") {
@@ -514,6 +575,26 @@ export async function reconcile(input: ReconcileInput, deps: ReconcileDeps): Pro
       title: res.ai.title,
       reason: "non-Indian-language",
       ...(res.hit?.originalLanguage ? { originalLanguage: res.hit.originalLanguage } : {}),
+      ...(res.ai.sources?.[0]?.url ? { sourceUrl: res.ai.sources[0]!.url } : {}),
+    })),
+    // WD-ENG-06 — DISTINCT from "non-Indian-language", and the difference is the
+    // whole point: this film's language is UNKNOWN, not foreign. It carries no
+    // TMDb language code, no Wikipedia list names it, and TMDb states no country.
+    // Nothing here says "not Indian"; what it says is "we could not tell".
+    //
+    // WHY A REJECT AND NOT A RED-TIER CANDIDATE (the choice Part 2 asked me to
+    // justify): reconcile assigns tier from DATE, PROVENANCE and STATUS — never
+    // from language — so an unresolved-language film would land red on its
+    // provenance alone, and red never renders. Emitting it as a candidate would
+    // therefore add a Release whose `language` could only be the "Other"
+    // placeholder, feeding a card language row and a pillar it belongs to no
+    // more than the reject list does. The reject path surfaces it in the SAME
+    // review artifact, under a label that states the actual problem, without
+    // fabricating a language for it. If it later needs to render, the fix is a
+    // resolved language — not a placeholder.
+    ...languageUnresolved.map((res) => ({
+      title: res.ai.title,
+      reason: "language unresolved",
       ...(res.ai.sources?.[0]?.url ? { sourceUrl: res.ai.sources[0]!.url } : {}),
     })),
     // DISTINCT from "non-Indian-language" on purpose: this film's language was

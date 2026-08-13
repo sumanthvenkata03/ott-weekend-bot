@@ -103,7 +103,18 @@ export interface WikiCoverage {
   year: number;
   /** "ok" = page existed & parsed; "missing" = 404/not created; "error" = fetch/parse threw. */
   status: "ok" | "missing" | "error";
+  /** Films inside the QUERY WINDOW. Zero is normal for a quiet week. */
   count: number;
+  // ── WD-ENG-05 — parser health, separate from window yield ──────────────────
+  // `count: 0` used to be the only signal, so a working parser over a quiet week
+  // was indistinguishable from a broken one. These make the difference legible
+  // to crossNetGuard, which was calling the former a "possible parser break".
+  /** Rows that yielded a title + date anywhere on the page. `status:"ok"` only. */
+  parsed?: number;
+  /** Rows with real content that yielded NO film — each one warned by name. */
+  unparsed?: number;
+  /** Data rows examined across the page's date tables. */
+  rowsSeen?: number;
 }
 
 /** A net's result: the films it found plus its per-(language, year) coverage. */

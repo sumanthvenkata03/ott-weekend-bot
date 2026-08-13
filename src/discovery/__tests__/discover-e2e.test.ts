@@ -104,7 +104,35 @@ describe("discover — cross-net sanity guard (🔒 January-bug alarm)", () => {
 
     await discover({ from: "2026-01-01", to: "2026-01-31", languages: ["Telugu"] });
 
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/COVERAGE: Wikipedia page for Telugu 2026 EXISTS but parsed 0/));
+    // WD-ENG-05 sharpened the wording. The SEMANTIC is unchanged and the
+    // assertion is stronger: this fixture has no date table at all, so the
+    // parser read zero rows page-wide — the genuine break — and it must still
+    // be LOUD.
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/COVERAGE: Wikipedia page for Telugu 2026 parsed ZERO rows page-wide/));
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/the parser is not reading this page/));
+  });
+
+  it("🔒 page parses fine but has 0 films THIS WINDOW -> INFO, not a warn (the Kannada case)", async () => {
+    // Kannada 2026 warned on every run for weeks: the page parsed 142 films for
+    // the year and simply had none in the queried week. The old guard called
+    // that a "possible parser break", so a true alarm and a quiet week were the
+    // same line — and the line got dismissed. They are now different lines.
+    const info = vi.spyOn(log, "info").mockImplementation(() => {});
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    // A real date table whose films are all in MARCH, queried for JANUARY.
+    const html = `<table class="wikitable">
+      <tr><th colspan="2">Opening</th><th>Title</th><th>Director</th><th>Cast</th><th>Ref.</th></tr>
+      <tr><td rowspan="2">M A R</td><td>6</td><td><i>Far Away One</i></td><td>D1</td><td>C1</td><td>[1]</td></tr>
+      <tr><td>13</td><td><i>Far Away Two</i></td><td>D2</td><td>C2</td><td>[2]</td></tr>
+    </table>`;
+    setWiki({ "List of Telugu films of 2026": { parse: { title: "x", text: html } } as WikiParseResponse });
+    setTmdb({ "te|theatrical|1": tmdbPage([{ id: 1, title: "Solo Tmdb", release_date: "2026-01-10" }]) });
+
+    await discover({ from: "2026-01-01", to: "2026-01-31", languages: ["Telugu"] });
+
+    expect(warn).not.toHaveBeenCalledWith(expect.stringMatching(/COVERAGE/));
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/parser OK \(2 rows parsed on the page\)/));
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/genuine list\/timing gap, not a parser break/));
   });
 });
 

@@ -122,6 +122,26 @@ export async function getCandidates(q: CandidateQuery): Promise<Release[]> {
 
   let films = result.films.filter((f) => matchesIntent(f, q.intent));
 
+  // ── WD-ENG-05 — THE ACTUAL SILENT LOSS ────────────────────────────────────
+  // Panchali Panchabhartruka was read off the Telugu 2026 list correctly (day
+  // cell 14 → 2026-08-14, inside the window) and still never became a candidate.
+  // It did not vanish in the parser; it was dropped HERE, by matchesIntent,
+  // because a wiki-only find carries no releaseType — the documented, deliberate
+  // "pool stays TMDb/AI-backed" rule three lines above.
+  //
+  // The rule is unchanged. What changes is that it now leaves a trace: a
+  // discovery the pipeline deliberately declines is stated, so the next person
+  // asking "where did that film go?" reads the answer instead of re-deriving it
+  // from the HTML. VISIBILITY ONLY — no film enters or leaves the pool here.
+  const wikiOnly = result.films.filter((f) => f.releaseType === undefined);
+  if (wikiOnly.length > 0) {
+    log.info(
+      `  [${q.intent}] ${wikiOnly.length} wiki-only find(s) not carried into candidates ` +
+        `(no TMDb match ⇒ no releaseType; pool stays TMDb/AI-backed): ` +
+        wikiOnly.map((f) => `${f.title} (${f.language}${f.releaseDate ? `, ${f.releaseDate}` : ""})`).join("; ")
+    );
+  }
+
   // OTT intent ALSO runs the two OTT recall nets (Blast-recall). Theatrical
   // intent does NOT — that intent-gate keeps the 4 theatrical-only pillars at 0
   // LLM calls. Both nets are DECOUPLED (own fetch + own extraction): the

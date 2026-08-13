@@ -217,15 +217,43 @@ function resolveSingle(dateEl: HTMLElement | null | undefined, year: number): Re
 }
 
 export interface ParseTally {
+  /** Films inside [from,to]. */
   films: DiscoveredFilm[];
+  /** Rows that produced no film: `blank + unparsed.length`. Unchanged semantics. */
   skipped: number;
+  // ── WD-ENG-05: SEPARATE "no film here" FROM "a film we could not read" ─────
+  // `skipped` conflated two very different things, and reported both as a bare
+  // integer with no row text. A month-header stub ("D E C" with no title, for a
+  // month that has no films yet) counted the same as a real film row the parser
+  // choked on — so a genuine loss looked exactly like page furniture.
+  /** Data rows examined across every date table on the page. */
+  rowsSeen: number;
+  /**
+   * Rows that yielded a title AND a date, REGARDLESS of the query window. This
+   * is the number that answers "is the parser working on this page at all?" —
+   * the question a zero in-range count cannot answer on its own.
+   */
+  resolved: number;
+  /** Structurally empty rows (month-header stubs, spacers). Expected; not a loss. */
+  blank: number;
+  /**
+   * Rows carrying real content that STILL failed to yield a film, as row text.
+   * Every entry is a candidate silent loss and is warned about by name.
+   */
+  unparsed: string[];
 }
 
 /** Parse one already-fetched page's HTML for films within [from,to]. */
 export function parsePage(htmlStr: string, language: string, year: number, page: string, from: string, to: string): ParseTally {
   const films: DiscoveredFilm[] = [];
-  let skipped = 0;
-  if (!htmlStr) return { films, skipped };
+  let blank = 0;
+  let rowsSeen = 0;
+  let resolved = 0;
+  const unparsed: string[] = [];
+  const tally = (): ParseTally => ({
+    films, skipped: blank + unparsed.length, rowsSeen, resolved, blank, unparsed,
+  });
+  if (!htmlStr) return tally();
 
   const root = parse(htmlStr);
   const start = parseISO(from);
@@ -248,27 +276,41 @@ export function parsePage(htmlStr: string, language: string, year: number, page:
 
     const grid = flattenGrid(trs.slice(1), numCols);
     for (const r of grid) {
-      const resolved =
+      rowsSeen += 1;
+      const date =
         dateSpan >= 2 ? resolveSplit(r[0], r[1], year) : resolveSingle(r[0], year);
       const title = titleOf(r[titleCol] ?? null);
-      if (!title || !resolved) {
-        skipped += 1;
+      if (!title || !date) {
+        // BLANK vs UNPARSED. The date columns are excluded from the emptiness
+        // test on purpose: a month cell carries a rowspan down the whole month,
+        // so every stub row "has" it and would never look empty. What decides is
+        // whether anything BEYOND the date columns has content — a title,
+        // director or cast. Nothing there ⇒ page furniture. Something there ⇒ a
+        // row that should have been a film and was not, which gets named.
+        const body = r.slice(dateSpan).map((c) => cleanText(c)).filter(Boolean).join(" · ");
+        if (!body) {
+          blank += 1;
+        } else {
+          const dateText = r.slice(0, dateSpan).map((c) => cleanText(c)).filter(Boolean).join(" ");
+          unparsed.push(`${dateText ? `[${dateText}] ` : ""}${body}`.slice(0, 200));
+        }
         continue;
       }
+      resolved += 1;
 
       let inRange = false;
       let releaseDate: string | undefined;
       let approximate = false;
-      if (resolved.iso && !resolved.approximate) {
-        const d = parseISO(resolved.iso);
+      if (date.iso && !date.approximate) {
+        const d = parseISO(date.iso);
         inRange = isWithinInterval(d, { start, end });
-        releaseDate = resolved.iso;
-      } else if (resolved.monthIndex !== undefined) {
+        releaseDate = date.iso;
+      } else if (date.monthIndex !== undefined) {
         // Month-only: include if that month overlaps the query window.
-        const mStart = parseISO(`${year}-${String(resolved.monthIndex + 1).padStart(2, "0")}-01`);
+        const mStart = parseISO(`${year}-${String(date.monthIndex + 1).padStart(2, "0")}-01`);
         const mEnd = endOfMonth(mStart);
         inRange = areIntervalsOverlapping({ start, end }, { start: mStart, end: mEnd }, { inclusive: true });
-        releaseDate = `${year}-${String(resolved.monthIndex + 1).padStart(2, "0")}-01`;
+        releaseDate = `${year}-${String(date.monthIndex + 1).padStart(2, "0")}-01`;
         approximate = true;
       }
       if (!inRange) continue;
@@ -293,7 +335,7 @@ export function parsePage(htmlStr: string, language: string, year: number, page:
       });
     }
   }
-  return { films, skipped };
+  return tally();
 }
 
 function yearsInRange(from: string, to: string): number[] {
@@ -330,13 +372,28 @@ export async function discoverWikipedia(
           log.info(`  Wikipedia [${language}/${year}] no list page (not created yet)`);
           continue;
         }
-        const { films: pageFilms, skipped } = parsePage(htmlStr, language, year, page, from, to);
-        films.push(...pageFilms);
-        coverage.push({ language, year, status: "ok", count: pageFilms.length });
+        const t = parsePage(htmlStr, language, year, page, from, to);
+        films.push(...t.films);
+        coverage.push({
+          language, year, status: "ok", count: t.films.length,
+          parsed: t.resolved, unparsed: t.unparsed.length, rowsSeen: t.rowsSeen,
+        });
+        // WD-ENG-05 — the coverage line now answers BOTH questions. "0 in range"
+        // alone cannot distinguish a broken parser from a quiet week, which is
+        // exactly the ambiguity that had Kannada warning on every run for weeks
+        // while its parser was working perfectly (142 films read off the page,
+        // none in that window). `parsed` is the parser's health; `in range` is
+        // the week's.
         log.info(
-          `  Wikipedia [${language}/${year}] ${pageFilms.length} in range` +
-            (skipped ? ` (${skipped} rows skipped)` : "")
+          `  Wikipedia [${language}/${year}] ${t.films.length} in range · ` +
+            `${t.resolved}/${t.rowsSeen} rows parsed on page` +
+            (t.unparsed.length ? ` · ⚠ ${t.unparsed.length} UNPARSED` : "")
         );
+        // A row with real content that yielded no film is a candidate silent
+        // loss. It is named, in full, every time — never a bare counter.
+        for (const row of t.unparsed) {
+          log.warn(`  ⚠ Wikipedia [${language}/${year}] UNPARSED ROW — no film emitted: ${row}`);
+        }
       } catch (err) {
         coverage.push({ language, year, status: "error", count: 0 });
         log.warn(`Wikipedia fetch/parse failed for "${page}"`, err instanceof Error ? err.message : err);

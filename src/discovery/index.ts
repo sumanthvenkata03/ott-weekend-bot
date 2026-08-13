@@ -184,10 +184,21 @@ function crossNetGuard(tmdbCoverage: TmdbCoverage[], wikiCoverage: WikiCoverage[
     if (w.status === "missing") {
       log.info(`  no Wikipedia list page for ${w.language} ${w.year} yet (TMDb found ${t})`);
     } else if (w.status === "ok") {
-      log.warn(
-        `⚠ COVERAGE: Wikipedia page for ${w.language} ${w.year} EXISTS but parsed 0 while ` +
-          `TMDb found ${t} — possible parser break or Wikipedia list gap`
-      );
+      // WD-ENG-05 — "EXISTS but parsed 0" was ambiguous and, for Kannada, wrong.
+      // The page parsed 142 films for 2026 and simply had none in the queried
+      // week; the warn read as a parser break and was dismissed as noise for
+      // weeks. Split the two cases so the loud one is only ever the real one.
+      if ((w.parsed ?? 0) > 0) {
+        log.info(
+          `  Wikipedia ${w.language} ${w.year}: parser OK (${w.parsed} rows parsed on the page) but ` +
+            `0 fell in this window while TMDb found ${t} — a genuine list/timing gap, not a parser break`
+        );
+      } else {
+        log.warn(
+          `⚠ COVERAGE: Wikipedia page for ${w.language} ${w.year} parsed ZERO rows page-wide while ` +
+            `TMDb found ${t} — the parser is not reading this page (structure change?)`
+        );
+      }
     } else {
       log.warn(
         `⚠ COVERAGE: Wikipedia ${w.language} ${w.year} fetch/parse errored while TMDb found ${t}`
