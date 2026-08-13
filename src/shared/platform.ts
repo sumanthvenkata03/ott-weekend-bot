@@ -18,6 +18,10 @@ export const PLATFORM_NAMES: Record<string, Platform> = {
   "sonyliv": "SonyLIV", "sony liv": "SonyLIV",
   "zee5": "ZEE5",
   "sun nxt": "Sun NXT",
+  // WD-ENG-08 — without an alias entry, toPlatform("ETV Win") is undefined and the
+  // press-ingest paths cannot set the platform they just read, which would make
+  // the union addition half a fix. Both spellings the press uses.
+  "etv win": "ETV Win", "etvwin": "ETV Win",
 };
 
 /**
@@ -49,7 +53,7 @@ export function toPlatform(s: string | undefined): Platform | undefined {
 export const PLATFORMS = [
   "Netflix", "Prime Video", "JioHotstar", "Aha", "SonyLIV",
   "ZEE5", "Sun NXT", "ManoramaMAX", "Hoichoi", "Lionsgate Play",
-  "Apple TV+", "MUBI", "Chaupal", "Planet Marathi", "Other",
+  "Apple TV+", "MUBI", "Chaupal", "Planet Marathi", "ETV Win", "Other",
 ] as const satisfies readonly Platform[];
 
 // Compile-time exhaustiveness guard. If a new Platform is added to the union

@@ -573,7 +573,8 @@ SELECTION — include every REAL release in this medium, capped at ${MAX_WED_DRO
 - ${framing.pick}
 - ${framing.cover}
 - ${framing.why}
-- Skip an entry ONLY if it is not a real film — a short, a trailer, a mislabeled or duplicate entry, something with no real release, or adult content. Everything else that is a genuine release belongs in the guide.
+- Skip an entry ONLY if it is not a real film — a trailer or promo clip, a mislabeled or duplicate entry, something with no real release, a SERIES or show, or adult content. Everything else that is a genuine release belongs in the guide.
+- MINI-FILMS AND SHORT FEATURES ARE IN SCOPE. A genuine, standalone, professionally released short or mini-film (the ETV Win mini-film slate, for instance) is a real film and belongs in the guide on the same terms as a feature. Runtime is NOT an eligibility test — only "is it a real, standalone, non-series release".
 - ORDER the films best / most-worth-watching FIRST — this matters both because the first four become the cover AND because when more than ${MAX_WED_DROP_FILMS} films exist, only the top ${MAX_WED_DROP_FILMS} are kept.
 - Never invent or duplicate films to reach ${MAX_WED_DROP_FILMS} — the count must equal the number of REAL distinct films available, capped at ${MAX_WED_DROP_FILMS}. For a film you do not recognize, write a SHORT FACTUAL blurb from the provided metadata only (language, genre, lead cast, director, platform) — do NOT invent plot, themes, or critical praise.
 - If after skipping junk there are 0 real films, return carouselSlides: [] (empty array) to skip this edition.

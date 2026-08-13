@@ -7,7 +7,14 @@ export type Language =
 export type Platform = 
   | "Netflix" | "Prime Video" | "JioHotstar" | "Aha" | "SonyLIV" 
   | "ZEE5" | "Sun NXT" | "ManoramaMAX" | "Hoichoi" | "Lionsgate Play"
-  | "Apple TV+" | "MUBI" | "Chaupal" | "Planet Marathi" | "Other";
+  | "Apple TV+" | "MUBI" | "Chaupal" | "Planet Marathi"
+  // WD-ENG-08 — ETV Win (Telugu; ETV Network's streaming arm, home of the
+  // mini-film slate). The RENDER side was already built for it — the colour
+  // token --platform-etv-win, the platformColor mapping in rendering/_shared.ts,
+  // and src/assets/platform-logos/etv-win.svg all predate this line. The TYPE
+  // was the only thing refusing it, so a real ETV Win release could never carry
+  // its own platform. Spelling is ETV's own: "ETV Win".
+  | "ETV Win" | "Other";
 
 export type Mood = 
   | "Light Watch" | "Mind-Bender" | "Emotional" | "Action-Packed"

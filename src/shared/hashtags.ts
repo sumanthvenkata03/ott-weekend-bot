@@ -64,6 +64,10 @@ export const PLATFORM_TAGS: Record<Platform, string[]> = {
   "MUBI":           ["#MUBI"],
   "Chaupal":        ["#Chaupal"],
   "Planet Marathi": ["#PlanetMarathi"],
+  // WD-ENG-08 — required by Record<Platform, …>, which is how this map stays
+  // exhaustive: adding a union member without a tag entry does not compile.
+  // ETV brands the service "ETV Win" and tags it #ETVWin.
+  "ETV Win":        ["#ETVWin"],
   "Other":          [],
 };
 
