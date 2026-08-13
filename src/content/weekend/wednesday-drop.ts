@@ -19,6 +19,8 @@ import {
   nameCandidates,
   nameTokens,
   personTokens,
+  scrubDroppedFilms,
+  type CopyNotice,
   type NameAllowlist,
 } from "../../shared/copy-guard.js";
 
@@ -453,33 +455,74 @@ function retryPromptFor(prompt: string, violations: CopyViolation[]): string {
   return out;
 }
 
-/** The Slack issue line for a surviving violation (kept-in-caption vs dropped-film). */
-function copyFlagFor(v: CopyViolation): string {
+/**
+ * The Slack issue line for a surviving violation.
+ *
+ * WD-ENG-01 PART 1 — the slide-level outcome is no longer a single "DROPPED
+ * film". `fed` decides it, and `fed` means one thing: was this title in the pool
+ * the gate approved and handed to the LLM?
+ *   fed   → copy-fallback. The blurb is replaced, THE FILM SHIPS.
+ *   unfed → copy-drop. A title no Release backs is a hallucination; it goes.
+ * A caption violation still cannot touch a film either way.
+ */
+function copyFlagFor(v: CopyViolation, fed: boolean): string {
   if (v.kind === "superlative") {
     const tail = v.leader ? ` (edition leader: "${v.leader}")` : "";
-    return v.where === "caption"
-      ? `copy rating-claim: "${v.name}" in CAPTION is not the edition's top-rated film${tail} — kept, review copy`
-      : `copy rating-claim: "${v.name}" on "${v.where}" is not the edition's top-rated film${tail} — DROPPED film`;
+    if (v.where === "caption")
+      return `copy rating-claim: "${v.name}" in CAPTION is not the edition's top-rated film${tail} — kept, review copy`;
+    return fed
+      ? `copy-fallback: ${v.where} — "${v.name}" is not the edition's top-rated film${tail}; blurb replaced with deterministic copy, film SHIPS`
+      : `copy-drop: ${v.where} — "${v.name}" rating claim on a film not in the fed pool${tail}; slide removed`;
   }
-  return v.where === "caption"
-    ? `copy name-discipline: "${v.name}" not in film data — in CAPTION, kept but review copy manually`
-    : `copy name-discipline: "${v.name}" not in film data — DROPPED film "${v.where}"`;
+  if (v.where === "caption")
+    return `copy name-discipline: "${v.name}" not in film data — in CAPTION, kept but review copy manually`;
+  return fed
+    ? `copy-fallback: ${v.where} — "${v.name}" not in film data; blurb replaced with deterministic copy, film SHIPS`
+    : `copy-drop: ${v.where} — "${v.name}" not in film data, and no Release backs this title; slide removed`;
+}
+
+/**
+ * The deterministic, NAME-FREE blurb that replaces an offending one. Honest
+ * metadata only — the exact mechanism Archives' `safeWhyLine` uses when a
+ * why-line cannot be certified (and the state contract:why-line-grounding
+ * demands when a synopsis is too thin to ground a claim).
+ *
+ * Every token it can emit is already allowlist filler: `language` and `platform`
+ * enter `nonPersonText` from the film's own record, the genre is lowercased so no
+ * extractor can see it, and the remaining words are in WED_DROP_NON_PERSON_WORDS.
+ * So the replacement is provably sweep-clean — pinned by a test, not by
+ * inspection, because a fallback that itself violated would loop.
+ */
+export function safeBlurb(r: Release, edition: WedDropEdition): string {
+  const genre = (r.genre[0] ?? "film").toLowerCase();
+  if (edition === "theatrical") {
+    return `A new ${r.language} ${genre} opening in cinemas this weekend.`;
+  }
+  const platform = r.platform[0];
+  return platform
+    ? `A new ${r.language} ${genre} streaming on ${platform} this week.`
+    : `A new ${r.language} ${genre} streaming this week.`;
 }
 
 /**
  * Generate a Wednesday Drop draft from a list of releases for a given edition
  * ("theatrical" → In Theaters | "ott" → Now Streaming). Each edition is an
- * independent draft built from its own pool. Returns the draft plus `nameFlags`
- * — copy name-discipline violations that survived one retry (offending film
- * dropped, or a caption violation kept-but-flagged) for the job to surface in
- * Slack. `nameFlags` is a plain widening; it never changes WednesdayDropDraft.
+ * independent draft built from its own pool. Returns the draft plus:
+ *   `nameFlags`    — human-readable lines for Slack: copy violations that
+ *                    survived one retry (blurb replaced, slide dropped, or a
+ *                    caption violation kept-but-flagged).
+ *   `copyNotices`  — the SAME events, structured, for the manifest. A
+ *                    copy-fallback is a non-blocking warn; a copy-drop whose
+ *                    scrub could not be certified is a FAIL, and the 4c render
+ *                    gate stops the edition on it.
+ * Both are plain widenings; neither changes WednesdayDropDraft.
  */
 export async function generateWednesdayDrop(
   releases: Release[],
   edition: WedDropEdition,
   weekendStart: string,
   weekendEnd: string
-): Promise<WednesdayDropDraft & { nameFlags: string[] }> {
+): Promise<WednesdayDropDraft & { nameFlags: string[]; copyNotices: CopyNotice[] }> {
   if (releases.length === 0) {
     throw new Error("Cannot generate Wednesday Drop with zero releases");
   }
@@ -587,6 +630,7 @@ Be specific. Take stands. Lean South-heavy where the films justify it.`;
   // whole run). A caption-only violation is kept-but-flagged (can't drop a film).
   const allow = buildNameAllowlist(releases);
   const nameFlags: string[] = [];
+  const copyNotices: CopyNotice[] = [];
   let { violations, undeclared } = findCopyViolations(output, allow, releases);
   // Backed-but-undeclared names are INFO ONLY — logged, never acted on. They do
   // not gate the retry and they never reach nameFlags or a drop (WD-042).
@@ -604,16 +648,92 @@ Be specific. Take stands. Lean South-heavy where the films justify it.`;
     logUndeclared(undeclared);
   }
   if (violations.length > 0) {
-    const dropTitles = new Set(violations.filter(v => v.where !== "caption").map(v => v.where));
-    for (const v of violations) nameFlags.push(copyFlagFor(v));
+    // ── WD-ENG-01 PART 1 — THE FED POOL IS UNDROPPABLE ────────────────────
+    // A film in `releases` has already cleared discovery, reconciliation, the
+    // AI net, the country gate, the ledger dedup and the operator's gate hash.
+    // The copy guard's job is to keep an unverified PHRASE off a card; deleting
+    // the FILM was always a category error, and it cost Batwara 1947 (041) and
+    // Aroopi (042) their slots on phrases that were never names at all.
+    //
+    // Fed → the blurb is replaced with deterministic copy and the film ships.
+    // Unfed → the model named a title no Release backs. That is the genuine
+    // hallucination case, and it still drops. Note the ordering: the drop MUST
+    // stay ahead of the picked-titles reconciliation below, which throws on an
+    // unmatched title — that throw is what this branch spares the run.
+    const fedTitles = new Set(releases.map(r => r.title));
+    const fallbackTitles = new Set<string>();
+    const dropTitles = new Set<string>();
+    for (const v of violations) {
+      if (v.where === "caption") continue;
+      (fedTitles.has(v.where) ? fallbackTitles : dropTitles).add(v.where);
+    }
+    for (const v of violations) {
+      const fed = v.where !== "caption" && fedTitles.has(v.where);
+      nameFlags.push(copyFlagFor(v, fed));
+      if (v.where === "caption") continue;
+      copyNotices.push({
+        kind: fed ? "copy-fallback" : "copy-drop",
+        title: v.where,
+        term: v.name,
+      });
+    }
+
+    if (fallbackTitles.size > 0) {
+      log.warn(
+        `Wed Drop [${edition}]: copy self-policing — 2 strikes on ${fallbackTitles.size} GATE-APPROVED film(s); ` +
+        `blurb replaced with deterministic copy, film(s) SHIP: ${[...fallbackTitles].join(", ")}`
+      );
+      const byTitle = new Map(releases.map(r => [r.title, r]));
+      output = {
+        ...output,
+        carouselSlides: output.carouselSlides.map(s =>
+          s.type === "release" && fallbackTitles.has(s.title) && byTitle.has(s.title)
+            ? { ...s, body: safeBlurb(byTitle.get(s.title)!, edition) }
+            : s
+        ),
+      };
+    }
+
     if (dropTitles.size > 0) {
       log.error(
-        `Wed Drop [${edition}]: copy self-policing — 2 strikes, dropping ${dropTitles.size} film(s): ${[...dropTitles].join(", ")}`
+        `Wed Drop [${edition}]: copy self-policing — 2 strikes, dropping ${dropTitles.size} UNFED film(s): ${[...dropTitles].join(", ")}`
       );
       const kept = output.carouselSlides.filter(s => !(s.type === "release" && dropTitles.has(s.title)));
       // If every real film was dropped, skip the edition (empty carousel).
       const anyReleaseLeft = kept.some(s => s.type === "release");
       output = { ...output, carouselSlides: anyReleaseLeft ? kept : [] };
+
+      // ── WD-ENG-01 PART 3 — ANY DROP IS LOUD AND CLEAN ───────────────────
+      // The card is gone; every other surface must stop referring to it. Scrub
+      // the caption, the index slide and the count words, then check the work.
+      // An uncertifiable scrub marks the notices `scrubFailed`, and the job's
+      // manifest turns that into ok:false so the 4c gate blocks the edition —
+      // a blocked edition beats a self-contradicting one.
+      if (anyReleaseLeft) {
+        const dropped = [...dropTitles];
+        const keptCount = kept.filter(s => s.type === "release").length;
+        const indexSlide = kept.find(s => s.type === "index");
+        const scrub = scrubDroppedFilms(output.caption, indexSlide?.body ?? "", dropped, keptCount);
+        output = {
+          ...output,
+          caption: scrub.caption,
+          carouselSlides: output.carouselSlides.map(s =>
+            s.type === "index" ? { ...s, body: scrub.indexBody } : s
+          ),
+        };
+        if (scrub.clean) {
+          log.warn(
+            `Wed Drop [${edition}]: post-drop scrub clean — caption + index carry no trace of ` +
+            `${dropped.join(", ")}; counts retargeted to ${keptCount}`
+          );
+        } else {
+          log.error(
+            `Wed Drop [${edition}]: post-drop scrub COULD NOT BE CERTIFIED — ${scrub.problems.join("; ")}. ` +
+            `Marking the edition unshippable.`
+          );
+          for (const n of copyNotices) if (n.kind === "copy-drop") n.scrubFailed = true;
+        }
+      }
     }
   }
 
@@ -670,5 +790,6 @@ Be specific. Take stands. Lean South-heavy where the films justify it.`;
     carouselSlides,
     releases: sorted.releases,
     nameFlags,
+    copyNotices,
   };
 }

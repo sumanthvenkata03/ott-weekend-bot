@@ -14,7 +14,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("../claude.js", () => ({ callClaudeJSON: vi.fn() }));
 
 import { callClaudeJSON } from "../claude.js";
-import { generateWednesdayDrop } from "./wednesday-drop.js";
+import { generateWednesdayDrop, safeBlurb } from "./wednesday-drop.js";
 import type { Release } from "../../shared/types.js";
 
 const mockCall = vi.mocked(callClaudeJSON);
@@ -125,8 +125,11 @@ describe("tonight's seven pass-1 strike strings are all clean now", () => {
   });
 });
 
-describe("the guard did NOT go soft — an unbacked person still strikes and still drops", () => {
-  it("an unbacked name retries once, then drops that film on the second strike", async () => {
+describe("the guard did NOT go soft — an unbacked person still strikes", () => {
+  // WD-ENG-01 PART 1 — the strike and the retry are untouched. The CONSEQUENCE
+  // is now decided by whether the film was fed. Cocktail 2 was, so it ships with
+  // replaced copy; the unfed-title case is pinned immediately below.
+  it("an unbacked name on a FED film retries once, then replaces the blurb — film ships", async () => {
     mockCall.mockResolvedValue(
       llmOut(
         [
@@ -140,14 +143,43 @@ describe("the guard did NOT go soft — an unbacked person still strikes and sti
     const draft = await generateWednesdayDrop(EDITION, "ott", "2026-08-10", "2026-08-16");
 
     expect(mockCall).toHaveBeenCalledTimes(2);                            // retry still fires
-    expect(draft.releases.map((r) => r.title)).toEqual(["Heartin"]);      // only the offender drops
+    expect(draft.releases.map((r) => r.title).sort()).toEqual(["Cocktail 2", "Heartin"]);
+    const cocktail = draft.slides.find((s) => s.type === "release" && s.title === "Cocktail 2")!;
+    expect(cocktail.body).toBe(safeBlurb(COCKTAIL_2, "ott"));
+    expect(cocktail.body).not.toContain("Tabu");
     expect(draft.nameFlags).toHaveLength(1);
     expect(draft.nameFlags[0]).toContain("Tabu");
-    expect(draft.nameFlags[0]).toContain("DROPPED film");
+    expect(draft.nameFlags[0]).toContain("copy-fallback");
     // The backed names it sat beside are NOT named in the flag.
     for (const backed of ["Pritam", "Rajesh Murugesan"]) {
       expect(draft.nameFlags[0]).not.toContain(backed);
     }
+  });
+
+  it("the SAME unbacked name on an UNFED title still DROPS it — hallucination defence intact", async () => {
+    // "Phantom Film" is in no Release record. The model invented the title AND
+    // named an unbacked person on it: the exact shape the drop path exists for.
+    // Body is byte-identical to the FED case above, so the ONLY variable between
+    // the two tests is whether the title was in the pool.
+    mockCall.mockResolvedValue(
+      llmOut(
+        [
+          { title: "Phantom Film", body: "Pritam scores it, and Tabu steals every scene." },
+          { title: "Heartin", body: "Rajesh Murugesan scores it beautifully." },
+        ],
+        { namesUsed: [] }
+      )
+    );
+
+    const draft = await generateWednesdayDrop(EDITION, "ott", "2026-08-10", "2026-08-16");
+
+    expect(mockCall).toHaveBeenCalledTimes(2);
+    expect(draft.releases.map((r) => r.title)).toEqual(["Heartin"]);
+    expect(draft.slides.some((s) => s.type === "release" && s.title === "Phantom Film")).toBe(false);
+    expect(draft.nameFlags[0]).toContain("copy-drop");
+    expect(draft.copyNotices).toEqual([
+      { kind: "copy-drop", title: "Phantom Film", term: "Tabu" },
+    ]);
   });
 
   it("a cross-person blend is still unbacked and still strikes", async () => {

@@ -14,7 +14,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("../claude.js", () => ({ callClaudeJSON: vi.fn() }));
 
 import { callClaudeJSON } from "../claude.js";
-import { generateWednesdayDrop } from "./wednesday-drop.js";
+import { generateWednesdayDrop, safeBlurb } from "./wednesday-drop.js";
 import type { Release } from "../../shared/types.js";
 
 const mockCall = vi.mocked(callClaudeJSON);
@@ -121,8 +121,13 @@ describe("Issue 041 — the possessive no longer costs an approved film its slid
   });
 });
 
-describe("the two-strike drop machinery is UNCHANGED", () => {
-  it("a genuinely unbacked name still retries once, then drops only that film and flags it", async () => {
+describe("the two-strike machinery is UNCHANGED up to the point where the film is FED", () => {
+  // WD-ENG-01 PART 1 — Batwara 1947 is exactly the film Issue 041 deleted, and
+  // it is IN the fed pool. The strike, the retry and the flag all still happen;
+  // what changed is the consequence. This case previously asserted the deck
+  // shrank to ["Awarapan 2"]; it now asserts the strictly larger set of facts:
+  // both films survive, the offending sentence is gone, and the receipt says so.
+  it("a genuinely unbacked name still retries once, then replaces the blurb and KEEPS the film", async () => {
     mockCall.mockResolvedValue(
       llmOut(
         [
@@ -136,7 +141,12 @@ describe("the two-strike drop machinery is UNCHANGED", () => {
     const draft = await generateWednesdayDrop([BATWARA, AWARAPAN], "theatrical", "2026-08-12", "2026-08-16");
 
     expect(mockCall).toHaveBeenCalledTimes(2);                          // retry still fires
-    expect(draft.releases.map((r) => r.title)).toEqual(["Awarapan 2"]); // only the offender drops
+    // THE 041 REGRESSION, PINNED: the gate-approved film keeps its slot.
+    expect(draft.releases.map((r) => r.title).sort()).toEqual(["Awarapan 2", "Batwara 1947"]);
+
+    const batwara = draft.slides.find((s) => s.type === "release" && s.title === "Batwara 1947")!;
+    expect(batwara.body).toBe(safeBlurb(BATWARA, "theatrical"));
+    expect(batwara.body).not.toContain("Tabu");
 
     // ONE flag for one hallucination. This previously emitted TWO — CAP_WORD
     // admits a trailing period, so a sentence-final name yields "Tabu." from the
@@ -146,9 +156,13 @@ describe("the two-strike drop machinery is UNCHANGED", () => {
     expect(draft.nameFlags).toHaveLength(1);
     const flag = draft.nameFlags[0]!;
     expect(flag).toContain("Tabu");
-    expect(flag).toContain("DROPPED film");
+    expect(flag).toContain("copy-fallback");
+    expect(flag).toContain("film SHIPS");
     // The flag names the hallucination, NOT the director it sat beside.
     expect(flag).not.toContain("Rajkumar Santoshi");
+    expect(draft.copyNotices).toEqual([
+      { kind: "copy-fallback", title: "Batwara 1947", term: "Tabu" },
+    ]);
   });
 
   it("the retry prompt names the real violation and not the possessive", async () => {

@@ -12,7 +12,8 @@
 
 import { enrichReleases } from "../ingestion/releases/index.js";
 import { filmKey } from "../shared/featured-ledger.js";
-import { log } from "../shared/logger.js";
+import { log } from "../shared/logger.js";
+import { startRunLog } from "../shared/run-artifacts.js";
 import {
   discoverArchivesLanguage,
   fetchArchivesStubById,
@@ -82,6 +83,7 @@ function buildCaption(deck: ArchivesDeck): string {
 
 async function main(deliver = true) {
   log.info("🎞️  TBSI Archives job — starting");
+  startRunLog("archives");
   if (!deliver) {
     log.warn("DRY RUN — no delivery (--no-deliver): discover + gate + render run; R2/Slack/ledger skipped");
   }

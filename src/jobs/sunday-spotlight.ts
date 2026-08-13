@@ -4,7 +4,8 @@ import { pickSpotlight } from "../content/weekend/spotlight-picker.js";
 import { generateSundaySpotlight } from "../content/weekend/sunday-spotlight.js";
 import { writeSundaySpotlightToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
-import { log } from "../shared/logger.js";
+import { log } from "../shared/logger.js";
+import { startRunLog } from "../shared/run-artifacts.js";
 import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
 import { buildHashtags } from "../shared/hashtags.js";
 import { renderSunSpotlight } from "../rendering/render-sun-spotlight.js";
@@ -40,6 +41,7 @@ function pickWeekend(now: Date): { startDate: string; endDate: string } {
 
 async function main() {
   log.info("🎬 Sunday Spotlight job — starting");
+  startRunLog("sun-spotlight");
 
   purgeExpired();
 

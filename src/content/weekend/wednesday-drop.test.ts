@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("../claude.js", () => ({ callClaudeJSON: vi.fn() }));
 
 import { callClaudeJSON } from "../claude.js";
-import { generateWednesdayDrop, parseLangOverrides, applyLangOverrides } from "./wednesday-drop.js";
+import { generateWednesdayDrop, parseLangOverrides, applyLangOverrides, safeBlurb } from "./wednesday-drop.js";
 import type { Release } from "../../shared/types.js";
 
 const mockCall = vi.mocked(callClaudeJSON);
@@ -68,7 +68,13 @@ describe("copy name-discipline — retry + drop", () => {
     expect(String(mockCall.mock.calls[1]![0])).toContain('"Tabu"');
   });
 
-  it("TWO STRIKES: a persistent out-of-data name drops ONLY that film, keeps the rest, and flags it (never fails the run)", async () => {
+  // WD-ENG-01 PART 1 — this case USED to assert that Vaazhai was dropped. It is
+  // a FED film, so under the new contract it can no longer be: the offending
+  // phrase leaves the card, the film does not. The assertions below are strictly
+  // stronger than the ones they replace — they pin the surviving film, the exact
+  // replacement copy, the flag wording AND the structured notice, where the old
+  // test pinned only the shortened title list.
+  it("TWO STRIKES on a FED film: the blurb is replaced, the film SHIPS, and both are flagged", async () => {
     mockCall.mockResolvedValue(
       llmOut(
         [
@@ -81,11 +87,26 @@ describe("copy name-discipline — retry + drop", () => {
 
     const draft = await generateWednesdayDrop([VAAZHAI, AMARAN], "theatrical", "2026-06-24", "2026-06-28");
 
-    expect(mockCall).toHaveBeenCalledTimes(2);                 // one retry, still bad → drop
-    expect(draft.releases.map((r) => r.title)).toEqual(["Amaran"]);   // offending film dropped, other kept
+    expect(mockCall).toHaveBeenCalledTimes(2);                 // one retry, still bad
+    // NOTHING is dropped — both gate-approved films are still in the deck.
+    expect(draft.releases.map((r) => r.title).sort()).toEqual(["Amaran", "Vaazhai"]);
+
+    // The offending phrase never prints: Vaazhai's blurb is the deterministic
+    // fallback, and it names nobody.
+    const vaazhai = draft.slides.find((s) => s.type === "release" && s.title === "Vaazhai")!;
+    expect(vaazhai.body).toBe(safeBlurb(VAAZHAI, "theatrical"));
+    expect(vaazhai.body).not.toContain("Tabu");
+    expect(vaazhai.body).not.toContain("Dhanush");
+    // The clean film's copy is untouched.
+    expect(draft.slides.find((s) => s.type === "release" && s.title === "Amaran")!.body)
+      .toBe("Sivakarthikeyan leads");
+
     expect(draft.nameFlags).toHaveLength(1);
     expect(draft.nameFlags[0]).toContain("Tabu");
     expect(draft.nameFlags[0]).toContain("Vaazhai");
+    expect(draft.nameFlags[0]).toContain("copy-fallback");
+    expect(draft.nameFlags[0]).toContain("film SHIPS");
+    expect(draft.copyNotices).toEqual([{ kind: "copy-fallback", title: "Vaazhai", term: "Tabu" }]);
   });
 
   it("BELT-AND-BRACES: a name the model omits from namesUsed is caught by the 'starring <Name>' regex scan", async () => {

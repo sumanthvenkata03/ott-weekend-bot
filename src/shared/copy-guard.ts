@@ -82,6 +82,40 @@ export interface NameAllowlist {
   nonPerson: Set<string>;
 }
 
+/**
+ * What the copy guard DID to a film, in a shape the manifest can render.
+ *
+ * ── WD-ENG-01 PART 1: THE GUARD LOST ITS AUTHORITY TO DELETE VERIFIED FILMS ──
+ * Two outcomes, and which one applies is decided by ONE fact — was the film in
+ * the pool the gate approved and fed to the LLM?
+ *
+ *   copy-fallback  the film WAS fed. It is gate-approved, reconciled, verified
+ *                  and rendered; a phrase in its blurb is not grounds to delete
+ *                  it. The blurb is replaced with deterministic, name-free copy
+ *                  and THE FILM SHIPS. Non-blocking warn.
+ *   copy-drop      the film was NOT fed — the model invented a title that no
+ *                  Release record backs. This is the true-hallucination defence
+ *                  and it is preserved exactly. Blocking when the post-drop
+ *                  scrub cannot be proven consistent (Part 3).
+ *
+ * Lives here rather than in post-validator so the content module can emit these
+ * without importing the validator, and the validator can consume them without
+ * importing the content module.
+ */
+export interface CopyNotice {
+  kind: "copy-fallback" | "copy-drop";
+  /** The film the guard acted on. */
+  title: string;
+  /** The exact offending slice, sourced from the ORIGINAL copy (see below). */
+  term: string;
+  /**
+   * copy-drop only. True when the caption/index/count scrub could NOT be proven
+   * to have removed every trace of `title` — the edition must be blocked rather
+   * than delivered self-contradicting.
+   */
+  scrubFailed?: boolean;
+}
+
 /** Diacritic-, case- and honorific-normalized significant tokens (≥2 chars). */
 export function nameTokens(s: string): string[] {
   return s
@@ -191,6 +225,25 @@ const POSSESSIVE_RE = new RegExp(
   "gu"
 );
 
+// A capitalised token carrying an INTERNAL HYPHEN followed by a LOWERCASE letter:
+// "Lights-off", "Coming-of-age", "Must-watch", "Slow-burn". Group 0 is the WHOLE
+// token (the leading \p{Lu} plus every hyphen/letter/apostrophe that follows), so
+// severHyphenLowercase can blank all of it and leave nothing for the 2–3 word
+// window to grab.
+//
+// The `-\p{Ll}` is the entire discriminator, and it is what keeps a real
+// hyphenated surname intact: "Abdul-Jabbar", "Smith-Jones" and "Ram-Charan" put a
+// CAPITAL after the hyphen, never match, and remain full name tokens.
+//
+// The leading (?<![\p{L}'’.\-]) pins the match to the START of a token so a
+// mid-word position can never anchor it, and the trailing [\p{L}'’.\-]* consumes
+// the rest of the token (including further hyphenated segments) so
+// "Coming-of-age" is blanked whole rather than leaving a dangling "age".
+const HYPHEN_LOWER_RE = new RegExp(
+  String.raw`(?<![\p{L}\p{N}'’.\-])\p{Lu}[\p{L}'’.]*-\p{Ll}[\p{L}'’.\-]*`,
+  "gu"
+);
+
 /**
  * Turn every SENTENCE boundary into a newline, so the extractors cannot build a
  * candidate that straddles one. LENGTH-PRESERVING: exactly one horizontal space
@@ -254,13 +307,49 @@ export function terminatePossessives(text: string): string {
 }
 
 /**
- * The scan copy the extractor regexes run against. All three rewrites preserve
+ * Blank a capitalised token whose internal hyphen is followed by a LOWERCASE
+ * letter. Such a token is a compound MODIFIER, never a person: "Lights-off",
+ * "Coming-of-age", "Must-watch", "Slow-burn". LENGTH-PRESERVING: every character
+ * of the token becomes "\n", which GAP cannot cross — so the token cannot START a
+ * name-shaped run, cannot JOIN one, and cannot EXTEND one. It is invisible to
+ * both extractors rather than merely filtered afterwards.
+ *
+ * ── WD-ENG-01 PART 2: THE EXTRACTION WAS WRONG A THIRD TIME ──────────────────
+ * Issue 042's final run 2-strike DROPPED "Aroopi" — a green, gate-approved,
+ * platform-resolved film — on ONE flag: "Lights-off Malayalam". CAP_WORD accepts
+ * an internal hyphen, so "Lights-off" read as one capitalised word, the 2-word
+ * window fused it with the language, {lights, off} backed nobody, and the film
+ * left the deck. Same shape as Issues 032 and 041: the guard behaved correctly on
+ * a candidate that was never a name. The fix is in the EXTRACTION.
+ *
+ * WHY NOT the non-person vocabulary: adding "lights"/"off"/"watch"/"burn" would
+ * make those tokens filler ANYWHERE in a run, so "Fakename Lights" would stop
+ * counting too — a global loosening, and an endless one (the model can coin a new
+ * compound modifier every week). Keying on the token's SHAPE ends the class.
+ *
+ * WHY the capital after the hyphen is load-bearing: a real hyphenated surname
+ * capitalises its second segment — "Abdul-Jabbar", "Smith-Jones" — so it never
+ * matches here and stays a full name token, subject to the same strict backing as
+ * any other. Only the lowercase-continued form is discarded.
+ *
+ * RESIDUAL, accepted: a person written with a lowercase second segment
+ * ("Jean-luc") is now invisible, and a lone capital beside it ("Picard") is below
+ * both extractors' thresholds, so that spelling escapes the sweep. Weighed
+ * against a compound modifier costing a verified film its slot every issue, and
+ * bounded by Part 1 — a fed film can no longer be dropped by this guard at all.
+ */
+export function severHyphenLowercase(text: string): string {
+  return text.replace(HYPHEN_LOWER_RE, (tok) => "\n".repeat(tok.length));
+}
+
+/**
+ * The scan copy the extractor regexes run against. All four rewrites preserve
  * length and only ever REPLACE a character with "\n", so every offset in the
  * result maps 1:1 onto the original string. nameCandidates relies on that to
  * slice labels out of the original.
  */
 export function scanText(text: string): string {
-  return terminatePossessives(neutralizeRoleTitles(segmentSentences(text)));
+  return terminatePossessives(neutralizeRoleTitles(segmentSentences(severHyphenLowercase(text))));
 }
 
 /**
@@ -310,4 +399,149 @@ export function sweepNames(text: string, allow: NameAllowlist): string[] {
     out.push(raw);
   }
   return out;
+}
+
+// ── WD-ENG-01 PART 3 — THE GHOST SCRUB ──────────────────────────────────────
+//
+// A drop that removes a CARD but leaves the film's name in the caption and the
+// index slide does not remove the film — it publishes a deck that contradicts
+// itself. Two live editions proved it:
+//
+//   Issue 041  "Batwara 1947" was struck off the theatrical deck; the caption
+//              still sold it and the index still listed it. THE BATWARA GHOST.
+//   Issue 042  "Aroopi" was struck off the OTT deck; the caption still said
+//              "Seven drops", still named Aroopi, and the index still carried
+//              "Aroopi (Malayalam) → Prime Video" against six rendered cards.
+//
+// The scrub is DETERMINISTIC — no second LLM call, no cost, no new failure mode.
+// It removes the title-bearing segments, re-derives the count words, and then
+// VERIFIES its own work. Verification is the point: a scrub that cannot prove it
+// left no trace reports failure, and Part 4c blocks the edition instead of
+// delivering it. The guarantee is deliberately scoped to what a deterministic
+// pass can actually prove — TITLE references and COUNT lines — and an oblique
+// allusion ("the week's only Malayalam horror") is out of its reach by
+// construction. That limit is stated, not papered over.
+
+/**
+ * Number words the copy uses for counts, indexed so N ⇒ NUMBER_WORDS[N].
+ *
+ * Deliberately runs PAST MAX_WED_DROP_FILMS (15). The table is used for two
+ * different jobs: picking the word to write (never above 15) and RECOGNISING a
+ * word already in the caption (which a miscounting model can write at any
+ * value). A table that stopped at fifteen would simply not see "Sixteen drops",
+ * so a stale overcount would survive the scrub unreported.
+ */
+const NUMBER_WORDS = [
+  "zero", "one", "two", "three", "four", "five", "six", "seven",
+  "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+  "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+] as const;
+
+/** Nouns a Wed Drop count word can quantify ("Seven drops", "six films"). */
+const COUNTED_NOUNS = "drops?|films?|releases?|titles?|picks?|arrivals?|movies?";
+
+const COUNT_RE = new RegExp(
+  String.raw`\b(${NUMBER_WORDS.join("|")})(\s+(?:fresh\s+|new\s+|great\s+)?(?:${COUNTED_NOUNS}))\b`,
+  "gi"
+);
+
+/** Preserve the original casing of a replaced count word ("Seven" → "Six"). */
+function matchCase(sample: string, word: string): string {
+  if (sample === sample.toUpperCase() && sample !== sample.toLowerCase()) return word.toUpperCase();
+  if (sample[0] === sample[0]?.toUpperCase()) return word[0]!.toUpperCase() + word.slice(1);
+  return word;
+}
+
+/**
+ * Rewrite every count word that quantifies a Wed Drop noun to `n`. Counts above
+ * the NUMBER_WORDS table are left alone (and the verifier below then refuses to
+ * certify the scrub, which is the correct outcome — better blocked than wrong).
+ */
+export function retargetCounts(text: string, n: number): string {
+  const want = NUMBER_WORDS[n];
+  if (!want) return text;
+  return text.replace(COUNT_RE, (_m, num: string, tail: string) => `${matchCase(num, want)}${tail}`);
+}
+
+/** Case-insensitive whole-phrase test for a film title inside free text. */
+export function mentionsTitle(text: string, title: string): boolean {
+  const t = title.trim();
+  if (!t) return false;
+  const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // \b is wrong at a non-word boundary (a title may start or end with punctuation
+  // or a digit), so the edges are asserted as "not a word character" instead.
+  return new RegExp(String.raw`(?<![\p{L}\p{N}])${esc}(?![\p{L}\p{N}])`, "iu").test(text);
+}
+
+/**
+ * Drop every SENTENCE that names one of `titles`. Sentence boundaries reuse the
+ * extractor's own segmenter, so "A.R. Rahman" and "Dr. Rajkumar" cannot be split
+ * mid-name here either — one segmentation rule, not two.
+ */
+export function scrubSentences(text: string, titles: readonly string[]): string {
+  if (titles.length === 0) return text;
+  // segmentSentences marks each boundary with "\n"; split there, not on periods.
+  const kept = segmentSentences(text)
+    .split("\n")
+    .filter((s) => s.trim().length > 0 && !titles.some((t) => mentionsTitle(s, t)));
+  return kept.join(" ").replace(/[^\S\r\n]{2,}/g, " ").trim();
+}
+
+/**
+ * Drop every SEGMENT of an index slide that names one of `titles`. The index body
+ * is a delimited list — newline-separated in the OTT edition, "•"-separated in the
+ * theatrical one — so the separator is detected rather than assumed, and the
+ * surviving segments are rejoined with the one the model actually used.
+ */
+export function scrubIndexBody(body: string, titles: readonly string[]): string {
+  if (titles.length === 0) return body;
+  const sep = body.includes("\n") ? "\n" : body.includes("•") ? "•" : null;
+  if (sep === null) return scrubSentences(body, titles);
+  const parts = body.split(sep);
+  const kept = parts.filter((p) => p.trim().length > 0 && !titles.some((t) => mentionsTitle(p, t)));
+  // Rejoin exactly as found: "\n" was already the delimiter; "•" carried spaces.
+  return sep === "\n" ? kept.map((p) => p.trim()).join("\n") : kept.map((p) => p.trim()).join(" • ");
+}
+
+export interface ScrubResult {
+  caption: string;
+  indexBody: string;
+  /** True when NO trace of any dropped title, and no stale count, survives. */
+  clean: boolean;
+  /** Why it could not be certified. Empty when `clean`. */
+  problems: string[];
+}
+
+/**
+ * Remove every reference to `dropped` from the caption and the index slide, then
+ * retarget the count words to `keptCount` — and VERIFY the result. `clean:false`
+ * is not a failure of nerve; it is the signal that the edition must be blocked.
+ */
+export function scrubDroppedFilms(
+  caption: string,
+  indexBody: string,
+  dropped: readonly string[],
+  keptCount: number
+): ScrubResult {
+  const problems: string[] = [];
+  const newCaption = retargetCounts(scrubSentences(caption, dropped), keptCount);
+  const newIndex = scrubIndexBody(indexBody, dropped);
+
+  for (const t of dropped) {
+    if (mentionsTitle(newCaption, t)) problems.push(`caption still names "${t}"`);
+    if (mentionsTitle(newIndex, t)) problems.push(`index slide still lists "${t}"`);
+  }
+  // A caption scrubbed to nothing cannot carry the edition — the whole caption
+  // was about the dropped film.
+  if (newCaption.trim().length === 0) problems.push("caption scrubbed empty");
+  if (newIndex.trim().length === 0) problems.push("index slide scrubbed empty");
+  // Every surviving count word must now read the rendered card count.
+  const want = NUMBER_WORDS[keptCount];
+  for (const m of newCaption.matchAll(COUNT_RE)) {
+    const phrase = m[0];
+    if (!want) { problems.push(`count "${phrase}" exceeds the number-word table`); continue; }
+    if ((m[1] ?? "").toLowerCase() !== want) problems.push(`caption count "${phrase}" ≠ ${keptCount}`);
+  }
+
+  return { caption: newCaption, indexBody: newIndex, clean: problems.length === 0, problems };
 }

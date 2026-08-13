@@ -14,6 +14,9 @@ import { dirname } from "node:path";
 import type { Release } from "./types.js";
 import { hasRealVoteBase as voteBaseOf, awardsNumericSeal } from "./seal-decision.js";
 import { missingPlatformLogos } from "./platform-logo.js";
+import type { CopyNotice } from "./copy-guard.js";
+
+export type { CopyNotice };
 
 export type Bucket = "arrival" | "gem" | "theatrical" | "ott" | "verdict" | "spotlight";
 export type CheckStatus = "pass" | "fail" | "warn";
@@ -134,6 +137,17 @@ export function qualifyingDate(
 export interface ManifestMeta {
   headSha?: string;
   treeDirty?: boolean | null;
+  /**
+   * WD-ENG-01 — what the copy guard did, so the receipt shows it. A
+   * copy-fallback lands as a non-blocking WARN on the film's own row (the film
+   * shipped; only its blurb changed). A copy-drop has no row to land on — the
+   * film is gone — so it gets a synthesized one, and that row FAILS when the
+   * post-drop scrub could not be certified, which is what makes the 4c render
+   * gate block a self-contradicting edition.
+   */
+  copyNotices?: readonly CopyNotice[];
+  /** Bucket the synthesized copy-drop rows are attributed to. */
+  copyNoticeBucket?: Bucket;
 }
 
 export function buildManifest(
@@ -147,6 +161,17 @@ export function buildManifest(
   const idCounts = new Map<string, number>();
   for (const { film } of films) idCounts.set(film.id, (idCounts.get(film.id) ?? 0) + 1);
 
+  // Copy-guard notices, keyed for the row loop. Fallbacks attach to the film's
+  // own row; drops have no row and are synthesized after it.
+  const notices = meta.copyNotices ?? [];
+  const fallbacksByTitle = new Map<string, CopyNotice[]>();
+  for (const n of notices) {
+    if (n.kind !== "copy-fallback") continue;
+    const list = fallbacksByTitle.get(n.title) ?? [];
+    list.push(n);
+    fallbacksByTitle.set(n.title, list);
+  }
+
   const rows: ManifestRow[] = films.map(({ film, bucket, whyLine }) => {
     const win = windows[bucket];
     const reasons: string[] = [];
@@ -156,6 +181,13 @@ export function buildManifest(
     // INFO — recorded in `reason` for the receipt, but never moves `status`. For
     // things the operator should be able to see happened, that are not problems.
     const info = (r: string) => { reasons.push(r); };
+
+    // COPY FALLBACK (WD-ENG-01 Part 1) — non-blocking by design. The film is
+    // gate-approved and it SHIPPED; only its blurb was swapped for deterministic
+    // copy. Warn so the operator can see which card lost its editorial line.
+    for (const n of fallbacksByTitle.get(film.title) ?? []) {
+      warn(`copy-fallback: ${n.title} — ${n.term}`);
+    }
 
     if (!win) {
       fail(`no window configured for bucket "${bucket}"`);
@@ -289,6 +321,33 @@ export function buildManifest(
 
     return { title: film.title, id: film.id, bucket, qualifyingDate: date, dateField: label, window: windowStr, status, reason: reasons.join("; ") };
   });
+
+  // COPY DROP (WD-ENG-01 Part 3) — the film has no row of its own, because it is
+  // not in the deck. Synthesize one so the drop appears in the receipt, the log,
+  // the Slack issues block and the counts, instead of living only in a draft
+  // JSON nobody opens. Issue 042's Aroopi drop left `ok: true` over six rows and
+  // no indication at all that a seventh film had existed.
+  //
+  // FAIL when the scrub could not be certified: `ok` then goes false and
+  // assertRenderable stops the edition. A clean scrub is a WARN — loud, but the
+  // deck is internally consistent and ships.
+  const noticeBucket = meta.copyNoticeBucket ?? (Object.keys(windows)[0] as Bucket | undefined) ?? "ott";
+  for (const n of notices) {
+    if (n.kind !== "copy-drop") continue;
+    const win = windows[noticeBucket];
+    rows.push({
+      title: n.title,
+      id: "copy-guard",
+      bucket: noticeBucket,
+      qualifyingDate: null,
+      dateField: "-",
+      window: win ? `${win.start} -> ${win.end}` : "-",
+      status: n.scrubFailed ? "fail" : "warn",
+      reason: n.scrubFailed
+        ? `copy-drop: ${n.title} — ${n.term}; slide removed AND the caption/index scrub could not be certified — edition blocked`
+        : `copy-drop: ${n.title} — ${n.term}; slide removed, caption/index/counts scrubbed clean`,
+    });
+  }
 
   const passCount = rows.filter(r => r.status === "pass").length;
   const warnCount = rows.filter(r => r.status === "warn").length;

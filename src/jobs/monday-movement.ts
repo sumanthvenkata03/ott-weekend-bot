@@ -4,7 +4,8 @@ import { pickHiddenGems } from "../content/weekend/spotlight-picker.js";
 import { generateMondayMovement, type DeckFacts } from "../content/weekend/monday-movement.js";
 import { writeMovementToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
-import { log } from "../shared/logger.js";
+import { log } from "../shared/logger.js";
+import { startRunLog } from "../shared/run-artifacts.js";
 import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
 import { buildHashtags } from "../shared/hashtags.js";
 import { renderMonMovement } from "../rendering/render-mon-movement.js";
@@ -40,6 +41,7 @@ function uniqueMaxTitle(films: Release[], key: (r: Release) => number | undefine
 
 async function main() {
   log.info("📰 Monday Movement job — starting");
+  startRunLog("mon-movement");
 
   purgeExpired();
 

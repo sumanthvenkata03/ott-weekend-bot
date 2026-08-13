@@ -19,7 +19,8 @@ import {
 } from "../content/weekend/verdict-research.js";
 import { writeSaturdayVerdictToNotion } from "../delivery/notion.js";
 import { purgeExpired, cached } from "../shared/cache.js";
-import { log } from "../shared/logger.js";
+import { log } from "../shared/logger.js";
+import { startRunLog } from "../shared/run-artifacts.js";
 import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
 import { buildHashtags } from "../shared/hashtags.js";
 import { renderSatVerdict } from "../rendering/render-sat-verdict.js";
@@ -135,6 +136,7 @@ async function researchFilmCached(film: Release): Promise<VerdictResearch> {
 
 async function main(deliver = true) {
   log.info("⚖️  Saturday Verdict job — starting");
+  startRunLog("sat-verdict");
   if (!deliver) {
     log.warn("DRY RUN — no delivery (--no-deliver): render + score + table run; R2/Notion/Slack skipped");
   }

@@ -46,7 +46,8 @@ import { buildAndUploadDeckZip, writeCaptionFile } from "../delivery/deliver-dec
 import { postToWebhook } from "../delivery/slack.js";
 import { config } from "../shared/config.js";
 import { editorialTodayStamp } from "../shared/editorial-clock.js";
-import { log } from "../shared/logger.js";
+import { log } from "../shared/logger.js";
+import { startRunLog } from "../shared/run-artifacts.js";
 
 function escapeMd(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -362,6 +363,7 @@ async function main(opts: { slack: boolean; mode: RunMode }): Promise<void> {
   const clock = istClockTime(new Date(nowMs));
   const ephemeral = isEphemeral(opts.mode);
   log.info(`🗞  TBSI News Desk — ${istDate} ${clock} IST · mode=${opts.mode} · slack=${opts.slack}`);
+  startRunLog("news-edition");
 
   // 1 — gather
   log.info("  Gathering across 7 languages…");

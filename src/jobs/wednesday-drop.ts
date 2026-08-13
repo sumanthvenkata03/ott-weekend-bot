@@ -25,7 +25,7 @@ import { enrichReleases } from "../ingestion/releases/index.js";
 import { assertPublishableTree, provenanceLine, type RunContext } from "../shared/run-context.js";
 import { confirmAutoPublish, applyAutoConfirmation, buildRedPing, editionOutcome } from "../reconcile/autonomy.js";
 import { auditRender, auditBlockers, type AuditSubject } from "../rendering/render-audit.js";
-import { saveRunArtifact, runArtifactPath } from "../shared/run-artifacts.js";
+import { saveRunArtifact, runArtifactPath, startRunLog } from "../shared/run-artifacts.js";
 import { redactSecrets } from "../shared/redact.js";
 /**
  * Manual one-off exclusion hook. WED_DROP_EXCLUDE is a comma-separated list of
@@ -244,7 +244,14 @@ async function produceEdition(
       ...(whyByTitle.has(f.title) ? { whyLine: whyByTitle.get(f.title)! } : {}),
     })),
     { [vbucket]: { start: windowStart, end: windowEnd, dateField: vbucket === "ott" ? "ott" : "theatrical", label: meta.notionTitle } },
-    { ...(runCtx ? { headSha: runCtx.headSha, treeDirty: runCtx.dirty } : {}) },
+    {
+      ...(runCtx ? { headSha: runCtx.headSha, treeDirty: runCtx.dirty } : {}),
+      // WD-ENG-01 — the copy guard's decisions reach the receipt. A fallback
+      // warns on the film's own row; a drop gets its own row and blocks the
+      // edition (via ok:false → assertRenderable) if its scrub was uncertifiable.
+      copyNotices: draft.copyNotices,
+      copyNoticeBucket: vbucket,
+    },
     { cardType: "wed-drop", editionDate: dateStr });
   log.info("\n" + manifestToLog(manifest));
   saveManifest(manifest, `output/manifests/wed-drop-${meta.slug}-${dateStr}.json`);
@@ -442,6 +449,7 @@ export function resolveAlwaysGate(raw: string | undefined): boolean {
 
 async function main() {
   log.info("🎬 Wednesday Drop job — starting");
+  startRunLog("wed-drop");
 
   // W-1 — THE WORKING-TREE LAW. Jobs execute the working tree, so a SCHEDULED
   // run on uncommitted code would publish unreviewed changes. Refuse before any

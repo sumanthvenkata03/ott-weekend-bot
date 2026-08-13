@@ -114,3 +114,47 @@ describe("WIRING PIN — HARD_FAIL_ON_INVALID stays false (R1)", () => {
     expect(code(read("src/shared/post-validator.ts"))).toContain("HARD_FAIL_ON_INVALID = false");
   });
 });
+
+// WD-ENG-01 PART 4 — "small, unconditional, EVERY job entry point that renders
+// or delivers". That is a statement about where a call sits, which is exactly
+// what a wiring pin is for: a types-only check would pass while a job quietly
+// stopped persisting its own log.
+describe("WIRING PIN — every job entry point starts a run log", () => {
+  const JOBS = [
+    "src/jobs/wednesday-drop.ts",
+    "src/jobs/monday-movement.ts",
+    "src/jobs/saturday-verdict.ts",
+    "src/jobs/sunday-spotlight.ts",
+    "src/jobs/friday-archives.ts",
+    "src/jobs/thursday-compare.ts",
+    "src/jobs/news-edition.ts",
+    "src/jobs/reddit-radar.ts",
+  ];
+
+  it.each(JOBS)("%s calls startRunLog", (f) => {
+    expect(code(read(f))).toContain("startRunLog(");
+  });
+
+  it("the call is INSIDE main(), not at module scope (importing a job must log nothing)", () => {
+    for (const f of JOBS) {
+      const src = code(read(f));
+      const mainAt = src.search(/async function main\s*\(/);
+      expect(mainAt, f).toBeGreaterThan(-1);
+      // Every occurrence sits after main()'s declaration — a module-scope call
+      // would fire on import, and news-edition imports reddit-radar.
+      for (let i = src.indexOf("startRunLog("); i !== -1; i = src.indexOf("startRunLog(", i + 1)) {
+        if (src.slice(i - 30, i).includes("import")) continue;   // the import line
+        expect(i, `${f}: startRunLog outside main()`).toBeGreaterThan(mainAt);
+      }
+    }
+  });
+
+  it("it is unconditional — no env flag guards it", () => {
+    for (const f of JOBS) {
+      const src = code(read(f));
+      const line = src.split("\n").find((l) => l.includes("startRunLog(") && !l.includes("import"))!;
+      expect(line, f).not.toContain("if ");
+      expect(line, f).not.toContain("process.env");
+    }
+  });
+});

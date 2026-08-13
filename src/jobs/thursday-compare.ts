@@ -5,11 +5,13 @@ import { pickFaceOff } from "../content/weekend/compare-picker.js";
 import { generateThursdayCompare } from "../content/weekend/thursday-compare.js";
 import { writeCompareToNotion } from "../delivery/notion.js";
 import { purgeExpired } from "../shared/cache.js";
-import { log } from "../shared/logger.js";
+import { log } from "../shared/logger.js";
+import { startRunLog } from "../shared/run-artifacts.js";
 import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
 import { buildHashtags } from "../shared/hashtags.js";
 async function main() {
   log.info("⚔️  Thursday Compare job — starting");
+  startRunLog("thu-compare");
   
   purgeExpired();
   

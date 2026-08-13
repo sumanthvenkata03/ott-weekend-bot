@@ -4,10 +4,19 @@
 // missing key, so config is mocked to keep this import-safe with keys blanked —
 // the same guard ott-candidates.test.ts uses. Only the pure resolver is exercised.
 import { describe, it, expect, vi } from "vitest";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 vi.mock("../../shared/config.js", () => ({
   config: { NOTION_TOKEN: "test", TMDB_API_KEY: "test", OMDB_API_KEY: "test", MDBLIST_API_KEY: "" },
 }));
+
+// wednesday-drop.ts calls main() BARE at module scope (the landmine this file's
+// header describes), so the import below runs a real job — and since WD-ENG-01
+// Part 4 that job starts a run log. Point the tee at the OS temp dir BEFORE the
+// import so a test suite never writes run logs into the developer's output/runs/.
+// This exercises startRunLog's documented operator-override branch.
+process.env.TBSI_LOG_FILE = join(tmpdir(), `tbsi-test-${process.pid}.log`);
 
 const { resolveAlwaysGate } = await import("../wednesday-drop.js");
 

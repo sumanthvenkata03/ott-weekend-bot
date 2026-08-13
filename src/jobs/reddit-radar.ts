@@ -17,6 +17,7 @@ import { postToWebhook } from "../delivery/slack.js";
 import { db } from "../shared/cache.js";
 import { editorialTodayStamp } from "../shared/editorial-clock.js";
 import { log } from "../shared/logger.js";
+import { startRunLog } from "../shared/run-artifacts.js";
 import type { VerdictLogEntry } from "../content/weekend/research-archive.js";
 
 const SITE = "https://thebigscreenindex.com";
@@ -195,6 +196,7 @@ async function scan(judged: JudgedFilm[], nowMs: number): Promise<RadarHit[]> {
 async function main(opts: { slack: boolean; test: boolean }): Promise<void> {
   const nowMs = Date.now();
   log.info(`🛰️  Reddit radar — ${editorialTodayStamp()} (IST) · slack=${opts.slack} test=${opts.test}`);
+  startRunLog("reddit-radar");
 
   const judged = [...readVerdictArchive(nowMs), ...readEvergreensPicks()];
   log.info(`  Judged scope: ${judged.length} film(s) (verdicts 30d + Evergreens picks)`);
