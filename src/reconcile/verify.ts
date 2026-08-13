@@ -45,6 +45,11 @@ export interface VerifyOptions {
   aiReview?: boolean;
   /** Pre-LLM corroboration cap. Default 40 (matches the prior reconcileEdition). */
   cap?: number;
+  /**
+   * WD-ENG-07 — the wiki language index from getCandidates. Threaded straight to
+   * reconcile. Omitted ⇒ byte-identical to pre-ENG-07 behaviour.
+   */
+  wikiLanguageIndex?: ReadonlyMap<string, string>;
   /** Injected TMDb access (default: live). */
   deps?: ReconcileDeps;
 }
@@ -76,6 +81,7 @@ export async function verifyCandidates(
       window: opts.window,
       cap,
       aiRejected: ai.rejected,
+      ...(opts.wikiLanguageIndex ? { wikiLanguageIndex: opts.wikiLanguageIndex } : {}),
     },
     deps
   );

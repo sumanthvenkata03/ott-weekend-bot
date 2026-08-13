@@ -69,6 +69,9 @@ function discoveryResult(films: DiscoveredFilm[]): DiscoveryResult {
     films,
     stats: { perNet: { tmdb: films.length, wikipedia: 0 }, unionCount: films.length, onlyInTmdb: films.length, onlyInWikipedia: 0, inBoth: 0 },
     ranAt: "2026-01-01T00:00:00.000Z",
+    // WD-ENG-07 — these fixtures are TMDb-only, so the wiki index is empty. An
+    // empty index is the "behaviour identical to before" path.
+    wikiLanguageIndex: new Map<string, string>(),
   };
 }
 
@@ -147,7 +150,7 @@ describe("getCandidates — intent routing onto discovery releaseType", () => {
 
   it("returns the enrichReleases output as the result (Release[] with the language enum mapped)", async () => {
     mockDiscover.mockResolvedValue(discoveryResult([film({ title: "Solo", language: "Telugu", tmdbId: 1, releaseType: "theatrical" })]));
-    const out = await getCandidates({ from: "2026-01-01", to: "2026-01-31", intent: "theatrical" });
+    const { releases: out } = await getCandidates({ from: "2026-01-01", to: "2026-01-31", intent: "theatrical" });
     expect(out).toHaveLength(1);
     expect(out[0]!.language).toBe("Telugu");
     expect(out[0]!.tmdbId).toBe(1);

@@ -245,7 +245,7 @@ export async function discover(query: DiscoveryQuery): Promise<DiscoveryResult> 
   ]);
 
   const tmdb = tmdbRes.status === "fulfilled" ? tmdbRes.value : { films: [], coverage: [] };
-  const wiki = wikiRes.status === "fulfilled" ? wikiRes.value : { films: [], coverage: [] };
+  const wiki = wikiRes.status === "fulfilled" ? wikiRes.value : { films: [], coverage: [], languageIndex: new Map<string, string>() };
   if (tmdbRes.status === "rejected") log.warn("TMDb net failed", tmdbRes.reason);
   if (wikiRes.status === "rejected") log.warn("Wikipedia net failed", wikiRes.reason);
 
@@ -289,5 +289,6 @@ export async function discover(query: DiscoveryQuery): Promise<DiscoveryResult> 
       inBoth,
     },
     ranAt: new Date().toISOString(),
+    wikiLanguageIndex: wiki.languageIndex,
   };
 }

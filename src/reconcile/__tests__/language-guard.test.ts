@@ -265,3 +265,47 @@ describe("POOL FILMS ARE STILL NEVER TOUCHED BY THIS GUARD", () => {
     expect(r.reconciled.find((x) => x.title === "Agadha")!.foundIn.sort()).toEqual(["ai-net", "tmdb"]);
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// WD-ENG-07 — THE INDEX IS NOW CONSUMED FOR THE LANGUAGE ITSELF, not just for
+// the Indian/foreign question. languageForCode maps any unrecognised ISO to the
+// "Other" placeholder, and "Other" reaches the card's language row as such.
+// Agadha's TMDb code is the provisional "en", so it landed on "Other" while the
+// List of Telugu films of 2026 had been saying Telugu the whole time.
+describe("WD-ENG-07 — a film whose language would be 'Other' takes the index's", () => {
+  const telugu = () =>
+    buildWikiLanguageIndex([{ language: "Telugu", year: 2026, html: listHtml("Telugu") }]);
+
+  it("AGADHA: 'Other' becomes Telugu when the index knows it", async () => {
+    const r = await run(["Agadha"], HITS, COUNTRIES, telugu());
+    const f = r.reconciled.find((x) => x.title === "Agadha")!;
+    expect(f.release?.language).toBe("Telugu");
+    expect(f.release?.language).not.toBe("Other");
+  });
+
+  it("INDEX ABSENT ⇒ byte-identical to before — still 'Other', nothing invented", async () => {
+    const r = await run(["Agadha"], HITS, COUNTRIES);
+    const f = r.reconciled.find((x) => x.title === "Agadha")!;
+    expect(f.release?.language).toBe("Other");
+  });
+
+  it("EMPTY index is equally inert", async () => {
+    const r = await run(["Agadha"], HITS, COUNTRIES, new Map());
+    expect(r.reconciled.find((x) => x.title === "Agadha")!.release?.language).toBe("Other");
+  });
+
+  it("a RESOLVED language is never overwritten by the index", async () => {
+    // TMDb says Tamil ("ta"); the Telugu list also happens to name the title.
+    // The resolved code wins — Wikipedia is the fallback authority here, not the
+    // primary one. (Kattalan is a real Malayalam title; the point is the CODE.)
+    const hits = { Agadha: { id: 1747034, title: "Agadha", originalLanguage: "ta", releaseDate: "2026-08-14", year: 2026 } };
+    const r = await run(["Agadha"], hits, { 1747034: { origin_country: ["IN"], production_countries: [] } }, telugu());
+    expect(r.reconciled.find((x) => x.title === "Agadha")!.release?.language).toBe("Tamil");
+  });
+
+  it("a title the index does not know keeps 'Other' — no guessing", async () => {
+    const hits = { Unknown1: { id: 8080, title: "Unknown1", originalLanguage: "en", releaseDate: "2026-08-14", year: 2026 } };
+    const r = await run(["Unknown1"], hits, { 8080: { origin_country: ["IN"], production_countries: [] } }, telugu());
+    expect(r.reconciled.find((x) => x.title === "Unknown1")!.release?.language).toBe("Other");
+  });
+});

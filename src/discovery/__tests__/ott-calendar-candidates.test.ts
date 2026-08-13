@@ -91,7 +91,7 @@ describe("getCandidates('ott') — calendar net end-to-end (the headline)", () =
   it("🔒 a CALENDAR-only Blast emerges with its press June-25 date SURVIVING enrich", async () => {
     vi.mocked(discoverOttCalendar).mockResolvedValue([blastFrom("ott-calendar")]);
 
-    const out = await getCandidates(OTT_Q);
+    const { releases: out } = await getCandidates(OTT_Q);
     expect(out).toHaveLength(1);
     const blast = out[0]!;
 
@@ -118,7 +118,7 @@ describe("getCandidates('ott') — calendar net end-to-end (the headline)", () =
     // Only ottSearch supplies Blast; the calendar net returns [] (fail-safe).
     vi.mocked(discoverOttSearch).mockResolvedValue([blastFrom("ai-ott")]);
     vi.mocked(discoverOttCalendar).mockResolvedValue([]);
-    const out = await getCandidates(OTT_Q);
+    const { releases: out } = await getCandidates(OTT_Q);
     expect(out).toHaveLength(1);
     expect(out[0]!.tmdbId).toBe(1515729);
   });
@@ -129,7 +129,7 @@ describe("getCandidates('ott') — 3-net dedup (shared-id merge, possibleDistinc
     vi.mocked(discoverOttSearch).mockResolvedValue([blastFrom("ai-ott")]);
     vi.mocked(discoverOttCalendar).mockResolvedValue([blastFrom("ott-calendar")]);
 
-    const out = await getCandidates(OTT_Q);
+    const { releases: out } = await getCandidates(OTT_Q);
     expect(out).toHaveLength(1);                         // shared id collapses to one
     expect(out[0]!.tmdbId).toBe(1515729);
     expect(out[0]!.sources).toEqual(expect.arrayContaining(["ai-ott", "ott-calendar"]));
@@ -139,7 +139,7 @@ describe("getCandidates('ott') — 3-net dedup (shared-id merge, possibleDistinc
     vi.mocked(discoverOttSearch).mockResolvedValue([blastFrom("ai-ott", 1515729)]);
     vi.mocked(discoverOttCalendar).mockResolvedValue([blastFrom("ott-calendar", 9999999)]);
 
-    const out = await getCandidates(OTT_Q);
+    const { releases: out } = await getCandidates(OTT_Q);
     expect(out).toHaveLength(2);                         // different ids ⇒ never merged
     expect(out.map((r) => r.tmdbId).sort()).toEqual([1515729, 9999999]);
   });

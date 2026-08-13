@@ -125,6 +125,13 @@ export interface TmdbNetResult {
 export interface WikiNetResult {
   films: DiscoveredFilm[];
   coverage: WikiCoverage[];
+  /**
+   * WD-ENG-07 — normalizedTitle → pillar language, from the WHOLE YEAR of every
+   * list page fetched this run. Consumed by reconcile: it answers "is this film
+   * Indian" when TMDb.original_language is provisional, and supplies the language
+   * itself when TMDb's code resolves to the "Other" placeholder.
+   */
+  languageIndex: Map<string, string>;
 }
 
 /** Coverage statistics — the "miss detection" lives here. */
@@ -145,4 +152,6 @@ export interface DiscoveryResult {
   stats: DiscoveryStats;
   /** ISO timestamp the run finished. */
   ranAt: string;
+  /** WD-ENG-07 — normalizedTitle → pillar language, whole-year (see WikiNetResult). */
+  wikiLanguageIndex: ReadonlyMap<string, string>;
 }

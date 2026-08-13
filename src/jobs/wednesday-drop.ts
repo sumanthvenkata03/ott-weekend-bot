@@ -505,10 +505,15 @@ export async function main() {
   //    the AI-search OTT net (Step 3), so press-confirmed OTT releases TMDb's
   //    release_type=4 misses (the Blast case) finally surface in a real drop.
   //    Languages default to the full 8 (find-8); verify-corroborate is also 8.
-  const [theatrical, ott] = await Promise.all([
+  const [theatricalC, ottC] = await Promise.all([
     getCandidates({ from: startDate, to: endDate, intent: "theatrical" }),       // THEATRICAL — Wed→Sun
     getCandidates({ from: ottStartDate, to: endDate, intent: "ott" }),           // OTT — Mon→Sun (+ AI-search recall)
   ]);
+  const theatrical = theatricalC.releases;
+  const ott = ottC.releases;
+  // WD-ENG-07 — ONE index for both editions: same run, same fetched pages, and
+  // language is a property of the film, not of the pillar querying it.
+  const wikiLanguageIndex = new Map<string, string>([...theatricalC.wikiLanguageIndex, ...ottC.wikiLanguageIndex]);
   log.info(`Candidates: ${theatrical.length} theatrical (In Theaters) + ${ott.length} OTT (Now Streaming)`);
 
   // 2. THE ISSUE NUMBER IS RESOLVED AFTER THE GATE (WD-ENG-02), because it is
@@ -527,8 +532,8 @@ export async function main() {
   // same default cap (40) and live deps. AI-review stays OFF here (Wednesday runs
   // it explicitly on the blocked run below), so the gate hash is unchanged.
   const results: ReconcileResult[] = [
-    await verifyCandidates(theatrical, { pillar: "theatrical", window: editionWindow("theatrical", startDate, endDate), languages: RECONCILE_LANGUAGES }),
-    await verifyCandidates(ott, { pillar: "ott", window: editionWindow("ott", ottStartDate, endDate), languages: RECONCILE_LANGUAGES }),
+    await verifyCandidates(theatrical, { pillar: "theatrical", window: editionWindow("theatrical", startDate, endDate), languages: RECONCILE_LANGUAGES, wikiLanguageIndex }),
+    await verifyCandidates(ott, { pillar: "ott", window: editionWindow("ott", ottStartDate, endDate), languages: RECONCILE_LANGUAGES, wikiLanguageIndex }),
   ];
   for (const r of results) log.info(reconcileSummary(r));
 

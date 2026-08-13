@@ -76,7 +76,7 @@ describe("Wednesday finding → verify pipeline — Blast end-to-end (5a headlin
   it("🔒 Blast flows getCandidates(ott) → verifyCandidates and is RENDERABLE (non-red, ott date intact)", async () => {
     // FIND — getCandidates("ott"): ottSearch finds Blast; the press ott date
     // survives enrich (the Step-3 clobber→merge over TMDb's theatrical-only date).
-    const pool = await getCandidates({ from: OTT_WIN.start, to: OTT_WIN.end, intent: "ott", languages: ["Tamil"] });
+    const { releases: pool } = await getCandidates({ from: OTT_WIN.start, to: OTT_WIN.end, intent: "ott", languages: ["Tamil"] });
     expect(pool).toHaveLength(1);
     expect(pool[0]!.tmdbId).toBe(55555);
     expect(pool[0]!.releaseDates?.ott).toBe("2026-06-25");

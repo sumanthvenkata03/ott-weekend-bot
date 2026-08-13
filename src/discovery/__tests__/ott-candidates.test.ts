@@ -82,7 +82,7 @@ beforeEach(() => {
 
 describe("getCandidates('ott') — Blast end-to-end (the headline)", () => {
   it("🔒 Blast emerges with its press June-25 date in releaseDates.ott SURVIVING enrich", async () => {
-    const out = await getCandidates({ from: "2026-06-22", to: "2026-06-28", intent: "ott", languages: ["Tamil"] });
+    const { releases: out } = await getCandidates({ from: "2026-06-22", to: "2026-06-28", intent: "ott", languages: ["Tamil"] });
 
     expect(out).toHaveLength(1);
     const blast = out[0]!;

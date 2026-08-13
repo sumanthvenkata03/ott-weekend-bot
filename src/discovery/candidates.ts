@@ -16,6 +16,7 @@
 // OTT search — that is what keeps the 4 theatrical-only pillars LLM-free.
 
 import { discover, SUPPORTED_LANGUAGES, unionFilms } from "./index.js";
+import { resolveWikiOnlyFilms, type WikiResolveDeps } from "./sources/resolveWikiFilm.js";
 import { discoverOttSearch } from "./sources/ottSearch.js";
 import { discoverOttCalendar } from "./sources/ottCalendar.js";
 import { enrichReleases } from "../ingestion/releases/index.js";
@@ -116,9 +117,46 @@ function matchesIntent(f: DiscoveredFilm, intent: DropIntent): boolean {
  * its finds (deduped by tmdbId). Adapt each to a Release stub and run the shared
  * enrichment seam. Returns enriched Release[] in the same shape ingest* produces.
  */
-export async function getCandidates(q: CandidateQuery): Promise<Release[]> {
+/**
+ * WD-ENG-07 — getCandidates now returns the wiki LANGUAGE INDEX alongside the
+ * releases. The index is built from list pages this call already fetched and
+ * parsed, so exposing it costs nothing; reconcile consumes it to answer
+ * "is this Indian" and to name a language TMDb left as the "Other" placeholder.
+ *
+ * The return shape widened from Release[] to an object deliberately: an out-
+ * param or a parallel entry point would have left two ways to call the same
+ * seam, which is how a caller ends up silently on the one without the index.
+ */
+export interface CandidateResult {
+  releases: Release[];
+  /** normalizedTitle → pillar language, whole-year (see wikiLanguageIndex.ts). */
+  wikiLanguageIndex: ReadonlyMap<string, string>;
+}
+
+export async function getCandidates(
+  q: CandidateQuery,
+  deps?: Partial<WikiResolveDeps>
+): Promise<CandidateResult> {
   const languages = q.languages && q.languages.length > 0 ? q.languages : SUPPORTED_LANGUAGES;
   const result = await discover({ from: q.from, to: q.to, languages });
+
+  // ── WD-ENG-07 — RESOLVE WIKI-ONLY FINDS BEFORE THE INTENT FILTER ─────────
+  // discover() links a wiki film to TMDb only if the TMDb discover sweep found
+  // the same title independently; it never SEARCHES for one. Agadha proved the
+  // cost of that: a real TMDb record (1747034), one plain search away, that no
+  // query was ever made for. Resolution runs here — after the union, before
+  // matchesIntent — so a newly TMDb-backed film flows through the EXISTING
+  // intents untouched. matchesIntent itself is deliberately unchanged: this
+  // makes films TMDb-backed, it does not admit TMDb-less ones.
+  // The default search is imported LAZILY, inside the call. A module-level
+  // import would bind searchTitleTmdb at load time, which breaks every test that
+  // partially mocks ingestion/releases/tmdb.js — and none of those tests have a
+  // wiki-only film to resolve, so they must never reach this code at all.
+  await resolveWikiOnlyFilms(result.films, {
+    searchTitle:
+      deps?.searchTitle ??
+      (async (title, opts) => (await import("../ingestion/releases/tmdb.js")).searchTitleTmdb(title, opts)),
+  });
 
   let films = result.films.filter((f) => matchesIntent(f, q.intent));
 
@@ -166,5 +204,5 @@ export async function getCandidates(q: CandidateQuery): Promise<Release[]> {
     .filter((r): r is Release => r !== undefined);
 
   log.info(`getCandidates [${q.intent}]: ${stubs.length} candidate(s) → enriching`);
-  return enrichReleases(stubs);
+  return { releases: await enrichReleases(stubs), wikiLanguageIndex: result.wikiLanguageIndex };
 }

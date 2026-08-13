@@ -362,6 +362,8 @@ export async function discoverWikipedia(
   const years = yearsInRange(from, to);
   const films: DiscoveredFilm[] = [];
   const coverage: WikiCoverage[] = [];
+  /** normalizedTitle → pillar language, whole-year, across every fetched page. */
+  const languageIndex = new Map<string, string>();
   for (const language of languages) {
     for (const year of years) {
       const page = `List of ${language} films of ${year}`;
@@ -374,6 +376,16 @@ export async function discoverWikipedia(
         }
         const t = parsePage(htmlStr, language, year, page, from, to);
         films.push(...t.films);
+        // WD-ENG-07 — THE LANGUAGE INDEX, built from the page we already have.
+        // Parsed for the WHOLE YEAR, not the query window: the index answers
+        // "what language is this film", which has nothing to do with when it
+        // opens. A window-scoped index would go blank for exactly the
+        // provisional records that need it (see wikiLanguageIndex.ts). This is
+        // a second pure parse of an in-memory string — no fetch, no cache read.
+        for (const f of parsePage(htmlStr, language, year, page, `${year}-01-01`, `${year}-12-31`).films) {
+          const key = f.normalizedTitle;
+          if (key && !languageIndex.has(key)) languageIndex.set(key, language);
+        }
         coverage.push({
           language, year, status: "ok", count: t.films.length,
           parsed: t.resolved, unparsed: t.unparsed.length, rowsSeen: t.rowsSeen,
@@ -400,5 +412,5 @@ export async function discoverWikipedia(
       }
     }
   }
-  return { films, coverage };
+  return { films, coverage, languageIndex };
 }

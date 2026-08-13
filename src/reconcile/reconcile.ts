@@ -333,10 +333,33 @@ function buildFromPool(
   return f;
 }
 
-function buildFromNewAi(res: AiResolution, window: BucketWindow, pillar: string): ReconciledFilm {
+function buildFromNewAi(
+  res: AiResolution,
+  window: BucketWindow,
+  pillar: string,
+  wikiLanguageIndex?: ReadonlyMap<string, string>
+): ReconciledFilm {
   const hit = res.hit!;
   const ai = res.ai;
-  const language = languageForCode(hit.originalLanguage);
+  // WD-ENG-07 — NAME THE LANGUAGE INSTEAD OF SHRUGGING.
+  // languageForCode maps any unrecognised ISO to the "Other" placeholder, and
+  // "Other" is not a language — it is the absence of one, and it reaches the
+  // card's language row as such. Agadha lands here: TMDb carries it as "en"
+  // (provisional), so the code says "Other" while the List of Telugu films of
+  // 2026 has been saying Telugu all along.
+  //
+  // The index is consulted ONLY when the code produced "Other". A resolved
+  // language is never overwritten — Wikipedia is the fallback authority here,
+  // not the primary one.
+  const coded = languageForCode(hit.originalLanguage);
+  const fromWiki =
+    coded === "Other"
+      ? wikiLanguageFor(wikiLanguageIndex, ai.title) ?? wikiLanguageFor(wikiLanguageIndex, hit.title)
+      : undefined;
+  const language = (fromWiki as typeof coded | undefined) ?? coded;
+  if (fromWiki) {
+    log.info(`  [lang-index] "${ai.title}": TMDb code "${hit.originalLanguage ?? "<absent>"}" → "Other"; Wikipedia list says ${fromWiki} — using ${fromWiki}.`);
+  }
   const da = assessDates(null, ai, window);
   const poster = posterUrlFromPath(hit.posterPath);
 
@@ -551,7 +574,7 @@ export async function reconcile(input: ReconcileInput, deps: ReconcileDeps): Pro
     reconciled.push(buildFromPool(r, ai, window, pillar, rankByTmdbId, cap));
   }
   // 2) New AI movies TMDb discovery missed (Indian-language only).
-  for (const res of newMovies) reconciled.push(buildFromNewAi(res, window, pillar));
+  for (const res of newMovies) reconciled.push(buildFromNewAi(res, window, pillar, input.wikiLanguageIndex));
   // 3) Unverified AI leads (red, no release).
   for (const res of unverified) reconciled.push(buildUnverified(res, pillar));
 
