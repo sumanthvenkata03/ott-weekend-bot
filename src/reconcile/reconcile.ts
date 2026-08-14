@@ -101,6 +101,32 @@ function maxDayGap(dates: string[]): number {
   return (ts[ts.length - 1]! - ts[0]!) / DAY;
 }
 
+/**
+ * WD-ENG-16B — attach a provenance label to each date in the conflict detail.
+ *
+ * `all` is the SAME deduped array the conflict predicate ran on; this only
+ * decorates it. A date that both nets report collapses to one entry in `all`, so
+ * it is labelled with both sources rather than being silently attributed to one.
+ */
+function labelDates(
+  all: string[],
+  tmdbDate: string | null,
+  aiDate: string | undefined,
+  window: BucketWindow
+): string {
+  return all
+    .map((d) => {
+      const from: string[] = [];
+      if (d === tmdbDate) from.push(`tmdb:${window.dateField}`);
+      if (d === aiDate) from.push("press");
+      // A date that appears only in datesSeen came from the press snippets too,
+      // but was not the headline press date — say so rather than calling it TMDb.
+      if (from.length === 0) from.push("press:seen");
+      return `${d} (${from.join("+")})`;
+    })
+    .join(" vs ");
+}
+
 interface DateAssessment {
   landingStatus: LandingStatus;
   effective?: string;
@@ -121,7 +147,12 @@ interface DateAssessment {
  */
 function assessDates(
   release: Release | null,
-  ai: ExtractedFilm | undefined,
+  // WD-ENG-16B — WIDENED to the structural subset this function actually reads.
+  // ExtractedFilm still satisfies it, so every existing caller is unchanged; the
+  // widening exists so the post-enrichment re-assessment can pass the two date
+  // facts it has (from the ReconciledFilm) without fabricating a whole
+  // ExtractedFilm just to satisfy a type.
+  ai: { date?: string; datesSeen?: string[] } | undefined,
   window: BucketWindow
 ): DateAssessment {
   const tmdbDate = release ? qualifyingDate(release, window.dateField).date : null;
@@ -132,7 +163,15 @@ function assessDates(
   const inWin = all.filter((d) => inWindow(d, window.start, window.end));
   const conflict =
     all.length >= 2 && (maxDayGap(all) > 2 || (inWin.length > 0 && inWin.length < all.length));
-  const conflictDetail = conflict ? `dates seen: ${all.join(" vs ")}` : undefined;
+
+  // WD-ENG-16B — the detail now NAMES THE SOURCE of each date. The threshold and
+  // the conflict predicate above are untouched; only the wording changes.
+  // "dates seen: 2026-08-14 vs 2026-10-02" told an operator that two dates
+  // existed but not which net believed which, so approving still meant guessing.
+  // The review renders this string verbatim (gate.ts), so naming the sources
+  // here is what puts BOTH dates AND their provenance in front of the operator
+  // before they approve. Nothing here picks a winner.
+  const conflictDetail = conflict ? `dates seen: ${labelDates(all, tmdbDate, aiDate, window)}` : undefined;
 
   // Effective date + its provenance: prefer the TMDb qualifying date; otherwise
   // fall back to the press date. For OTT specifically, a blank TMDb ott date +
@@ -173,6 +212,61 @@ function assessDates(
     ...(conflictDetail ? { conflictDetail } : {}),
     ...(reason ? { reason } : {}),
   };
+}
+
+/**
+ * WD-ENG-16B — RE-RUN THE LANDING/CONFLICT ASSESSMENT ONCE THE RECORD IS WHOLE.
+ *
+ * ── THE DEFECT THIS CLOSES ──────────────────────────────────────────────────
+ * assessDates is correct and has always been correct. On the AI-net-only path it
+ * was simply CALLED TOO EARLY: buildFromNewAi invokes it as
+ * `assessDates(null, ai, window)` — release is null — so `all` holds exactly one
+ * date and there is nothing to conflict with. The TMDb date arrives afterwards,
+ * when enrichAiNetFilms replaces f.release with the enriched record and
+ * mergeReleaseDates prefers TMDb's releaseDates.theatrical over the press one.
+ *
+ * Shabara: admitted on press 2026-08-14, enriched to TMDb 2026-10-02, tiered
+ * yellow/"single-net" with no date-conflict, because the tier was decided before
+ * the second date existed. The manifest caught it later and blocked the render —
+ * but only after the operator had already approved a review showing ONE date.
+ *
+ * The fix is ordering, not a new rule: no second conflict definition, the 2-day
+ * threshold untouched, mergeReleaseDates precedence untouched. The existing
+ * check is simply asked the question again once both dates are present.
+ *
+ * WARN, NOT FAIL, deliberately. A conflict makes the film yellow and puts both
+ * dates in the review; it does not block. The genuinely dangerous case — a
+ * PRINTED date outside the window — is already a hard block at the manifest
+ * (assertRenderable), and that is the right place for it. Blocking an edition on
+ * a 7-day disagreement, which in this data is usually a real preponement rather
+ * than an error, would cost more than it saves.
+ *
+ * Mutates in place and returns whether anything changed, so the caller can log
+ * the movement rather than silently re-tiering films behind the operator.
+ */
+export function reassessAfterEnrichment(
+  f: ReconciledFilm,
+  window: BucketWindow
+): { changed: boolean; before: { tier: Tier; landingStatus?: LandingStatus } } {
+  const before = { tier: f.tier, ...(f.landingStatus ? { landingStatus: f.landingStatus } : {}) };
+
+  // The film's own press date is the AI half; the enriched release is the TMDb
+  // half. `datesSeen` is not retained on ReconciledFilm, so the re-assessment
+  // sees the two headline dates — which is exactly the pair that diverged.
+  const da = assessDates(f.release ?? null, { ...(f.date ? { date: f.date } : {}) }, window);
+
+  f.landingStatus = da.landingStatus;
+  if (da.reason) f.landingReason = da.reason;
+  else delete f.landingReason;
+  if (da.conflictDetail) f.conflictDetail = da.conflictDetail;
+  else delete f.conflictDetail;
+
+  const t = assignTier(f);
+  f.tier = t.tier;
+  f.reasons = t.reasons;
+
+  const changed = before.tier !== f.tier || before.landingStatus !== f.landingStatus;
+  return { changed, before };
 }
 
 // ── Tiering (§F) ────────────────────────────────────────────────────────────

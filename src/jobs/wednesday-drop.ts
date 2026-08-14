@@ -14,7 +14,9 @@ import { resolveIssueNumber } from "../shared/issue-anchor.js";
 import { editorialDateUTC, editorialTodayStamp, utcStamp, warnIfNotPostingDay } from "../shared/editorial-clock.js";
 import { EDITION_META, type WedDropEdition } from "../shared/wed-drop-edition.js";
 import { excludedKeysFor, recordFeatured, filmKey, type PillarKey } from "../shared/featured-ledger.js";
-import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag, assertRenderable, EditionBlockedError } from "../shared/post-validator.js";
+import { buildManifest, manifestToLog, manifestToSlack, saveManifest, assertOrFlag, assertRenderable, EditionBlockedError, dateFieldForPillar } from "../shared/post-validator.js";
+import type { BucketWindow } from "../shared/post-validator.js";
+import { reassessAfterEnrichment } from "../reconcile/reconcile.js";
 import { editionWindow, RECONCILE_LANGUAGES } from "../reconcile/run.js";
 import { verifyCandidates } from "../reconcile/verify.js";
 import { annotateWithAiReview, enforceVerification } from "../reconcile/ai-review.js";
@@ -92,11 +94,16 @@ function applyPlatformOverrides(pool: Release[], overrides: Map<string, Platform
  * guarantee.
  */
 export async function enrichAiNetFilms(results: ReconcileResult[]): Promise<number> {
-  const targets = results.flatMap((r) =>
-    r.reconciled.filter(
+  // WD-ENG-16B — iterate PER RESULT rather than flat-mapping, because the
+  // re-assessment below needs each film's own pillar window and the flat list
+  // threw that away.
+  const perResult = results.map((r) => ({
+    result: r,
+    targets: r.reconciled.filter(
       (f) => f.release && f.tmdbId !== undefined && f.foundIn.length === 1 && f.foundIn[0] === "ai-net"
-    )
-  );
+    ),
+  }));
+  const targets = perResult.flatMap((p) => p.targets);
   if (targets.length === 0) return 0;
 
   log.info(`  Field parity: enriching ${targets.length} AI-net film(s) through the shared seam…`);
@@ -106,13 +113,50 @@ export async function enrichAiNetFilms(results: ReconcileResult[]): Promise<numb
   );
   const byId = new Map(enriched.map((r) => [r.id, r]));
   let applied = 0;
-  for (const f of targets) {
-    const e = byId.get(f.release!.id);
-    if (!e) continue;              // gate/enrichment dropped it — leave as-is
-    f.release = e;
-    applied++;
+  const movements: string[] = [];
+
+  for (const { result, targets: group } of perResult) {
+    // ONE mapping, shared with the manifest — see dateFieldForPillar. This is
+    // the invariant WD-ENG-16 found violated: the same pillar must resolve to
+    // the same date field for the landing check and for the card.
+    const window: BucketWindow = {
+      start: result.window.start,
+      end: result.window.end,
+      dateField: dateFieldForPillar(result.pillar),
+      label: result.pillar,
+    };
+
+    for (const f of group) {
+      const e = byId.get(f.release!.id);
+      if (!e) continue;              // gate/enrichment dropped it — leave as-is
+      f.release = e;
+      applied++;
+
+      // ── THE SHABARA FIX ────────────────────────────────────────────────────
+      // The record is only now complete: until this assignment the film carried
+      // the press date alone, so the conflict check had a single date and could
+      // not fire. Ask it again, with both.
+      const { changed, before } = reassessAfterEnrichment(f, window);
+      if (changed || f.conflictDetail) {
+        movements.push(
+          `${f.title}: ${before.tier}→${f.tier}` +
+            (f.conflictDetail ? ` — ${f.conflictDetail}` : "") +
+            (f.landingReason ? ` [${f.landingReason}]` : "")
+        );
+      }
+    }
   }
+
   log.info(`  Field parity: ${applied}/${targets.length} AI-net film(s) now carry full card data`);
+  if (movements.length > 0) {
+    // Loud, and never silent: a film whose tier moved after the operator's own
+    // reconcile summary was printed must say so, with both dates named.
+    log.warn(
+      `  ⚠ POST-ENRICHMENT RE-ASSESSMENT moved ${movements.length} film(s) — the enriched TMDb date ` +
+        `disagrees with the press date that admitted them:`
+    );
+    for (const m of movements) log.warn(`      ${m}`);
+  }
   return applied;
 }
 
@@ -244,7 +288,11 @@ async function produceEdition(
       bucket: vbucket,
       ...(whyByTitle.has(f.title) ? { whyLine: whyByTitle.get(f.title)! } : {}),
     })),
-    { [vbucket]: { start: windowStart, end: windowEnd, dateField: vbucket === "ott" ? "ott" : "theatrical", label: meta.notionTitle } },
+    // WD-ENG-16B — dateFieldForPillar, not an inline ternary. This is the SAME
+    // mapping the post-enrichment re-assessment uses, which is what makes
+    // "same pillar ⇒ same date field for the landing check and for the card"
+    // structural instead of two ternaries that happened to agree.
+    { [vbucket]: { start: windowStart, end: windowEnd, dateField: dateFieldForPillar(vbucket), label: meta.notionTitle } },
     {
       ...(runCtx ? { headSha: runCtx.headSha, treeDirty: runCtx.dirty } : {}),
       // WD-ENG-01 — the copy guard's decisions reach the receipt. A fallback

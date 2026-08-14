@@ -122,6 +122,28 @@ export function inWindow(date: string, start: string, end: string): boolean {
   return date >= start && date <= end;
 }
 
+/**
+ * THE PILLAR → DATE-FIELD MAPPING. One definition, used by everyone.
+ *
+ * ── WD-ENG-16: WHY THIS IS A FUNCTION AND NOT A TERNARY IN THREE PLACES ─────
+ * The Shabara defect was one question — "does this film belong in this window?"
+ * — answered against two different fields. reconcile's assessDates read the
+ * reconciled/press date; the manifest read releaseDates.{theatrical|ott}. They
+ * returned opposite answers (pass vs fail) for the same film, and the operator
+ * only ever saw the first one.
+ *
+ * The mapping itself was never wrong; it was simply written out separately at
+ * each call site, so nothing forced the two readers to agree. Routing every
+ * caller through here makes "same pillar ⇒ same field" structural rather than a
+ * convention, which is what WD-ENG-16B pins.
+ *
+ * Wednesday's pillar labels are exactly "ott" and "theatrical"; anything else is
+ * treated as theatrical, matching the ternary this replaced.
+ */
+export function dateFieldForPillar(pillar: string): BucketWindow["dateField"] {
+  return pillar === "ott" ? "ott" : "theatrical";
+}
+
 // Resolve the date that qualifies a film for a bucket, plus a field label.
 export function qualifyingDate(
   film: Release,
