@@ -25,9 +25,23 @@ import { join } from "node:path";
 const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 
 describe("the count guard is wired and armed", () => {
-  it("is registered in the config alongside the default reporter", () => {
+  it("is attached from a plugin hook, NOT from the reporters array", () => {
+    // WD-ENG-10C. Living in `test.reporters` was a documented bypass: a CLI
+    // `--reporter=X` replaces that array wholesale and unloads the guard.
+    // `configureVitest` runs after CLI merge and before the reporter list is
+    // built, so the flag cannot reach it.
     const cfg = read("vitest.config.ts");
-    expect(cfg).toContain('reporters: ["default", "./vitest.count-guard.ts"]');
+    expect(cfg).toContain("configureVitest");
+    expect(cfg).toContain("vitest.config.reporters.push(new CountGuardReporter())");
+    expect(cfg).not.toContain('reporters: ["default", "./vitest.count-guard.ts"]');
+  });
+
+  it("does not put the guard back into test.reporters", () => {
+    // A future edit that "tidies" the plugin away by re-listing the reporter
+    // would silently restore the bypass. This is the tripwire for that.
+    const cfg = read("vitest.config.ts");
+    const reportersLine = /reporters:\s*\[[^\]]*\]/.exec(cfg)?.[0] ?? "";
+    expect(reportersLine).toBe('reporters: ["default"]');
   });
 
   it("pins an explicit expected total", () => {
@@ -57,10 +71,13 @@ describe("the count guard is wired and armed", () => {
     }
   });
 
-  it("documents that a CLI --reporter override unloads it", () => {
-    // This is the trap that made the guard inert for every command in the
-    // WD-ENG session, all of which passed --reporter=dot.
-    expect(read("vitest.count-guard.ts")).toMatch(/CLI `--reporter=X` REPLACES/);
+  it("records the closed bypass where the next reader will look", () => {
+    // The trap that made the guard inert for every command in the WD-ENG
+    // session, all of which passed --reporter=dot. Kept as documentation
+    // BECAUSE it is now fixed — the reason for the plugin has to survive.
+    const src = read("vitest.count-guard.ts");
+    expect(src).toMatch(/CLI `--reporter=X`\s*\n?\s*\*?\s*REPLACES/);
+    expect(src).toContain("configureVitest");
   });
 
   it("npm exposes an unflagged full-suite entry point", () => {
@@ -71,11 +88,15 @@ describe("the count guard is wired and armed", () => {
 });
 
 describe("the ROOT CAUSE is recorded where the next person will look", () => {
-  it("cache.ts still opens the db at module load — the shared-resource fact", () => {
-    // Not changed by this packet (production code is out of scope). Pinned so
-    // the investigation's finding cannot quietly stop being true without notice.
+  it("cache.ts NO LONGER opens the db at module load — WD-ENG-10C fixed it", () => {
+    // This pin used to assert the opposite, deliberately: WD-ENG-10B left the
+    // production code alone and recorded the eager open as a standing fact so it
+    // could not stop being true unnoticed. 10C changed it on purpose, so the pin
+    // is re-aimed at the new fact rather than deleted. The behavioural proof
+    // lives in cache-lazy-init.test.ts; this is the source-level tripwire.
     const cache = read("src/shared/cache.ts");
-    expect(cache).toContain("export const db = new Database(DB_PATH)");
-    expect(cache).toContain('db.pragma("journal_mode = WAL")');
+    expect(cache).not.toContain("export const db = new Database(DB_PATH)");
+    expect(cache).not.toMatch(/^db\.pragma\("journal_mode = WAL"\)/m);
+    expect(cache).toContain("function init(): CacheHandles");
   });
 });

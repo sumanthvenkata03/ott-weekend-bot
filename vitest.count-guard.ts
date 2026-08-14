@@ -43,15 +43,22 @@ import type { Reporter, TestModule } from "vitest/node";
  * removed, and never to make a red run go green — a mismatch downward is the
  * exact symptom this file exists to catch.
  */
-export const EXPECTED_TOTAL_TESTS = 1306;
+export const EXPECTED_TOTAL_TESTS = 1322;
 
 /**
- * ⚠ A CLI `--reporter=X` REPLACES `test.reporters` from the config, which
- * silently unloads this guard. Every command in the WD-ENG session used
- * `--reporter=dot`, so the guard would not have been running for any of them.
- * The npm scripts below therefore do NOT pass `--reporter`, and
- * `npm run test:count` exists as the explicit "guarded run" entry point.
- * If you pass `--reporter` by hand, you are opting OUT of the count check.
+ * ── WD-ENG-10C: THE BYPASS IS CLOSED ────────────────────────────────────────
+ * This guard USED to be listed in `test.reporters`, and a CLI `--reporter=X`
+ * REPLACES that array rather than appending to it — silently unloading the
+ * guard. Every command in the WD-ENG session passed `--reporter=dot`, so the
+ * guard was not running for any of them: it disappeared under precisely the
+ * conditions it exists to police.
+ *
+ * It is now attached from a `configureVitest` plugin hook in vitest.config.ts,
+ * which runs after CLI options are merged and before the reporter list is
+ * instantiated. `--reporter` can no longer unload it. Nothing here needs to
+ * know that; the note is here because this is where a reader looks first.
+ *
+ * Filtered runs remain exempt, by `isFilteredRun()` below and nowhere else.
  */
 
 /** Escape hatch for a deliberately filtered run (`-t`, a single file, etc.). */
@@ -88,9 +95,12 @@ export default class CountGuardReporter implements Reporter {
       "".padEnd(78, "━"),
       short
         ? `  ${EXPECTED_TOTAL_TESTS - total} case(s) DID NOT RUN — almost certainly a test file that failed\n` +
-          `  to COLLECT. Check the "Test Files ... failed" line: the usual cause is\n` +
-          `  SQLite "disk I/O error" from parallel workers contending on\n` +
-          `  data/cache.sqlite, which shared/cache.ts opens at module load (WD-ENG-10B).\n` +
+          `  to COLLECT. Check the "Test Files ... failed" line for the victim.\n` +
+          `  The historical cause was SQLite "disk I/O error" from parallel workers\n` +
+          `  contending on data/cache.sqlite, which shared/cache.ts opened at module\n` +
+          `  load; WD-ENG-10C made that open lazy, so a recurrence here is either a\n` +
+          `  NEW module-scope db touch or a different cause entirely — find out which\n` +
+          `  before assuming.\n` +
           `  DO NOT trust this run's green cases. Re-run; if it repeats, capture\n` +
           `  per-file counts with COUNT_GUARD_VERBOSE=1.`
         : `  ${total - EXPECTED_TOTAL_TESTS} MORE case(s) ran than expected. If you added tests, update\n` +

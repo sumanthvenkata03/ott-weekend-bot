@@ -7,6 +7,7 @@
 // quota-limited sources (e.g. YouTube, later) tell live vs cached calls apart.
 import { ofetch } from "ofetch";
 import pThrottle from "p-throttle";
+import type { Statement } from "better-sqlite3";
 import { db } from "../shared/cache.js";
 
 type ResponseType = "json" | "text";
@@ -15,10 +16,25 @@ type HttpMethod = "GET" | "POST";
 // Direct peek/write against the shared table (same key/value/expires_at schema
 // as cache.ts). We go direct because the shared cached() helper does not expose
 // a hit/miss flag.
-const peekStmt = db.prepare("SELECT value, expires_at FROM http_cache WHERE key = ?");
-const putStmt = db.prepare(
-  "INSERT OR REPLACE INTO http_cache (key, value, expires_at) VALUES (?, ?, ?)"
-);
+//
+// WD-ENG-10C: prepared LAZILY, on the archives-ledger / news-seen / radar-seen
+// precedent. cache.ts now defers opening data/cache.sqlite to first use; doing
+// these two `db.prepare` calls at module scope would have re-armed the exact
+// import-time DB open that change exists to remove — and this module is in the
+// import graph of ottCalendar, ottSearch and news-gather, so it would have
+// dragged most of the discovery suite back onto the contended file.
+let stmts: { peek: Statement; put: Statement } | null = null;
+
+function getStmts() {
+  if (stmts) return stmts;
+  stmts = {
+    peek: db.prepare("SELECT value, expires_at FROM http_cache WHERE key = ?"),
+    put: db.prepare(
+      "INSERT OR REPLACE INTO http_cache (key, value, expires_at) VALUES (?, ?, ?)"
+    ),
+  };
+  return stmts;
+}
 
 // Same throttle profile as tmdb.ts: 4 requests / second across all sources.
 const throttle = pThrottle({ limit: 4, interval: 1000 });
@@ -72,7 +88,7 @@ export async function fetchCached<T = unknown>(
   opts: FetchCachedOptions
 ): Promise<CachedFetch<T>> {
   const now = Date.now();
-  const row = peekStmt.get(key) as { value: string; expires_at: number } | undefined;
+  const row = getStmts().peek.get(key) as { value: string; expires_at: number } | undefined;
   if (row && row.expires_at > now) {
     return { value: JSON.parse(row.value) as T, cached: true };
   }
@@ -82,6 +98,6 @@ export async function fetchCached<T = unknown>(
     ...(opts.headers ? { headers: opts.headers } : {}),
     ...(opts.body !== undefined ? { body: opts.body } : {}),
   })) as T;
-  putStmt.run(key, JSON.stringify(value), now + opts.ttlSeconds * 1000);
+  getStmts().put.run(key, JSON.stringify(value), now + opts.ttlSeconds * 1000);
   return { value, cached: false };
 }

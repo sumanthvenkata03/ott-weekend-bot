@@ -11,6 +11,7 @@
 // - Result is cached per FILM IDENTITY (7d) so re-runs never re-bill quota.
 // - This module is opt-in: the key-free `npm run research` CLI never imports it.
 import { z } from "zod";
+import type { Statement } from "better-sqlite3";
 import { callClaudeJSON, MODELS } from "../content/claude.js";
 import type { ModelChoice } from "../content/claude.js";
 import { cached, db } from "../shared/cache.js";
@@ -187,7 +188,13 @@ OUTPUT — STRICT JSON ONLY (no markdown, no prose). Omit any field with no sour
 // ── Cache (identity-keyed) ──────────────────────────────────────────────────
 // cached() exposes no hit/miss, so we peek http_cache directly (same table +
 // pattern as http.ts) to stamp `cached` fresh on each call.
-const peekStmt = db.prepare("SELECT expires_at FROM http_cache WHERE key = ?");
+//
+// WD-ENG-10C: prepared lazily, same reason as http.ts — cache.ts no longer opens
+// data/cache.sqlite at import, and a module-scope `db.prepare` here would put it
+// straight back for every importer of this module.
+let peekStmt: Statement | null = null;
+const getPeekStmt = (): Statement =>
+  (peekStmt ??= db.prepare("SELECT expires_at FROM http_cache WHERE key = ?"));
 
 function cacheKeyFor(q: ResearchQuery): string {
   if (q.imdbId) return `research:consolidate:${q.imdbId}`;
@@ -195,7 +202,7 @@ function cacheKeyFor(q: ResearchQuery): string {
 }
 
 function isFresh(key: string): boolean {
-  const row = peekStmt.get(key) as { expires_at: number } | undefined;
+  const row = getPeekStmt().get(key) as { expires_at: number } | undefined;
   return !!row && row.expires_at > Date.now();
 }
 

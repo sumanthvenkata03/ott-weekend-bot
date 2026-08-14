@@ -15,9 +15,10 @@
 // DELIBERATELY with its first network seam mocked — the test owns the rejection,
 // so no code path can reach process.exit.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 
 vi.mock("../../shared/config.js", () => ({
   config: { NOTION_TOKEN: "test", TMDB_API_KEY: "test", OMDB_API_KEY: "test", MDBLIST_API_KEY: "" },
@@ -52,18 +53,85 @@ const { resolveAlwaysGate, main } = await import("../wednesday-drop.js");
 const RUNS_DIR = join(process.cwd(), "output", "runs");
 const runsSnapshot = () => (existsSync(RUNS_DIR) ? readdirSync(RUNS_DIR).sort() : []);
 
+// ── WD-ENG-10C: THE TEMP-LOG PATH USED TO BE KEYED ON THE PID ALONE ─────────
+// `tbsi-test-${process.pid}.log` is not unique. It is unique only among LIVE
+// processes: the OS recycles PIDs freely, and vitest spawns a fresh worker pool
+// per run, so a later run's worker can be handed the PID an earlier run's worker
+// had. It then points at that run's leftover file — which two of the cases below
+// treat as evidence ("no run log exists yet" / "a run log now exists"). The
+// first of those flips to a false FAILURE the moment the file is inherited, and
+// it is a genuinely intermittent failure because it needs the recycle to land.
+//
+// Belt AND braces, because this one cost two packets of misattribution:
+//   BELT   — a random component, so no two paths ever coincide, across runs or
+//            within one (each case gets its own file, so cases cannot pollute
+//            each other either).
+//   BRACES — an unconditional delete of the target path before use, so even a
+//            path that somehow DID repeat starts from nothing.
+// Either alone would close the hole. Both together mean a future edit that
+// weakens one still leaves the other standing.
+const freshLogPath = (): string =>
+  join(tmpdir(), `tbsi-test-${process.pid}-${randomUUID()}.log`);
+
+/** BRACES: guarantee nothing is sitting at `path` before a case relies on it. */
+const armLogPathAt = (path: string): string => {
+  rmSync(path, { force: true });
+  return path;
+};
+
+const armLogPath = (): string => armLogPathAt(freshLogPath());
+
 let prevTee: string | undefined;
 beforeEach(() => {
   prevTee = process.env.TBSI_LOG_FILE;
   // The run log must land in temp, not in the repo's output/runs/.
-  process.env.TBSI_LOG_FILE = join(tmpdir(), `tbsi-test-${process.pid}.log`);
+  process.env.TBSI_LOG_FILE = armLogPath();
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
+  // Don't leave one file per case behind in temp now that paths are unique.
+  if (process.env.TBSI_LOG_FILE) rmSync(process.env.TBSI_LOG_FILE, { force: true });
   if (prevTee === undefined) delete process.env.TBSI_LOG_FILE;
   else process.env.TBSI_LOG_FILE = prevTee;
   vi.restoreAllMocks();
+});
+
+describe("WD-ENG-10C — the run-log temp path cannot collide across runs", () => {
+  it("a recycled PID cannot inherit an earlier run's log file", () => {
+    // Stand in for "an earlier run, same PID, left this behind". Under the old
+    // PID-only scheme this IS the path this run would have been handed.
+    const pidOnly = join(tmpdir(), `tbsi-test-${process.pid}.log`);
+    writeFileSync(pidOnly, "stale run log from an earlier process with this same PID");
+    try {
+      expect(existsSync(pidOnly)).toBe(true);
+
+      const first = armLogPath();
+      const second = armLogPath();
+
+      // BELT, three ways: not the PID-only path, not each other, and each empty.
+      expect(first).not.toBe(pidOnly);
+      expect(second).not.toBe(pidOnly);
+      expect(first).not.toBe(second);
+      expect(existsSync(first)).toBe(false);
+      expect(existsSync(second)).toBe(false);
+      // The PID is still in the name — it stays useful for attribution.
+      expect(first).toContain(`tbsi-test-${process.pid}-`);
+    } finally {
+      rmSync(pidOnly, { force: true });
+    }
+  });
+
+  it("arming a path that already exists deletes it — the braces, independently", () => {
+    // Proves the cleanup does the work on its own, so the fix does not rest
+    // solely on randomness never repeating.
+    const path = armLogPath();
+    writeFileSync(path, "left over");
+    expect(existsSync(path)).toBe(true);
+
+    expect(armLogPathAt(path)).toBe(path);
+    expect(existsSync(path)).toBe(false);
+  });
 });
 
 describe("resolveAlwaysGate — gate is ON unless explicitly disarmed", () => {
