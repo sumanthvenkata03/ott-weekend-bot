@@ -299,3 +299,95 @@ describe("PART 3 — an UNFED title still drops, and the drop is loud and clean"
     ]);
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// WD-ENG-12 ITEM 5 — THE STREAMING-BRAND VOCABULARY IS COMPLETE, PER BRAND.
+//
+// WED_DROP_NON_PERSON_WORDS carried "lionsgate" but not "play". "Lionsgate Play"
+// was therefore safe only by ACCIDENT: the phrase reaches the allowlist as
+// non-person TEXT from the film record's `platform` field, so it is covered when
+// — and only when — the film being written about actually carries that platform.
+// Copy naming the service for any other reason left "Play" unbacked.
+//
+// Post-WD-ENG-01 that can no longer drop a film (the fed-film ruling above), so
+// this was a latent CAPTION-level flag and a wasted retry, not a deck failure.
+// It is still a bug: every other multi-word brand in the list has all of its
+// tokens ("prime"+"video", "sun"+"nxt", "sony"+"liv"), so the missing "play" was
+// an incomplete entry rather than a safety decision.
+//
+// Adding a word LOOSENS the guard, which is why this is pinned both ways: the
+// gap set below is asserted by EXACT EQUALITY, so completing one brand cannot
+// quietly become a habit of adding whatever token trips a sweep.
+describe("WD-ENG-12 — multi-word platform brands are tokenised completely", () => {
+  const WORDS = new Set(WED_DROP_NON_PERSON_WORDS);
+
+  /** Same shape the guard uses: lowercase, letters-only, ≥2 chars. */
+  const brandTokens = (p: string): string[] =>
+    p.toLowerCase().split(/[^\p{L}]+/u).filter((t) => t.length >= 2);
+
+  // Every Platform in the union except the "Other" sentinel, which is not a brand.
+  const BRANDS = [
+    "Netflix", "Prime Video", "JioHotstar", "Aha", "SonyLIV", "ZEE5", "Sun NXT",
+    "ManoramaMAX", "Hoichoi", "Lionsgate Play", "Apple TV+", "MUBI", "Chaupal",
+    "Planet Marathi", "ETV Win",
+  ] as const;
+
+  it("THE FIX — Lionsgate Play is now covered token by token", () => {
+    expect(WORDS.has("lionsgate")).toBe(true);
+    expect(WORDS.has("play")).toBe(true);
+  });
+
+  it("the brands that ARE covered are covered COMPLETELY — no half-entries", () => {
+    // A brand is either fully in the list or fully absent. A half-entry is the
+    // exact defect this item found, and it is the one state ruled out here.
+    for (const brand of BRANDS) {
+      const toks = brandTokens(brand);
+      const present = toks.filter((t) => WORDS.has(t));
+      if (present.length === 0) continue;                       // fully absent — see below
+      expect(present, `${brand} is a HALF-ENTRY`).toEqual(toks);
+    }
+  });
+
+  it("the brands NOT in the vocabulary are exactly these, and no others", () => {
+    // Found while fixing "play": three more brands have no tokens in the list at
+    // all. They are NOT fixed here — that would be improvising past this item's
+    // scope, and each carries the same loosening cost that needed arguing for
+    // "play". They are recorded by exact equality so (a) the gap is visible
+    // rather than folklore, and (b) a NEW platform added to the union without a
+    // decision about its tokens trips this test instead of shipping silently.
+    const uncovered = BRANDS.filter((b) => brandTokens(b).every((t) => !WORDS.has(t)));
+    expect([...uncovered].sort()).toEqual(["Chaupal", "ETV Win", "Planet Marathi"]);
+  });
+
+  // The real Aug-13 fixture set DOES contain a Lionsgate Play film (Aakhri
+  // Sawal) — which is precisely the accidental coverage this item is about. To
+  // show the WORD LIST is carrying the phrase rather than that record, the
+  // allowlist below is built from the releases that are NOT on that platform.
+  const OFF_PLATFORM = FED_SEVEN.filter(
+    (r) => !(r.platform as string[]).includes("Lionsgate Play")
+  );
+  const allowWithoutBrand = () =>
+    buildAllowlist({
+      personNames: OFF_PLATFORM.flatMap((r) => [...(r.leadCast ?? []), r.director, r.musicDirector]),
+      nonPersonText: OFF_PLATFORM.flatMap((r) => [r.title, ...r.platform, r.language]),
+      nonPersonWords: WED_DROP_NON_PERSON_WORDS,
+    });
+
+  it("PRECONDITION — the accidental coverage is genuinely removed", () => {
+    expect(FED_SEVEN.some((r) => (r.platform as string[]).includes("Lionsgate Play"))).toBe(true);
+    expect(OFF_PLATFORM.some((r) => (r.platform as string[]).includes("Lionsgate Play"))).toBe(false);
+    expect(OFF_PLATFORM.length).toBeGreaterThan(0);
+  });
+
+  it("BEHAVIOUR — 'Lionsgate Play' in copy is clean when no film record carries it", () => {
+    expect(sweepNames("Streaming on Lionsgate Play from Friday.", allowWithoutBrand())).toEqual([]);
+  });
+
+  it("adding 'play' did NOT launder a real name — a hallucinated person still flags", () => {
+    // The loosening is bounded: "play" drops out of a run, it does not back the
+    // rest of it. A fabricated two-word name is still unbacked and still caught.
+    expect(
+      sweepNames("Lionsgate Play picked it up after Fakename Surnameson pitched it.", allowWithoutBrand())
+    ).toEqual(["Fakename Surnameson"]);
+  });
+});

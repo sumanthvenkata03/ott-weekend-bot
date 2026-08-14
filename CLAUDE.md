@@ -75,7 +75,13 @@ Do not report "done" until you have verified. For rendering changes:
 
 ## Code conventions (Sumanth's standing preferences)
 
-- Tabs, not spaces.
+- Two spaces, not tabs. (This line used to say "tabs, not spaces" and the
+  code never did: a WD-ENG-12 sweep of all 260 `.ts` files under `src/` and
+  `scripts/` found 257 indented with 2 spaces, 1 with tabs
+  — `src/shared/editorial-clock.ts` — and 2 with no indented lines at all.
+  The doc was the outlier, so the doc moved. `editorial-clock.ts` is left
+  alone deliberately: reindenting it would rewrite every line of a
+  date-arithmetic module for cosmetics.)
 - CRLF line endings.
 - Commit messages: no attribution/co-author trailers.
 - Copy-paste-ready answers; minimal preamble.

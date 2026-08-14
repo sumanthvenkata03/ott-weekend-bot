@@ -158,9 +158,10 @@ describe("THE GUARD DID NOT GO SOFT — genuinely foreign films reject, same lab
     // Note the code uses a PILLAR language ("ta"), not Bengali: INDIAN_LANG_CODES
     // is the seven pillar codes {te,ta,ml,hi,kn,mr,pa} and deliberately excludes
     // "bn", so a Bengali film rejects on LANGUAGE before the country gate is
-    // reached. (The comment above this branch in reconcile.ts still describes
-    // Mastul as passing a bn-shaped language check — stale, and flagged, not
-    // changed: it is out of this packet's scope.)
+    // reached. (WD-ENG-06 flagged that the comment above this branch in
+    // reconcile.ts still described Mastul as passing a bn-shaped language check.
+    // WD-ENG-12 corrected that comment; this case and the one below it are the
+    // two behaviours it now points at.)
     const hits = { Mastul: { id: 900, title: "Mastul", originalLanguage: "ta", releaseDate: "2026-08-14", year: 2026 } };
     const r = await run(["Mastul"], hits, { 900: { origin_country: ["BD"], production_countries: [{ iso_3166_1: "BD" }] } });
     expect(rejectionFor(r, "Mastul")?.reason).toMatch(/^non-Indian-country \[BD\]$/);

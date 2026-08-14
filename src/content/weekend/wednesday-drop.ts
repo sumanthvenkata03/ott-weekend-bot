@@ -275,9 +275,25 @@ export const WED_DROP_NON_PERSON_WORDS: readonly string[] = [
   "january", "february", "march", "april", "may", "june", "july", "august",
   "september", "october", "november", "december",
   // Streaming brands (so "Prime Video", "Jio Hotstar", "Sony LIV" are not names)
+  //
+  // EVERY TOKEN OF A MULTI-WORD BRAND BELONGS HERE — "prime"+"video",
+  // "jio"+"hotstar", "sony"+"liv", "sun"+"nxt". WD-ENG-01 found "lionsgate"
+  // present and "play" MISSING, which made "Lionsgate Play" safe only by
+  // accident: the phrase reaches the allowlist as non-person TEXT from the film
+  // record's `platform` field, so it is covered when — and only when — the film
+  // being written about actually carries that platform. Copy naming the service
+  // for any other reason left "Play" as an unbacked token. Post-WD-ENG-01 that
+  // is caption-level only and can no longer drop a film, but it is still a
+  // spurious flag and a spurious retry.
+  //
+  // Adding a word here LOOSENS the guard, so it is a real decision, not a
+  // formality: "Play" is not a person-name token in Indian film credits, and it
+  // is markedly less name-like than "Sun", "Max", "Prime", "Aha" and "Zee",
+  // which this list already carries. The brand-completeness pin in
+  // wd-eng-01-authority.test.ts now enforces the rule rather than trusting it.
   "netflix", "prime", "video", "hotstar", "disney", "jiocinema", "jiohotstar",
   "jio", "sonyliv", "sony", "liv", "zee5", "zee", "aha", "hoichoi", "sunnxt",
-  "sun", "nxt", "mubi", "lionsgate", "apple", "tv", "manoramamax", "max",
+  "sun", "nxt", "mubi", "lionsgate", "play", "apple", "tv", "manoramamax", "max",
 ];
 
 // Rating superlatives that require the film to be the edition's strict-max

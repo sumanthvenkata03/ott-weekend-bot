@@ -497,9 +497,21 @@ export async function reconcile(input: ReconcileInput, deps: ReconcileDeps): Pro
       } else {
         // NEW ai-net discovery — apply the Indian-language guard, then the
         // country gate beside it. They answer DIFFERENT questions: the first is
-        // "what language is it", the second "where is it from". Mastul passes a
-        // bn-shaped language check and fails the country check; that gap is
-        // exactly what let it through before.
+        // "what language is it", the second "where is it from".
+        //
+        // WD-ENG-12 — THIS COMMENT USED TO NAME MASTUL AS THE WORKED EXAMPLE,
+        // and it was wrong about the path. It said Mastul "passes a bn-shaped
+        // language check and fails the country check". It cannot: INDIAN_LANG_CODES
+        // is the seven PILLAR codes {te,ta,ml,hi,kn,mr,pa} and deliberately
+        // excludes "bn", so a Bengali film is rejected as "non-Indian-language"
+        // and NEVER REACHES the country gate at all. The real Mastul was stopped
+        // one step earlier than the comment claimed.
+        //
+        // The gate below is still load-bearing, just for a different shape: a
+        // film in a PILLAR language that is produced abroad — the ta/BD case —
+        // which the language check genuinely does pass. Both paths are pinned in
+        // language-guard.test.ts ("a PILLAR-language film from a foreign country
+        // still rejects on COUNTRY" and "a Bengali film rejects on LANGUAGE").
         //
         // ── WD-ENG-06: UNKNOWN IS NOT FOREIGN, AND ONE FIELD IS NOT A VERDICT ──
         // This branch used to be `if (!(iso && INDIAN_LANG_CODES.has(iso)))
