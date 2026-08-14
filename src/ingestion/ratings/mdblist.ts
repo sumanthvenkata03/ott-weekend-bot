@@ -69,6 +69,24 @@ const throttledOfetch = throttle((imdbId: string) =>
 let warnedNoKey = false;
 
 /**
+ * HTTP status out of a thrown error, or undefined when there isn't one.
+ *
+ * ofetch's FetchError has carried the status on different properties across
+ * versions (`status`, `statusCode`, and `response.status`), so all three are
+ * consulted rather than betting on one. undefined is the meaningful answer for a
+ * NETWORK-level failure (DNS, connection refused, timeout) and for a ZodError —
+ * neither has a status, and both must stay loud.
+ */
+function httpStatusOf(err: unknown): number | undefined {
+  if (!err || typeof err !== "object") return undefined;
+  const e = err as { status?: unknown; statusCode?: unknown; response?: { status?: unknown } };
+  for (const candidate of [e.status, e.statusCode, e.response?.status]) {
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/**
  * Fetch MDBList ratings for a single IMDb ID.
  * - No MDBLIST_API_KEY → null immediately (logged once); OMDb fallback handles it.
  * - Cache hits return instantly; misses respect the throttle.
@@ -96,7 +114,30 @@ export async function getMdblistRatings(imdbId: string): Promise<MdblistRatings 
     const mapped = mapRatings(parsed.ratings);
     return Object.keys(mapped).length > 0 ? mapped : null;
   } catch (err) {
-    log.warn(`MDBList fetch failed for ${imdbId}`, err instanceof Error ? err.message : err);
+    // WD-ENG-13 — A 404 IS NOT A FAULT. MDBList simply does not carry every
+    // IMDb id, and for a slate of new Indian releases it carries rather few:
+    // one captured Monday run logged five of these in a single pass, every one
+    // of them normal. Printed as a warn they were indistinguishable from a real
+    // outage — the same cry-wolf shape WD-ENG-05 found on the coverage warn, and
+    // the reason an operator learns to skim past MDBList lines entirely.
+    //
+    // ONLY 404 is demoted. Any other status (401/403 = credential, 429 = rate
+    // limit, 5xx = outage) and any NETWORK-level failure — where no status
+    // exists at all — stay warns, because each is something an operator can and
+    // should act on. A ZodError from the schema parse above also lands here with
+    // no status, and stays loud: a shape change is exactly the silent break the
+    // warn is for.
+    const status = httpStatusOf(err);
+    if (status === 404) {
+      log.info(
+        `MDBList: no entry for ${imdbId} — expected miss, not an outage (OMDb carries the fallback)`
+      );
+      return null;
+    }
+    log.warn(
+      `MDBList fetch failed for ${imdbId}${status === undefined ? "" : ` (HTTP ${status})`}`,
+      err instanceof Error ? err.message : err
+    );
     return null;
   }
 }

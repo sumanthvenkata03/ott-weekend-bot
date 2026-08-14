@@ -38,6 +38,12 @@ import { log } from "../../shared/logger.js";
 import { searchTitleTmdb, type TmdbTitleHit } from "../../ingestion/releases/tmdb.js";
 import { normalizeTitle } from "../normalize.js";
 import { resolveTitleToTmdb, languageForCode, INDIAN_LANG_CODES } from "./resolveTitle.js";
+import {
+  recordSourceFailure,
+  recordSourceSuccess,
+  degradationLine,
+  recoveryLine,
+} from "./source-health.js";
 import type { ExtractedFilm, ExtractionResult, RejectedExtraction } from "../../reconcile/types.js";
 import type { DiscoveredFilm } from "../types.js";
 
@@ -46,6 +52,10 @@ import type { DiscoveredFilm } from "../types.js";
 // list this week's films (incl. Blast) in its body.
 const FILMIBEAT_OTT_URL = "https://www.filmibeat.com/top-listing/ott-movie-releases-this-week/";
 const UA = "TBSI-discovery/1.0 (editorial automation; contact webnexasolutionsllc@gmail.com)";
+
+/** Ledger key (stable, never printed) and log label (printed, never a key). */
+const SOURCE_KEY = "ott-calendar";
+const SOURCE_LABEL = "OTT calendar";
 
 const FETCH_TTL = 21600;        // 6h — the roundup changes slowly within a window
 const EXTRACT_TTL = 86400;      // 24h — keeps the gate hash stable across an --approve re-run
@@ -205,32 +215,45 @@ export async function discoverOttCalendar(
   from: string,
   to: string
 ): Promise<DiscoveredFilm[]> {
+  // WD-ENG-13 — every one of the four exits below is a "contributed 0 films"
+  // outcome, and every one of them used to print a line identical on run 1 and
+  // run 50. `degrade` records the attempt and wraps the path-specific reason in
+  // the streak context, so the line escalates once the failures stop being
+  // plausibly transient. The reason text itself is preserved verbatim in both
+  // wordings — the four failure MODES stay distinguishable either way.
+  const degrade = (reason: string): DiscoveredFilm[] => {
+    log.warn(degradationLine(SOURCE_LABEL, reason, recordSourceFailure(SOURCE_KEY)));
+    return [];
+  };
+
   let body: string;
   try {
     body = await fetchBody();
   } catch (err) {
-    log.warn(
-      `OTT calendar: fetch failed — degrading to [] (other OTT nets unaffected): ` +
+    return degrade(
+      `fetch failed — degrading to [] (other OTT nets unaffected): ` +
         `${err instanceof Error ? err.message : String(err)}`
     );
-    return [];
   }
 
   const text = flattenBody(body);
   if (text.length === 0) {
-    log.warn(`OTT calendar: roundup body was empty after flatten — degrading to []`);
-    return [];
+    return degrade(`roundup body was empty after flatten — degrading to []`);
   }
 
   let extraction: ExtractionResult;
   try {
     extraction = await extract(from, to, text);
   } catch (err) {
+    // Still log.error as well: an extraction throw carries an error object worth
+    // printing, and this is the one path that was never a plain warn.
     log.error(
       `OTT calendar: extraction failed — degrading to []`,
       err instanceof Error ? err.message : err
     );
-    return [];
+    return degrade(
+      `extraction failed — ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 
   // SILENT-BREAK TRIPWIRE — the body fetched OK (non-empty) but the extractor
@@ -240,11 +263,10 @@ export async function discoverOttCalendar(
   // dead source is caught before it ships an empty drop. Still returns [] —
   // additive: the other OTT nets carry the window.
   if (extraction.films.length === 0) {
-    log.warn(
-      `⚠ COVERAGE: OTT calendar page fetched OK (${text.length} chars) but extracted 0 films — ` +
+    return degrade(
+      `⚠ COVERAGE: page fetched OK (${text.length} chars) but extracted 0 films — ` +
         `possible scrape/parser break (${FILMIBEAT_OTT_URL})`
     );
-    return [];
   }
 
   const windowYear = Number.parseInt(from.slice(0, 4), 10);
@@ -264,5 +286,14 @@ export async function discoverOttCalendar(
     films.push(toDiscoveredFilm(ai, res.hit, windowYear));
   }
   log.info(`OTT calendar: ${extraction.films.length} extracted → ${films.length} resolved Indian film(s)`);
+
+  // THE RESET, and the other half of "the line changes when the situation
+  // changes". Reaching here means the fetch, the flatten and the extraction all
+  // worked and the page listed films — the source did its job, whatever the
+  // Indian-resolution filter above then kept. A streak that ends says so ONCE,
+  // so a recovery is as visible in the log as the failure was.
+  const before = recordSourceSuccess(SOURCE_KEY);
+  if (before.consecutiveFailures > 0) log.success(recoveryLine(SOURCE_LABEL, before));
+
   return films;
 }

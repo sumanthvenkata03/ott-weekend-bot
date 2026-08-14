@@ -12,7 +12,7 @@
 
 import { enrichReleases } from "../ingestion/releases/index.js";
 import { filmKey } from "../shared/featured-ledger.js";
-import { log } from "../shared/logger.js";
+import { log } from "../shared/logger.js";
 import { startRunLog } from "../shared/run-artifacts.js";
 import {
   discoverArchivesLanguage,
@@ -85,7 +85,13 @@ async function main(deliver = true) {
   log.info("🎞️  TBSI Archives job — starting");
   startRunLog("archives");
   if (!deliver) {
-    log.warn("DRY RUN — no delivery (--no-deliver): discover + gate + render run; R2/Slack/ledger skipped");
+    // WD-ENG-13 — INFO, not WARN. This announces the MODE the operator chose one
+    // keystroke ago; there is nothing to act on. As a warn it was the only yellow
+    // line on an otherwise perfectly healthy dry run, which teaches the operator
+    // that yellow on this job means nothing — the exact reflex WD-ENG-05
+    // diagnosed. news-edition and reddit-radar already log their dry-run lines at
+    // info; this brings the two --no-deliver jobs onto the same footing.
+    log.info("DRY RUN — no delivery (--no-deliver): discover + gate + render run; R2/Slack/ledger skipped");
   }
 
   purgeExpired();

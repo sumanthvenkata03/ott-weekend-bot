@@ -19,7 +19,7 @@ import {
 } from "../content/weekend/verdict-research.js";
 import { writeSaturdayVerdictToNotion } from "../delivery/notion.js";
 import { purgeExpired, cached } from "../shared/cache.js";
-import { log } from "../shared/logger.js";
+import { log } from "../shared/logger.js";
 import { startRunLog } from "../shared/run-artifacts.js";
 import { notifyDraftReady, notifyJobFailure } from "../delivery/slack.js";
 import { buildHashtags } from "../shared/hashtags.js";
@@ -138,7 +138,11 @@ async function main(deliver = true) {
   log.info("⚖️  Saturday Verdict job — starting");
   startRunLog("sat-verdict");
   if (!deliver) {
-    log.warn("DRY RUN — no delivery (--no-deliver): render + score + table run; R2/Notion/Slack skipped");
+    // WD-ENG-13 — INFO, not WARN. See the identical note in friday-archives.ts:
+    // a mode announcement the operator just asked for is not a warning, and as
+    // the only yellow line on a healthy dry run it trained exactly the reflex
+    // WD-ENG-05 diagnosed.
+    log.info("DRY RUN — no delivery (--no-deliver): render + score + table run; R2/Notion/Slack skipped");
   }
 
   purgeExpired();
