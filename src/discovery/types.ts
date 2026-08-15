@@ -11,8 +11,13 @@
  *    finds press-confirmed OTT releases TMDb's release_type=4 net misses.
  *  - "ott-calendar": the OTT-calendar net (full roundup-page body → Claude
  *    extract → TMDb resolve) — surfaces films whose row sits in the page BODY,
- *    past Tavily's truncated snippet (the Blast case). */
-export type DiscoverySource = "tmdb" | "wikipedia" | "ai-ott" | "ott-calendar";
+ *    past Tavily's truncated snippet (the Blast case).
+ *  - "news": the NEWS net (Google News RSS headlines → Claude extract → TMDb
+ *    resolve). WD-ENG-17. The only source in the WD-ENG-15 survey that carried
+ *    all five of that week's missed films; free, keyless, and independent of
+ *    TMDb/Wikipedia/Tavily, so it counts as a genuine second net for
+ *    corroboration rather than re-reporting another net's upstream. */
+export type DiscoverySource = "tmdb" | "wikipedia" | "ai-ott" | "ott-calendar" | "news";
 
 /**
  * How TMDb surfaced a film in the date range:

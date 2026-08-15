@@ -24,11 +24,17 @@ vi.mock("../sources/ottSearch.js", () => ({
 vi.mock("../sources/ottCalendar.js", () => ({
   discoverOttCalendar: vi.fn(async () => []),
 }));
+// WD-ENG-17 — the news net runs on BOTH intents, so it must be mocked here too
+// or every case in this file makes 9 real RSS requests and one real LLM call.
+vi.mock("../sources/newsNet.js", () => ({
+  discoverNewsNet: vi.fn(async () => []),
+}));
 
 import { discover } from "../index.js";
 import { enrichReleases } from "../../ingestion/releases/index.js";
 import { discoverOttSearch } from "../sources/ottSearch.js";
 import { discoverOttCalendar } from "../sources/ottCalendar.js";
+import { discoverNewsNet } from "../sources/newsNet.js";
 import { getCandidates, toReleaseStub } from "../candidates.js";
 import { log } from "../../shared/logger.js";
 import type { DiscoveredFilm, DiscoveryResult, ReleaseType } from "../types.js";
@@ -38,6 +44,7 @@ const mockDiscover = vi.mocked(discover);
 const mockEnrich = vi.mocked(enrichReleases);
 const mockOttSearch = vi.mocked(discoverOttSearch);
 const mockOttCalendar = vi.mocked(discoverOttCalendar);
+const mockNewsNet = vi.mocked(discoverNewsNet);
 
 interface FilmSpec {
   title: string;
@@ -158,13 +165,32 @@ describe("getCandidates — intent routing onto discovery releaseType", () => {
 });
 
 describe("getCandidates — OTT-net intent gating (theatrical isolation)", () => {
-  it("🔒 intent 'theatrical' does NOT trigger EITHER OTT net (0 LLM — keeps the 4 theatrical pillars free)", async () => {
+  it("🔒 intent 'theatrical' does NOT trigger EITHER OTT net", async () => {
     mockDiscover.mockResolvedValue(discoveryResult([
       film({ title: "T", language: "Telugu", tmdbId: 1, releaseType: "theatrical" }),
     ]));
     await getCandidates({ from: "2026-01-01", to: "2026-01-31", intent: "theatrical" });
     expect(mockOttSearch).not.toHaveBeenCalled();
     expect(mockOttCalendar).not.toHaveBeenCalled();
+  });
+
+  it("⚠ WD-ENG-17 COST CHANGE — theatrical is NO LONGER LLM-free: the news net runs", async () => {
+    // This case's sibling used to read "0 LLM — keeps the 4 theatrical pillars
+    // free", and that property is GONE, deliberately. WD-ENG-15 found theatrical
+    // discovery running on two nets with zero redundancy, and the films it
+    // misses (Chargesheet 03-08, Panchali Panchabhartruka) appear in NO
+    // structured source — only in news prose. Catching them needs an extraction,
+    // and an extraction is an Anthropic call.
+    //
+    // THE COST, pinned so it cannot be discovered by surprise on a bill: ONE
+    // cached Claude extraction per theatrical getCandidates call, so Mon
+    // Movement, Sat Verdict, Sun Spotlight and Fri Archives each gain one. It is
+    // cached 24h per window, so a re-run inside a window is free. The two OTT
+    // nets remain OTT-only, so this is the only new call.
+    mockDiscover.mockResolvedValue(discoveryResult([]));
+    await getCandidates({ from: "2026-01-01", to: "2026-01-31", intent: "theatrical" });
+    expect(mockNewsNet).toHaveBeenCalledTimes(1);
+    expect(mockNewsNet).toHaveBeenCalledWith("theatrical", "2026-01-01", "2026-01-31");
   });
 
   it("intent 'ott' DOES trigger BOTH OTT nets (Blast-recall path), once each, with the same window/languages", async () => {
@@ -174,6 +200,9 @@ describe("getCandidates — OTT-net intent gating (theatrical isolation)", () =>
     expect(mockOttSearch).toHaveBeenCalledWith(["Tamil"], "2026-06-22", "2026-06-28");
     expect(mockOttCalendar).toHaveBeenCalledTimes(1);
     expect(mockOttCalendar).toHaveBeenCalledWith(["Tamil"], "2026-06-22", "2026-06-28");
+    // …and the news net rides alongside them on the OTT intent too.
+    expect(mockNewsNet).toHaveBeenCalledTimes(1);
+    expect(mockNewsNet).toHaveBeenCalledWith("ott", "2026-06-22", "2026-06-28");
   });
 });
 

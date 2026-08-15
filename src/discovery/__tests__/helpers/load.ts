@@ -55,3 +55,10 @@ export function loadTmdb(file: string): TmdbDiscoverResponse {
 export function tmdbPage(results: TmdbMovie[], totalPages = 1, page = 1): TmdbDiscoverResponse {
   return { page, results, total_pages: totalPages, total_results: results.length * totalPages };
 }
+
+// --- Google News RSS (WD-ENG-17) ---
+/** Raw RSS XML of a captured Google News search feed. Real captured payloads,
+ *  frozen offline — the news net's parse+extract chain runs against these. */
+export function loadGnewsXml(file: string): string {
+  return readFileSync(join(FIX, "gnews", file), "utf8");
+}

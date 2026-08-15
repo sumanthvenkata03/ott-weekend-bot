@@ -47,6 +47,10 @@ vi.mock("../../shared/cache.js", async (orig) => ({
   ...(await orig<typeof import("../../shared/cache.js")>()),
   purgeExpired: vi.fn(),
 }));
+// WD-ENG-17 — the news net now runs on BOTH intents inside getCandidates. Mocked
+// here so this file stays offline: unmocked it makes 9 real RSS attempts per
+// call and writes the real data/source-health.json streak ledger.
+vi.mock("../../discovery/sources/newsNet.js", () => ({ discoverNewsNet: vi.fn(async () => []) }));
 
 const { resolveAlwaysGate, main } = await import("../wednesday-drop.js");
 

@@ -91,3 +91,7 @@ describe("Wednesday finding → verify pipeline — Blast end-to-end (5a headlin
     expect(blast!.release?.releaseDates?.ott).toBe("2026-06-25"); // press date carried all the way through
   });
 });
+// WD-ENG-17 — the news net now runs on BOTH intents inside getCandidates. Mocked
+// here so this file stays offline: unmocked it makes 9 real RSS attempts per
+// call and writes the real data/source-health.json streak ledger.
+vi.mock("../sources/newsNet.js", () => ({ discoverNewsNet: vi.fn(async () => []) }));

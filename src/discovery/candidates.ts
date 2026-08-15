@@ -19,6 +19,7 @@ import { discover, SUPPORTED_LANGUAGES, unionFilms } from "./index.js";
 import { resolveWikiOnlyFilms, type WikiResolveDeps } from "./sources/resolveWikiFilm.js";
 import { discoverOttSearch } from "./sources/ottSearch.js";
 import { discoverOttCalendar } from "./sources/ottCalendar.js";
+import { discoverNewsNet } from "./sources/newsNet.js";
 import { enrichReleases } from "../ingestion/releases/index.js";
 import { log } from "../shared/logger.js";
 import { toPlatform } from "../shared/platform.js";
@@ -198,6 +199,20 @@ export async function getCandidates(
       films = unionFilms([...films, ...ottFinds, ...calendarFinds]);
     }
   }
+
+  // ── WD-ENG-17 — THE NEWS NET, ON BOTH INTENTS ─────────────────────────────
+  // Unlike the two OTT recall nets above, this one runs for THEATRICAL too, and
+  // that is the point: WD-ENG-15 found theatrical discovery running on exactly
+  // two nets (TMDb + Wikipedia) with zero redundancy, and the films it misses —
+  // Chargesheet 03-08, Panchali Panchabhartruka — appear in no structured source
+  // at all. This is the only surveyed source that carried them.
+  //
+  // Additive and fail-safe on the same terms as every other net: a degraded run
+  // returns [] and leaves the union byte-for-byte unchanged. unionFilms dedups on
+  // tmdbId, so a film also found by TMDb collapses onto one record and simply
+  // gains "news" in its foundIn — which is what makes it count as corroboration.
+  const newsFinds = await discoverNewsNet(q.intent, q.from, q.to);
+  if (newsFinds.length > 0) films = unionFilms([...films, ...newsFinds]);
 
   const stubs = films
     .map(toReleaseStub)

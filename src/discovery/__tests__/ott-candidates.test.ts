@@ -111,3 +111,7 @@ describe("getCandidates('ott') — Blast end-to-end (the headline)", () => {
     expect(discoverOttSearch).toHaveBeenCalledWith(["Tamil"], "2026-06-22", "2026-06-28");
   });
 });
+// WD-ENG-17 — the news net now runs on BOTH intents inside getCandidates. Mocked
+// here so this file stays offline: unmocked it makes 9 real RSS attempts per
+// call and writes the real data/source-health.json streak ledger.
+vi.mock("../sources/newsNet.js", () => ({ discoverNewsNet: vi.fn(async () => []) }));

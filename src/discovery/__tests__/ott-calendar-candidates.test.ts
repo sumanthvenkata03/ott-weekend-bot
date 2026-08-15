@@ -150,3 +150,7 @@ describe("getCandidates('ott') — 3-net dedup (shared-id merge, possibleDistinc
     expect(out.every((f) => f.possibleDistinct === true)).toBe(true);
   });
 });
+// WD-ENG-17 — the news net now runs on BOTH intents inside getCandidates. Mocked
+// here so this file stays offline: unmocked it makes 9 real RSS attempts per
+// call and writes the real data/source-health.json streak ledger.
+vi.mock("../sources/newsNet.js", () => ({ discoverNewsNet: vi.fn(async () => []) }));
