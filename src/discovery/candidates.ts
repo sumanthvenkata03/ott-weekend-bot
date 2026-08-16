@@ -190,29 +190,48 @@ export async function getCandidates(
   // its shared id (no double-count); the possibleDistinct guard still fires only
   // on DIFFERENT ids, so genuine same-title namesakes stay split. A net that
   // returns [] (degraded/fail-safe) leaves the union byte-for-byte unchanged.
+  // ── WD-ENG-17 / 17D — THE THREE RECALL NETS, OTT INTENT ONLY ──────────────
+  // The news net (WD-ENG-17) sits here, alongside the two OTT nets, and NOT on
+  // the theatrical intent. It shipped on both intents and WD-ENG-17D moved it,
+  // on measurement rather than principle.
+  //
+  // WHY THEATRICAL WAS DROPPED (measured, WD-ENG-17C — one billed extraction
+  // over 178 real captured headlines):
+  //   · 4 films extracted, 2 dated, 2 candidates — BOTH already green via TMDb.
+  //     Zero new films.
+  //   · One of the two carried a WRONG DATE: Batwara 1947 dated 2026-08-14 off a
+  //     roundup headline that shared Awarapan 2's date; its real date is 08-13.
+  //   · The two films the theatrical wiring was ADDED for — Chargesheet 03-08 and
+  //     Panchali Panchabhartruka — were both correctly REJECTED, as
+  //     "box office, already released" and "pre-release event, no theatrical
+  //     date". Their only headlines are a box-office collection story and a
+  //     pre-release event.
+  //
+  // THE STRUCTURAL REASON, which is why no prompt change fixes it: theatrical
+  // coverage in the Indian film press is box-office and event reporting, not
+  // dated release announcements. An honest extractor has nothing dateable to
+  // work with, and loosening the date rule to catch these would reintroduce
+  // exactly the manufactured-date failure the net exists to avoid.
+  //
+  // So theatrical keeps its TWO nets (TMDb + Wikipedia) and its ZERO LLM calls —
+  // Mon Movement, Sat Verdict, Sun Spotlight and Fri Archives stay free. The OTT
+  // half is unaffected and keeps performing (WD-ENG-17B: 6 candidates, zero
+  // false positives, Mr. Work From Home recovered).
   if (q.intent === "ott") {
-    const [ottFinds, calendarFinds] = await Promise.all([
+    const [ottFinds, calendarFinds, newsFinds] = await Promise.all([
       discoverOttSearch(languages, q.from, q.to),
       discoverOttCalendar(languages, q.from, q.to),
+      discoverNewsNet(q.intent, q.from, q.to),
     ]);
-    if (ottFinds.length > 0 || calendarFinds.length > 0) {
-      films = unionFilms([...films, ...ottFinds, ...calendarFinds]);
+    // Additive and fail-safe on the same terms as every other net: a degraded run
+    // returns [] and leaves the union byte-for-byte unchanged. unionFilms dedups
+    // on the shared key, so a film also found by TMDb collapses onto one record
+    // and simply gains "news" in its foundIn — which is what makes it count as
+    // corroboration rather than a duplicate.
+    if (ottFinds.length > 0 || calendarFinds.length > 0 || newsFinds.length > 0) {
+      films = unionFilms([...films, ...ottFinds, ...calendarFinds, ...newsFinds]);
     }
   }
-
-  // ── WD-ENG-17 — THE NEWS NET, ON BOTH INTENTS ─────────────────────────────
-  // Unlike the two OTT recall nets above, this one runs for THEATRICAL too, and
-  // that is the point: WD-ENG-15 found theatrical discovery running on exactly
-  // two nets (TMDb + Wikipedia) with zero redundancy, and the films it misses —
-  // Chargesheet 03-08, Panchali Panchabhartruka — appear in no structured source
-  // at all. This is the only surveyed source that carried them.
-  //
-  // Additive and fail-safe on the same terms as every other net: a degraded run
-  // returns [] and leaves the union byte-for-byte unchanged. unionFilms dedups on
-  // tmdbId, so a film also found by TMDb collapses onto one record and simply
-  // gains "news" in its foundIn — which is what makes it count as corroboration.
-  const newsFinds = await discoverNewsNet(q.intent, q.from, q.to);
-  if (newsFinds.length > 0) films = unionFilms([...films, ...newsFinds]);
 
   const stubs = films
     .map(toReleaseStub)

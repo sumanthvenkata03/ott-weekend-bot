@@ -315,3 +315,69 @@ describe("the NEWS DESK is byte-unchanged — this net borrowed, it did not edit
     expect(src).not.toContain("XMLParser");
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// WD-ENG-17D — THE OTT HALF IS UNTOUCHED BY THE THEATRICAL GATING.
+//
+// WD-ENG-17C measured the theatrical intent on one billed extraction over 178
+// real headlines: 4 films, 2 dated, 2 candidates — both ALREADY green via TMDb,
+// one (Batwara 1947) carrying a wrong date lifted from a roundup headline it
+// shared with Awarapan 2. Zero new films, for one billed call on each of the
+// four theatrical pillars. So the net was gated to OTT.
+//
+// The gating is a CALL-SITE change in candidates.ts. The net module itself is
+// unchanged and still supports both intents — which is what keeps these pins
+// meaningful and would make re-enabling theatrical a one-line change if the
+// press ever starts publishing dated theatrical announcements.
+describe("WD-ENG-17D — gating changed the caller, not the net", () => {
+  it("the module still accepts the theatrical intent — the capability is retained", () => {
+    // Deliberately NOT deleted: the measurement, not the code, is what ruled
+    // theatrical out, and a future re-measurement should not need a rewrite.
+    const q = buildNewsQueries("theatrical", FROM, TO);
+    expect(q).toHaveLength(9);
+    expect(q.map((x) => x.query).join("|")).toContain("theatrical release this week in cinemas");
+  });
+
+  it("candidates.ts calls the net ONLY inside the ott branch", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src/discovery/candidates.ts"), "utf8");
+
+    // Exactly one call site, and it sits inside the ott guard.
+    const calls = [...src.matchAll(/discoverNewsNet\(/g)];
+    expect(calls).toHaveLength(1);
+    const guard = src.indexOf('if (q.intent === "ott")');
+    expect(guard).toBeGreaterThan(-1);
+    expect(calls[0]!.index).toBeGreaterThan(guard);
+  });
+
+  it("the OTT contract is unchanged — 9 requests, 1 extraction, news provenance", async () => {
+    // The three properties WD-ENG-17B measured against. If gating had perturbed
+    // any of them, the 6-candidate / zero-false-positive result would no longer
+    // describe what ships.
+    mockSearch.mockResolvedValue({
+      movie: [{ id: 77, title: "Kattalan", year: 2026, originalLanguage: "ml", releaseDate: "2026-08-13" }],
+      tv: [],
+    } as never);
+    mockClaude.mockResolvedValue({
+      films: [film({ title: "Kattalan", language: "Malayalam", platform: "ManoramaMAX", date: "2026-08-13" })],
+      rejected: [],
+    } as never);
+
+    const out = await discoverNewsNet("ott", FROM, TO);
+
+    expect(mockFetch).toHaveBeenCalledTimes(9);
+    expect(mockClaude).toHaveBeenCalledTimes(1);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.foundIn).toEqual(["news"]);
+    expect(out[0]!.releaseType).toBe("digital");
+  });
+
+  it("the undated-headline guard still holds — the property that made it trustworthy", async () => {
+    // WD-ENG-17B's zero-false-positive result rests on this. Re-pinned here so
+    // the gating change cannot be read as having relaxed anything.
+    mockClaude.mockResolvedValue({ films: [film({ title: "Kattalan" })], rejected: [] } as never);
+    expect(await discoverNewsNet("ott", FROM, TO)).toEqual([]);
+    expect(mockSearch).not.toHaveBeenCalled();
+  });
+});

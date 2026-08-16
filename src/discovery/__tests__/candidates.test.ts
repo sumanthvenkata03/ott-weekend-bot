@@ -4,6 +4,8 @@
 // `enrichReleases` are mocked so this stays offline and isolated to the routing
 // logic — enrichment correctness is pinned separately in src/ingestion.
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const SUPPORTED = ["Telugu", "Tamil", "Malayalam", "Kannada", "Hindi", "Marathi", "Punjabi"];
 
@@ -165,32 +167,51 @@ describe("getCandidates — intent routing onto discovery releaseType", () => {
 });
 
 describe("getCandidates — OTT-net intent gating (theatrical isolation)", () => {
-  it("🔒 intent 'theatrical' does NOT trigger EITHER OTT net", async () => {
+  it("🔒 intent 'theatrical' triggers NO recall net (0 LLM — the 4 theatrical pillars are free)", async () => {
     mockDiscover.mockResolvedValue(discoveryResult([
       film({ title: "T", language: "Telugu", tmdbId: 1, releaseType: "theatrical" }),
     ]));
     await getCandidates({ from: "2026-01-01", to: "2026-01-31", intent: "theatrical" });
     expect(mockOttSearch).not.toHaveBeenCalled();
     expect(mockOttCalendar).not.toHaveBeenCalled();
+    // WD-ENG-17D — the news net is back on this side of the line too. It shipped
+    // on BOTH intents in WD-ENG-17 and was gated to OTT on measurement, not
+    // principle: WD-ENG-17C spent one billed theatrical extraction over 178 real
+    // headlines and got 2 candidates, both ALREADY green via TMDb, one of them
+    // (Batwara 1947) carrying a wrong date off a shared roundup headline. Zero
+    // new films for one billed call per theatrical pillar run.
+    expect(mockNewsNet).not.toHaveBeenCalled();
   });
 
-  it("⚠ WD-ENG-17 COST CHANGE — theatrical is NO LONGER LLM-free: the news net runs", async () => {
-    // This case's sibling used to read "0 LLM — keeps the 4 theatrical pillars
-    // free", and that property is GONE, deliberately. WD-ENG-15 found theatrical
-    // discovery running on two nets with zero redundancy, and the films it
-    // misses (Chargesheet 03-08, Panchali Panchabhartruka) appear in NO
-    // structured source — only in news prose. Catching them needs an extraction,
-    // and an extraction is an Anthropic call.
-    //
-    // THE COST, pinned so it cannot be discovered by surprise on a bill: ONE
-    // cached Claude extraction per theatrical getCandidates call, so Mon
-    // Movement, Sat Verdict, Sun Spotlight and Fri Archives each gain one. It is
-    // cached 24h per window, so a re-run inside a window is free. The two OTT
-    // nets remain OTT-only, so this is the only new call.
+  it("🔒 ZERO ANTHROPIC CALLS on the theatrical path — the property, stated as a whole", async () => {
+    // Mon Movement, Sat Verdict, Sun Spotlight and Fri Archives all reach
+    // discovery through getCandidates(theatrical). Every net that can bill an
+    // extraction is asserted absent here, together, so a future net wired
+    // "just for theatrical" trips this instead of appearing on a bill.
     mockDiscover.mockResolvedValue(discoveryResult([]));
     await getCandidates({ from: "2026-01-01", to: "2026-01-31", intent: "theatrical" });
-    expect(mockNewsNet).toHaveBeenCalledTimes(1);
-    expect(mockNewsNet).toHaveBeenCalledWith("theatrical", "2026-01-01", "2026-01-31");
+    for (const [name, m] of [
+      ["ottSearch", mockOttSearch],
+      ["ottCalendar", mockOttCalendar],
+      ["newsNet", mockNewsNet],
+    ] as const) {
+      expect(m, `${name} must not run on the theatrical intent`).not.toHaveBeenCalled();
+    }
+  });
+
+  it("the two films theatrical was wired FOR are not reachable that way — recorded, not retried", () => {
+    // Chargesheet 03-08 and Panchali Panchabhartruka were the whole argument for
+    // the theatrical half. WD-ENG-17C showed the extractor correctly REJECTS
+    // both — their only headlines are a box-office collection story and a
+    // pre-release event, neither of which is a dated release announcement.
+    // Recorded in the source so the next person does not re-wire it and re-spend
+    // the measurement.
+    const src = readFileSync(join(process.cwd(), "src/discovery/candidates.ts"), "utf8");
+    expect(src).toContain("WD-ENG-17C");
+    expect(src).toContain("Chargesheet 03-08");
+    expect(src).toContain("Panchali Panchabhartruka");
+    expect(src).toContain("box-office and event reporting, not");
+    expect(src).toContain("dated release announcements");
   });
 
   it("intent 'ott' DOES trigger BOTH OTT nets (Blast-recall path), once each, with the same window/languages", async () => {
@@ -200,7 +221,9 @@ describe("getCandidates — OTT-net intent gating (theatrical isolation)", () =>
     expect(mockOttSearch).toHaveBeenCalledWith(["Tamil"], "2026-06-22", "2026-06-28");
     expect(mockOttCalendar).toHaveBeenCalledTimes(1);
     expect(mockOttCalendar).toHaveBeenCalledWith(["Tamil"], "2026-06-22", "2026-06-28");
-    // …and the news net rides alongside them on the OTT intent too.
+    // …and the news net rides alongside them — OTT ONLY, and still exactly once.
+    // The OTT half is what WD-ENG-17B measured at 6 candidates / zero false
+    // positives / Mr. Work From Home recovered, and WD-ENG-17D left it untouched.
     expect(mockNewsNet).toHaveBeenCalledTimes(1);
     expect(mockNewsNet).toHaveBeenCalledWith("ott", "2026-06-22", "2026-06-28");
   });
