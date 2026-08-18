@@ -29,6 +29,7 @@ import { assertPublishableTree, provenanceLine, type RunContext } from "../share
 import { confirmAutoPublish, applyAutoConfirmation, buildRedPing, editionOutcome } from "../reconcile/autonomy.js";
 import { auditRender, auditBlockers, type AuditSubject } from "../rendering/render-audit.js";
 import { saveRunArtifact, runArtifactPath, startRunLog } from "../shared/run-artifacts.js";
+import { injectManualAdds, manualAddsPath } from "../reconcile/manual-adds.js";
 import { redactSecrets } from "../shared/redact.js";
 /**
  * Manual one-off exclusion hook. WED_DROP_EXCLUDE is a comma-separated list of
@@ -584,6 +585,30 @@ export async function main() {
     await verifyCandidates(ott, { pillar: "ott", window: editionWindow("ott", ottStartDate, endDate), languages: RECONCILE_LANGUAGES, wikiLanguageIndex }),
   ];
   for (const r of results) log.info(reconcileSummary(r));
+
+  // ── 3a-bis. WD-ENG-11B/11C — THE MANUAL-ADD DIAL ───────────────────────────
+  // Operator-declared films with no TMDb record (Panchali Panchabhartruka,
+  // Nijame Rujuvainadhi, Chargesheet 03-08 — all real, all unreportable), read
+  // from a checked-in evidence file and injected as RECONCILED films HERE:
+  // after verification, BEFORE ai-review, enforcement and decideGate.
+  //
+  // That position is the whole design. Every guardrail downstream still applies:
+  //   · computeDropHash fingerprints every reconciled film, so manual entries are
+  //     INSIDE the hash the operator approves — they cannot be slipped in after;
+  //   · annotateWithAiReview runs over them and may contradict and remove them;
+  //   · enforceVerification classifies them like any other film;
+  //   · the copy guard builds its allowlist from their cast.
+  // They can never reach green: assignTier's green branch needs tmdb+ai-net and
+  // their foundIn is exactly ["manual"].
+  //
+  // KEYED ON THE THEATRICAL WINDOW START (startDate), not the issue number. The
+  // issue number lives on an anchor keyed by the gate hash, which does not exist
+  // for another 40 lines, and the only earlier source is the wall-clock helper
+  // that two WD-ENG-02 pins forbid in this file — correctly. startDate is derived
+  // by snapping editorialDateUTC() to the ISO week's Monday and adding two, so a
+  // Wednesday-night gate and its Thursday-morning --approve read the SAME file.
+  log.info(`  Manual-add dial: reading ${manualAddsPath(startDate)}`);
+  injectManualAdds(results, { windowStart: startDate, wikiLanguageIndex });
 
   // 3b. SHADOW Reddit discovery net — env REDDIT_NET=1, default OFF. Reports only
   //     (console + one Slack context block); touches NO tier/card/ledger/reconcile

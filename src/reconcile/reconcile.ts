@@ -269,6 +269,18 @@ export function reassessAfterEnrichment(
   return { changed, before };
 }
 
+/**
+ * WD-ENG-11B — the ONE predicate the manual bypass keys on.
+ *
+ * Deliberately conjunctive and deliberately exact: `foundIn` must be EXACTLY
+ * ["manual"] (not merely contain it) and the manualAdd evidence record must be
+ * present. A film that acquired "manual" alongside another net, or that carries
+ * the tag with no evidence behind it, does not qualify.
+ */
+export function isManualAdd(f: ReconciledFilm): boolean {
+  return f.manualAdd !== undefined && f.foundIn.length === 1 && f.foundIn[0] === "manual";
+}
+
 // ── Tiering (§F) ────────────────────────────────────────────────────────────
 
 /**
@@ -278,6 +290,27 @@ export function reassessAfterEnrichment(
  * (landingReason) — no hand-reworded "outside window".
  */
 export function assignTier(f: ReconciledFilm): { tier: Tier; reasons: string[] } {
+  // ── WD-ENG-11B — THE NARROW MANUAL BYPASS ─────────────────────────────────
+  // The unverified⇒RED pin below is load-bearing and stays fully intact for
+  // ai-net leads: a title the LLM produced with no TMDb match is a hallucination
+  // risk and renders nothing. A manual add is a DIFFERENT object. It carries an
+  // operator's checked-in evidence file, a real Release built from that file,
+  // at least one source URL, and — for wiki-list — machine verification against
+  // the Wikipedia index. It went through validation before it ever got here.
+  //
+  // The bypass is therefore keyed on BOTH conditions and nothing else:
+  // foundIn is exactly ["manual"] AND the manualAdd record is present. An
+  // ai-net film can satisfy neither. Both directions are pinned.
+  //
+  // It yields YELLOW / single-net and can never yield green: the green branch
+  // below requires tmdb+ai-net in foundIn, which ["manual"] is not. No evidence
+  // basis upgrades this — corroboration reassures, it never promotes.
+  if (isManualAdd(f)) {
+    const issues = ["single-net", `operator-added (${f.manualAdd!.label})`];
+    if (f.landingStatus === "fail") return { tier: "red", reasons: [...issues, "manifest fail"] };
+    return { tier: "yellow", reasons: issues };
+  }
+
   if (f.status === "unverified")
     return { tier: "red", reasons: ["unverified — no TMDb match; title + source only"] };
   if (f.status === "series-rejected")

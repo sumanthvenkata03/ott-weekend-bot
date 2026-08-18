@@ -165,6 +165,23 @@ export interface ReconciledFilm {
   wasBelowCap?: boolean;
   conflictDetail?: string;
 
+  /**
+   * WD-ENG-11B — set ONLY on an operator manual-add. Its presence is what the
+   * narrow tier bypass in assignTier keys on, and what the review artifact
+   * renders as OPERATOR-ADDED. Absent on every other film.
+   */
+  manualAdd?: {
+    evidenceBasis: "wiki-list" | "platform-official" | "trade-press";
+    /** True only for wiki-list, and only when the index actually contained it. */
+    verified: boolean;
+    /** True for platform-official / trade-press — nothing machine-checked these. */
+    assertion: boolean;
+    sourceUrls: string[];
+    posterSourceUrl?: string;
+    /** Pre-rendered label, so review / manifest / logs cannot word it differently. */
+    label: string;
+  };
+
   // TMDb-resolved enrichment (NEVER from the LLM)
   resolvedTitle?: string;
   posterUrl?: string;

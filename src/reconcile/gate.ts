@@ -255,6 +255,15 @@ function filmLine(f: ReconciledFilm): string {
     `· nets: ${f.foundIn.join("+")}`,
   ];
   const flags: string[] = [];
+  // WD-ENG-11B — OPERATOR-ADDED leads the flags, before anything else, because
+  // it changes how every other line on this row should be read: none of it came
+  // from a net. The label carries the evidence basis and says outright when the
+  // basis is an unverified operator assertion rather than a machine check.
+  if (f.manualAdd) {
+    flags.push(`OPERATOR-ADDED — ${f.manualAdd.label}`);
+    flags.push(`evidence: ${f.manualAdd.sourceUrls.join(", ")}`);
+    if (f.manualAdd.posterSourceUrl) flags.push(`poster source: ${f.manualAdd.posterSourceUrl}`);
+  }
   if (f.ottDateFromPress) flags.push("ott-date-from-press");
   if (f.wasBelowCap) flags.push("press-corroborated/was-below-cap");
   if (f.ambiguousMatch) flags.push("ambiguous-match");
