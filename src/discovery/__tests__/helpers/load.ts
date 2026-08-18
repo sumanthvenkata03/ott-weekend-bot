@@ -62,3 +62,10 @@ export function tmdbPage(results: TmdbMovie[], totalPages = 1, page = 1): TmdbDi
 export function loadGnewsXml(file: string): string {
   return readFileSync(join(FIX, "gnews", file), "utf8");
 }
+
+// --- District (WD-ENG-18) ---
+/** Raw HTML of a captured District page - the /movies listing or a detail page.
+ *  Real captured payloads, frozen offline; the parse chain runs against these. */
+export function loadDistrictHtml(file: string): string {
+  return readFileSync(join(FIX, "district", file), "utf8");
+}

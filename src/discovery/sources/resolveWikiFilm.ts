@@ -142,8 +142,15 @@ export async function resolveWikiOnlyFilms(
   films: DiscoveredFilm[],
   deps: WikiResolveDeps
 ): Promise<{ resolved: WikiResolution[]; unresolved: WikiResolution[] }> {
+  // WD-ENG-18 — district joins wikipedia here. Both are TMDb-LESS algorithmic
+  // nets whose finds must earn admission by resolving to a real TMDb record;
+  // neither may enter the pool unresolved. Widening the filter is what puts the
+  // District net under the existing TMDb-backing rule rather than beside it.
   const targets = films.filter(
-    (f) => f.tmdbId === undefined && f.releaseType === undefined && f.foundIn.includes("wikipedia")
+    (f) =>
+      f.tmdbId === undefined &&
+      f.releaseType === undefined &&
+      (f.foundIn.includes("wikipedia") || f.foundIn.includes("district"))
   );
   const resolved: WikiResolution[] = [];
   const unresolved: WikiResolution[] = [];

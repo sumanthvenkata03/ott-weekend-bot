@@ -20,6 +20,7 @@ import { resolveWikiOnlyFilms, type WikiResolveDeps } from "./sources/resolveWik
 import { discoverOttSearch } from "./sources/ottSearch.js";
 import { discoverOttCalendar } from "./sources/ottCalendar.js";
 import { discoverNewsNet } from "./sources/newsNet.js";
+import { discoverDistrict } from "./sources/districtNet.js";
 import { enrichReleases } from "../ingestion/releases/index.js";
 import { log } from "../shared/logger.js";
 import { toPlatform } from "../shared/platform.js";
@@ -141,6 +142,26 @@ export async function getCandidates(
   const languages = q.languages && q.languages.length > 0 ? q.languages : SUPPORTED_LANGUAGES;
   const result = await discover({ from: q.from, to: q.to, languages });
 
+  // ── WD-ENG-18 — THE DISTRICT NET, THEATRICAL INTENT ONLY ──────────────────
+  // The THIRD theatrical net. WD-ENG-15 found this intent running on TMDb +
+  // Wikipedia alone, so a miss by either left no way for a theatrical film to
+  // reach green on nets. District carried both TMDb-less theatrical films with
+  // the correct date and language, and its schema.org/Movie JSON-LD is
+  // structured enough to PARSE — so, unlike the news net (WD-ENG-17D), it adds
+  // theatrical redundancy WITHOUT adding an Anthropic call to the four
+  // theatrical pillars.
+  //
+  // UNIONED HERE, BEFORE resolveWikiOnlyFilms, on purpose. Its finds carry no
+  // tmdbId and no releaseType, exactly like Wikipedia's, so they flow through
+  // the SAME TMDb-backing gate: resolve to a real record and become a candidate,
+  // or stay declined. Unioning after the intent filter would have let them skip
+  // that gate entirely — which is the one thing this net must not do.
+  let discovered = result.films;
+  if (q.intent === "theatrical") {
+    const districtFinds = await discoverDistrict(q.from, q.to);
+    if (districtFinds.length > 0) discovered = unionFilms([...discovered, ...districtFinds]);
+  }
+
   // ── WD-ENG-07 — RESOLVE WIKI-ONLY FINDS BEFORE THE INTENT FILTER ─────────
   // discover() links a wiki film to TMDb only if the TMDb discover sweep found
   // the same title independently; it never SEARCHES for one. Agadha proved the
@@ -153,13 +174,13 @@ export async function getCandidates(
   // import would bind searchTitleTmdb at load time, which breaks every test that
   // partially mocks ingestion/releases/tmdb.js — and none of those tests have a
   // wiki-only film to resolve, so they must never reach this code at all.
-  await resolveWikiOnlyFilms(result.films, {
+  await resolveWikiOnlyFilms(discovered, {
     searchTitle:
       deps?.searchTitle ??
       (async (title, opts) => (await import("../ingestion/releases/tmdb.js")).searchTitleTmdb(title, opts)),
   });
 
-  let films = result.films.filter((f) => matchesIntent(f, q.intent));
+  let films = discovered.filter((f) => matchesIntent(f, q.intent));
 
   // ── WD-ENG-05 — THE ACTUAL SILENT LOSS ────────────────────────────────────
   // Panchali Panchabhartruka was read off the Telugu 2026 list correctly (day
@@ -172,7 +193,7 @@ export async function getCandidates(
   // discovery the pipeline deliberately declines is stated, so the next person
   // asking "where did that film go?" reads the answer instead of re-deriving it
   // from the HTML. VISIBILITY ONLY — no film enters or leaves the pool here.
-  const wikiOnly = result.films.filter((f) => f.releaseType === undefined);
+  const wikiOnly = discovered.filter((f) => f.releaseType === undefined);
   if (wikiOnly.length > 0) {
     log.info(
       `  [${q.intent}] ${wikiOnly.length} wiki-only find(s) not carried into candidates ` +

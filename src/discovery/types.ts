@@ -16,8 +16,13 @@
  *    resolve). WD-ENG-17. The only source in the WD-ENG-15 survey that carried
  *    all five of that week's missed films; free, keyless, and independent of
  *    TMDb/Wikipedia/Tavily, so it counts as a genuine second net for
- *    corroboration rather than re-reporting another net's upstream. */
-export type DiscoverySource = "tmdb" | "wikipedia" | "ai-ott" | "ott-calendar" | "news";
+ *    corroboration rather than re-reporting another net's upstream.
+ *  - "district": the DISTRICT net (District/Zomato schema.org/Movie JSON-LD →
+ *    parse, no LLM). WD-ENG-18. Theatrical only, and the reason it exists is
+ *    that theatrical ran on TWO nets with zero redundancy — the two-net green
+ *    rule had no third opinion to draw on. Parse-only keeps the four theatrical
+ *    pillars at zero Anthropic calls. */
+export type DiscoverySource = "tmdb" | "wikipedia" | "ai-ott" | "ott-calendar" | "news" | "district";
 
 /**
  * How TMDb surfaced a film in the date range:

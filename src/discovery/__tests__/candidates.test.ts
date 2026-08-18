@@ -31,6 +31,11 @@ vi.mock("../sources/ottCalendar.js", () => ({
 vi.mock("../sources/newsNet.js", () => ({
   discoverNewsNet: vi.fn(async () => []),
 }));
+// WD-ENG-18 — the District net runs on the theatrical intent inside
+// getCandidates. Mocked here so this file stays offline: unmocked it makes a
+// listing fetch plus one detail fetch per film and writes the real
+// data/source-health.json streak ledger.
+vi.mock("../sources/districtNet.js", () => ({ discoverDistrict: vi.fn(async () => []) }));
 
 import { discover } from "../index.js";
 import { enrichReleases } from "../../ingestion/releases/index.js";

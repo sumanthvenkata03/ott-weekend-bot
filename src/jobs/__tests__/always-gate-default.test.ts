@@ -51,6 +51,11 @@ vi.mock("../../shared/cache.js", async (orig) => ({
 // here so this file stays offline: unmocked it makes 9 real RSS attempts per
 // call and writes the real data/source-health.json streak ledger.
 vi.mock("../../discovery/sources/newsNet.js", () => ({ discoverNewsNet: vi.fn(async () => []) }));
+// WD-ENG-18 — the District net runs on the theatrical intent inside
+// getCandidates. Mocked here so this file stays offline: unmocked it makes a
+// listing fetch plus one detail fetch per film and writes the real
+// data/source-health.json streak ledger.
+vi.mock("../../discovery/sources/districtNet.js", () => ({ discoverDistrict: vi.fn(async () => []) }));
 
 const { resolveAlwaysGate, main } = await import("../wednesday-drop.js");
 
