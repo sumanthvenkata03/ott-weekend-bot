@@ -133,16 +133,73 @@ describe("the evidence file: location, shape, and loud refusals", () => {
     expect(() => readManualAdds("2026-08-12", dir)).toThrow(/sourceUrls/);
   });
 
-  it("THE HARD CAP — 3 entries fails the run LOUDLY and truncates nothing", () => {
-    writeFile("2026-08-12", [PANCHALI, OTT_ASSERTION, { ...PANCHALI, title: "Third Film" }]);
-    expect(() => readManualAdds("2026-08-12", dir)).toThrow(/hard cap is 2/);
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🔁 PIN CHANGE (WD-046-SM2) — THE CAP IS PER EDITION, NOT PER FILE.
+  //
+  // These two pins previously asserted the per-FILE count, and the case they
+  // used — [PANCHALI (theatrical), OTT_ASSERTION (ott), Third Film (theatrical)]
+  // — is 2 theatrical + 1 ott, which the approved contract says must LOAD. They
+  // pinned the deviation, so they are re-aimed at the contract: WD-ENG-09 and the
+  // WD-ENG-11 build spec both say "2 per edition", and one window-keyed file
+  // serves BOTH editions.
+  //
+  // NOT WEAKENED. The throw is unchanged in kind — same loud failure, same
+  // no-truncation guarantee, and no deck can carry more than 2 operator-authored
+  // films. What changed is that one deck's entries no longer consume the other's
+  // budget. The over-cap case is now pinned per pillar, in BOTH pillars.
+  // ══════════════════════════════════════════════════════════════════════════
+  it("🔁 THE HARD CAP — 3 in ONE edition fails LOUDLY, NAMES that edition, truncates nothing", () => {
+    writeFile("2026-08-12", [PANCHALI, { ...PANCHALI, title: "Second Film" }, { ...PANCHALI, title: "Third Film" }]);
+    expect(() => readManualAdds("2026-08-12", dir)).toThrow(/3 theatrical entries/);
+    expect(() => readManualAdds("2026-08-12", dir)).toThrow(/hard cap is 2 per EDITION/);
     expect(() => readManualAdds("2026-08-12", dir)).toThrow(/nothing was truncated/);
     expect(MANUAL_ADD_CAP).toBe(2);
   });
 
-  it("exactly 2 is allowed — the cap is inclusive", () => {
-    writeFile("2026-08-12", [PANCHALI, OTT_ASSERTION]);
+  it("🔁 the OTT deck has its OWN budget, and over-running it names OTT", () => {
+    writeFile("2026-08-12", [
+      OTT_ASSERTION,
+      { ...OTT_ASSERTION, title: "Second OTT" },
+      { ...OTT_ASSERTION, title: "Third OTT" },
+    ]);
+    expect(() => readManualAdds("2026-08-12", dir)).toThrow(/3 ott entries/);
+    expect(() => readManualAdds("2026-08-12", dir)).toThrow(/the ott deck/);
+  });
+
+  it("🔁 2 theatrical + 1 ott LOADS — one deck's entries never consume the other's budget", () => {
+    // The exact case the old per-FILE pin rejected, and the case that blocked a
+    // genuine OTT add (Srinivasa Mangapuram) behind two in-budget theatrical ones.
+    writeFile("2026-08-12", [PANCHALI, { ...PANCHALI, title: "Second Film" }, OTT_ASSERTION]);
+    expect(readManualAdds("2026-08-12", dir)).toHaveLength(3);
+  });
+
+  it("🔁 2 + 2 is the MAXIMUM a file can hold, and it loads", () => {
+    writeFile("2026-08-12", [
+      PANCHALI, { ...PANCHALI, title: "Second Film" },
+      OTT_ASSERTION, { ...OTT_ASSERTION, title: "Second OTT" },
+    ]);
+    expect(readManualAdds("2026-08-12", dir)).toHaveLength(4);
+  });
+
+  it("🔁 …and 2 + 3 still throws — the ceiling holds on the deck that broke it", () => {
+    writeFile("2026-08-12", [
+      PANCHALI, { ...PANCHALI, title: "Second Film" },
+      OTT_ASSERTION, { ...OTT_ASSERTION, title: "Second OTT" }, { ...OTT_ASSERTION, title: "Third OTT" },
+    ]);
+    expect(() => readManualAdds("2026-08-12", dir)).toThrow(/3 ott entries/);
+  });
+
+  it("exactly 2 in one edition is allowed — the cap is inclusive", () => {
+    writeFile("2026-08-12", [PANCHALI, { ...PANCHALI, title: "Second Film" }]);
     expect(readManualAdds("2026-08-12", dir)).toHaveLength(2);
+  });
+
+  it("🔒 a file over-cap in BOTH decks names THEATRICAL first — the message is deterministic", () => {
+    writeFile("2026-08-12", [
+      PANCHALI, { ...PANCHALI, title: "T2" }, { ...PANCHALI, title: "T3" },
+      OTT_ASSERTION, { ...OTT_ASSERTION, title: "O2" }, { ...OTT_ASSERTION, title: "O3" },
+    ]);
+    expect(() => readManualAdds("2026-08-12", dir)).toThrow(/3 theatrical entries/);
   });
 });
 
@@ -461,11 +518,31 @@ describe("injectManualAdds — the job seam", () => {
     expect(th.rejected[0]!.reason).toMatch(/manual-add refused .*NOT in the/);
   });
 
-  it("THE CAP FAILS LOUDLY THROUGH THE WIRED PATH — the run stops, nothing truncates", () => {
-    writeFile("2026-08-12", [PANCHALI, OTT_ASSERTION, { ...PANCHALI, title: "Third Film" }]);
+  // 🔁 PIN CHANGE (WD-046-SM2) — same correction as the reader-level pins above.
+  // The old case (2 theatrical + 1 ott) is legal under the approved contract, so
+  // the over-cap case is now three in ONE deck. The wired path still fails loudly.
+  it("🔁 THE CAP FAILS LOUDLY THROUGH THE WIRED PATH — the run stops, nothing truncates", () => {
+    writeFile("2026-08-12", [PANCHALI, { ...PANCHALI, title: "Second Film" }, { ...PANCHALI, title: "Third Film" }]);
     expect(() =>
       injectManualAdds([result("theatrical")], { windowStart: "2026-08-12", wikiLanguageIndex: WIKI_INDEX, dir })
-    ).toThrow(/hard cap is 2/);
+    ).toThrow(/3 theatrical entries/);
+  });
+
+  it("🔁 2 theatrical + 1 ott injects through the WIRED path, each to its own deck", () => {
+    // "Some Other Film" is IN WIKI_INDEX — a wiki-list entry is machine-verified
+    // against it, so an invented title would be refused for that reason and not
+    // exercise the cap change this pin is about.
+    writeFile("2026-08-12", [PANCHALI, { ...PANCHALI, title: "Some Other Film" }, OTT_ASSERTION]);
+    const th = result("theatrical");
+    const ott = result("ott");
+    const out = injectManualAdds([th, ott], { windowStart: "2026-08-12", wikiLanguageIndex: WIKI_INDEX, dir });
+    expect(out).toEqual({ injected: 3, refused: 0 });
+    // "Ordinary Film" is the pre-existing reconciled row each result() seeds;
+    // manual adds are APPENDED to it, never replacing the deck.
+    expect(th.reconciled.map((f) => f.title)).toEqual([
+      "Ordinary Film", "Panchali Panchabhartruka", "Some Other Film",
+    ]);
+    expect(ott.reconciled.map((f) => f.title)).toEqual(["Ordinary Film", "Nijame Rujuvainadhi"]);
   });
 
   it("A PREVIOUS WINDOW'S FILE IS NOT READ through the wired path either", () => {

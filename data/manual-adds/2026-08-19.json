@@ -20,6 +20,24 @@
       "cast": ["Adhvithi Shetty", "Ruthu Chaithra", "Lokendra Surya"],
       "sourceUrls": ["https://www.siasat.com/16-films-releasing-in-hyderabad-theatres-on-friday-august-21-3526508/"],
       "evidenceBasis": "trade-press"
+    },
+    {
+      "title": "Srinivasa Mangapuram",
+      "language": "Telugu",
+      "date": "2026-08-20",
+      "dateField": "ott",
+      "platform": "Prime Video",
+      "audioLanguages": {
+        "original": "Telugu",
+        "dubbed": ["Tamil", "Hindi", "Malayalam", "Kannada"]
+      },
+      "cast": ["Jaya Krishna Ghattamaneni", "Rasha Thadani", "Mohan Babu"],
+      "director": "Ajay Bhupathi",
+      "sourceUrls": [
+        "https://www.123telugu.com/telugu/news/jai-krishna-ghattamanenis-srinivasa-mangapuram-sets-ott-premiere-on-prime-video-from-august-20.html",
+        "https://en.wikipedia.org/wiki/Srinivasa_Mangapuram_(film)"
+      ],
+      "evidenceBasis": "trade-press"
     }
   ]
 }

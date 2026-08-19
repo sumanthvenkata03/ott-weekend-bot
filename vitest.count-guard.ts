@@ -43,7 +43,7 @@ import type { Reporter, TestModule } from "vitest/node";
  * removed, and never to make a red run go green — a mismatch downward is the
  * exact symptom this file exists to catch.
  */
-export const EXPECTED_TOTAL_TESTS = 1564;
+export const EXPECTED_TOTAL_TESTS = 1570;
 
 /**
  * ── WD-ENG-10C: THE BYPASS IS CLOSED ────────────────────────────────────────

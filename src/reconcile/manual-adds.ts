@@ -33,10 +33,28 @@
 // the SAME file. No wall-clock issue numbering, no anchor dependency, no drift
 // across the midnight that WD-ENG-02 was about.
 //
-// ONE FILE PER EDITION, named for the Wednesday, e.g. data/manual-adds/
-// 2026-08-12.json. Both pillars read it; each entry is routed to the theatrical
-// or OTT edition by its own dateField, and the 2-entry cap is per FILE, which is
-// per edition.
+// ONE FILE PER WINDOW, named for the Wednesday, e.g. data/manual-adds/
+// 2026-08-12.json. BOTH editions read that one file; each entry is routed to the
+// theatrical or OTT deck by its own dateField.
+//
+// ── THE CAP IS PER EDITION, NOT PER FILE (WD-046-SM2) ───────────────────────
+// This comment used to read "the 2-entry cap is per FILE, which is per edition",
+// and the code matched the comment rather than the contract. The equivalence it
+// asserts is false: one window-keyed file serves BOTH editions, so a per-FILE
+// count of 2 gave the two decks 2 entries BETWEEN them — half the cap WD-ENG-09
+// and the WD-ENG-11 build spec both approved ("2 per edition").
+//
+// It surfaced when a third entry was appended for a genuine OTT release
+// (Srinivasa Mangapuram, Prime Video 2026-08-20) to a file already holding two
+// theatrical adds: the read threw, and because nothing on the path catches it,
+// the throw would have taken the whole edition down — including the two
+// theatrical entries that were within their own deck's budget.
+//
+// The count is now PER dateField. A file may hold at most MANUAL_ADD_CAP
+// theatrical AND MANUAL_ADD_CAP ott. This RESTORES the approved contract; it
+// does not widen it — no single deck can carry more operator-authored films than
+// it could before, because no single deck could ever reach 2 without starving
+// the other.
 //
 // ── WORKED EXAMPLE — copy this ─────────────────────────────────────────────
 //   data/manual-adds/2026-08-12.json
@@ -76,8 +94,15 @@ import type { ReconciledFilm } from "./types.js";
 /** Where an edition's evidence file lives. Window-start-keyed — see the header. */
 export const MANUAL_ADDS_DIR = "data/manual-adds";
 
-/** Hard cap per edition. Exceeding it FAILS the run; it never truncates. */
+/**
+ * Hard cap per EDITION — counted separately for the theatrical deck and the OTT
+ * deck, NOT across the file. Exceeding it in either FAILS the run; it never
+ * truncates. See the header for why this is a correction rather than a widening.
+ */
 export const MANUAL_ADD_CAP = 2;
+
+/** The two decks an entry can be routed to, in the order the cap reports them. */
+const EDITIONS = ["theatrical", "ott"] as const;
 
 /**
  * The three evidence bases.
@@ -183,12 +208,21 @@ export function readManualAdds(windowStart: string, dir: string = MANUAL_ADDS_DI
     throw new Error(`manual-adds: ${path} failed validation — ${issues}`);
   }
 
-  if (parsed.data.entries.length > MANUAL_ADD_CAP) {
+  // THE CAP, COUNTED PER EDITION. `dateField` IS the edition key — it is the
+  // same value loadManualAdds routes on below, so the budget a file is charged
+  // against here is exactly the deck the entry will land in. Editions are checked
+  // in a fixed order so a file over-cap in BOTH names theatrical first, and the
+  // message stays deterministic.
+  for (const edition of EDITIONS) {
+    const n = parsed.data.entries.filter((e) => e.dateField === edition).length;
+    if (n <= MANUAL_ADD_CAP) continue;
     // LOUD, never a silent truncation. Truncating would publish some of an
     // operator's intent and drop the rest without saying which.
     throw new Error(
-      `manual-adds: ${path} declares ${parsed.data.entries.length} entries; the hard cap is ` +
-        `${MANUAL_ADD_CAP} per edition. Remove entries or split across issues — nothing was truncated.`
+      `manual-adds: ${path} declares ${n} ${edition} entries; the hard cap is ${MANUAL_ADD_CAP} ` +
+        `per EDITION (the ${edition} deck). One window-keyed file serves BOTH editions, so it may ` +
+        `hold up to ${MANUAL_ADD_CAP} theatrical AND ${MANUAL_ADD_CAP} ott. Remove ${edition} ` +
+        `entries or split across issues — nothing was truncated.`
     );
   }
 
