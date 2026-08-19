@@ -23,12 +23,18 @@
 //
 // AUGMENT-ONLY: every original TMDb candidate survives in `reconciled`; the AI
 // net can only ADD films and annotate tier, never remove a TMDb candidate.
+//
+// WD-ENG-20 is the ONE narrowing, and it removes no film: two rows carrying the
+// SAME tmdbId are one film written twice, and they collapse to a single row that
+// unions their provenance (merge-by-id.ts). No id is lost, no film is dropped,
+// and a row without a tmdbId is never touched.
 
 import type { Release } from "../shared/types.js";
 import { toPlatform } from "../shared/platform.js";
 import type { TmdbTitleHit, TmdbTitleSearch } from "../ingestion/releases/tmdb.js";
 import { qualifyingDate, inWindow } from "../shared/post-validator.js";
 import { isCorroborated, discoveryTagsOf } from "./net-independence.js";
+import { mergeByTmdbId, logMerges } from "./merge-by-id.js";
 import type { BucketWindow, ManifestRow } from "../shared/post-validator.js";
 import { normalizeTitle } from "../discovery/normalize.js";
 import { wikiLanguageFor } from "../discovery/sources/wikiLanguageIndex.js";
@@ -733,9 +739,25 @@ export async function reconcile(input: ReconcileInput, deps: ReconcileDeps): Pro
   // 3) Unverified AI leads (red, no release).
   for (const res of unverified) reconciled.push(buildUnverified(res, pillar));
 
+  // 3.5) WD-ENG-20 — ONE TMDb ID IS ONE FILM.
+  //
+  // Rows that share a tmdbId are the SAME film under two spellings or two
+  // language variants, so they collapse to one row that unions their provenance.
+  // This runs BEFORE flagDuplicates and BEFORE tiering, in that order, on
+  // purpose: the merged row must be tiered on its unioned foundIn (it can only
+  // ever count MORE independent nets), and flagDuplicates must see the deck the
+  // operator will actually read, so it flags real title collisions between
+  // DIFFERENT films rather than a pair it is already about to be told is one.
+  //
+  // It touches nothing without a tmdbId, so manual adds and unverified ai-net
+  // leads pass through untouched — see merge-by-id.ts.
+  const merge = mergeByTmdbId(reconciled);
+  logMerges(pillar, merge.merges);
+  const reconciledFilms = merge.films;
+
   // 4) Flag possible dupes, then assign tiers.
-  flagDuplicates(reconciled);
-  for (const f of reconciled) {
+  flagDuplicates(reconciledFilms);
+  for (const f of reconciledFilms) {
     const { tier, reasons } = assignTier(f);
     f.tier = tier;
     for (const r of reasons) if (!f.reasons.includes(r)) f.reasons.push(r);
@@ -788,15 +810,21 @@ export async function reconcile(input: ReconcileInput, deps: ReconcileDeps): Pro
   ];
 
   const counts = {
-    total: reconciled.length,
-    green: reconciled.filter((f) => f.tier === "green").length,
-    yellow: reconciled.filter((f) => f.tier === "yellow").length,
-    red: reconciled.filter((f) => f.tier === "red").length,
-    addedByAiNet: reconciled.filter(
+    total: reconciledFilms.length,
+    green: reconciledFilms.filter((f) => f.tier === "green").length,
+    yellow: reconciledFilms.filter((f) => f.tier === "yellow").length,
+    red: reconciledFilms.filter((f) => f.tier === "red").length,
+    addedByAiNet: reconciledFilms.filter(
       (f) => f.status === "confirmed" && f.foundIn.length === 1 && f.foundIn[0] === "ai-net"
     ).length,
-    flagged: reconciled.filter((f) => f.tier !== "green").length,
+    flagged: reconciledFilms.filter((f) => f.tier !== "green").length,
   };
 
-  return { pillar, window: { start: window.start, end: window.end }, reconciled, rejected, counts };
+  return {
+    pillar,
+    window: { start: window.start, end: window.end },
+    reconciled: reconciledFilms,
+    rejected,
+    counts,
+  };
 }

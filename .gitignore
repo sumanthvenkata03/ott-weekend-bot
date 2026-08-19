@@ -1,7 +1,15 @@
 node_modules
 dist
 .env
-data/
+# `data/*`, NOT `data/` — git does not descend into a directory excluded with a
+# trailing slash, so a `!data/...` negation under a bare `data/` is a dead line.
+# Excluding per-ENTRY keeps everything in data/ ignored exactly as before while
+# leaving the directory re-includable, which is what the manual-add evidence
+# files need (manual-adds.ts is built around a CHECKED-IN file).
+data/*
+!data/manual-adds/
+data/manual-adds/*
+!data/manual-adds/*.json
 data/research-archive/
 *.log
 .DS_Store

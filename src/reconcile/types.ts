@@ -165,6 +165,14 @@ export interface ReconciledFilm {
   tier: Tier;
   reasons: string[];          // human-readable "why this tier"
 
+  /**
+   * WD-ENG-20 — the row(s) folded into this one because they shared its tmdbId.
+   * Present ONLY on a merged row. Provenance for the review: it names the
+   * spellings and language variants the deck no longer shows separately, so a
+   * collapsed pair is visible as a merge rather than as a film that vanished.
+   */
+  mergedVariants?: Array<{ title: string; language: string; foundIn: string[] }>;
+
   // Flags
   possibleDuplicate?: boolean;
   ambiguousMatch?: boolean;

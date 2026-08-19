@@ -1,0 +1,25 @@
+{
+  "entries": [
+    {
+      "title": "Judaa",
+      "language": "Punjabi",
+      "date": "2026-08-21",
+      "dateField": "theatrical",
+      "audioLanguages": { "original": "Punjabi" },
+      "cast": ["Gulab Sidhu", "Jasmin Bhasin"],
+      "director": "Simerjit Singh",
+      "sourceUrls": ["https://www.siasat.com/16-films-releasing-in-hyderabad-theatres-on-friday-august-21-3526508/"],
+      "evidenceBasis": "trade-press"
+    },
+    {
+      "title": "Brahmakamala",
+      "language": "Kannada",
+      "date": "2026-08-21",
+      "dateField": "theatrical",
+      "audioLanguages": { "original": "Kannada" },
+      "cast": ["Adhvithi Shetty", "Ruthu Chaithra", "Lokendra Surya"],
+      "sourceUrls": ["https://www.siasat.com/16-films-releasing-in-hyderabad-theatres-on-friday-august-21-3526508/"],
+      "evidenceBasis": "trade-press"
+    }
+  ]
+}
