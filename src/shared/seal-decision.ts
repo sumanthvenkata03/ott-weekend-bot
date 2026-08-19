@@ -27,6 +27,62 @@ export function hasRealVoteBase(film: { imdbVotes?: number; tmdbVoteCount?: numb
   return (film.imdbVotes ?? 0) > 0 || (film.tmdbVoteCount ?? 0) >= 50;
 }
 
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * WD-046-SEAL — is this an OTT ARRIVAL rather than a premiere?
+ *
+ * True when the film played theatrically STRICTLY BEFORE the OTT date it is
+ * being carded for. Both dates must be ISO yyyy-mm-dd, which makes the string
+ * comparison a correct chronological one and rejects anything malformed rather
+ * than comparing garbage.
+ *
+ * Deliberately excludes two shapes that look similar and are not:
+ *   · no theatrical date at all — a direct-to-OTT premiere (Pyaar Prema
+ *     Kalyanam), and a manual add with no rating record at all (Srinivasa
+ *     Mangapuram). Both are genuinely new to everyone.
+ *   · a theatrical date AFTER the OTT date — a film streaming before it opens
+ *     in cinemas (I'm Game, theatrical 2026-09-03 vs OTT 2026-08-20). Nothing
+ *     has had a run yet, so there is no verdict to inherit.
+ */
+export function isOttArrival(
+  rel: { releaseDates?: { theatrical?: string; ott?: string } } | undefined
+): boolean {
+  const t = rel?.releaseDates?.theatrical;
+  const o = rel?.releaseDates?.ott;
+  if (typeof t !== "string" || typeof o !== "string") return false;
+  if (!ISO.test(t) || !ISO.test(o)) return false;
+  return t < o;
+}
+
+/**
+ * WD-046-SEAL — does a Wed Drop card wear the RATINGS SEAL instead of NEW?
+ *
+ * The operator's rule, and both halves are required:
+ *   (a) it is an OTT arrival (isOttArrival), and
+ *   (b) it has a real vote base (hasRealVoteBase — the ENG-10 floor, UNWEAKENED).
+ *
+ * THE THEATRICAL EDITION IS ALWAYS NEW. Every film in that deck opens inside the
+ * window by construction, so there is no prior run for an audience to have
+ * scored — a seal there would be borrowed from a different release entirely.
+ * This is an explicit branch rather than an emergent one: today no theatrical
+ * film HAS a vote base, so the two are indistinguishable in behaviour, and the
+ * moment one did (a re-release, a festival title) the emergent version would
+ * quietly start printing scores on premiere cards.
+ *
+ * Returning false does NOT blank the seal — the caller falls back to the NEW
+ * stamp, which is a seal in its own right. Nothing is ever fabricated: this
+ * predicate only decides WHICH honest state to show.
+ */
+export function wearsArrivalSeal(
+  edition: string,
+  rel: (SealInput & { releaseDates?: { theatrical?: string; ott?: string } }) | undefined
+): boolean {
+  if (edition !== "ott") return false;
+  if (!rel) return false;
+  return isOttArrival(rel) && hasRealVoteBase(rel);
+}
+
 /** The fields the seal decision reads. Structural, so both callers can pass their own shape. */
 export type SealInput = {
   tbsiScore?: number;

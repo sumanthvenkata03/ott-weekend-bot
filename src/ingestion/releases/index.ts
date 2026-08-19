@@ -118,14 +118,24 @@ async function enrichWithRatings(releases: Release[]): Promise<Release[]> {
       // OMDb language/cast/runtime role — UNCHANGED, applied only when OMDb responded.
       const mergedAudio = omdb ? mergeAudioLanguages(r.audioLanguages, omdb.languages, r.title) : undefined;
 
+      // ── WD-046-SEAL-B — THE VOTE BASE, OMDb FIRST ─────────────────────────
+      // This used to be `imdbVotes: omdb.imdbVotes` inside the OMDb spread, which
+      // wrote the key even when OMDb had nothing — and OMDb answers "N/A" for
+      // new Indian titles, so the key landed as an explicit `undefined` and there
+      // was no second chance at it. Precedence is unchanged where OMDb HAS a
+      // count; MDBList now fills the gap where it does not, and an existing value
+      // is the last resort. All three absent ⇒ the key is not written at all
+      // (the conditional spread below), so absent stays absent.
+      const imdbVotes = omdb?.imdbVotes ?? mdblist?.imdbVotes ?? r.imdbVotes;
+
       return {
         ...r,
         ...(omdb ? {
-          imdbVotes: omdb.imdbVotes,
           director: omdb.director ?? r.director,
           cast: omdb.cast.length > 0 ? omdb.cast : r.cast,
           runtime: omdb.runtime ?? r.runtime,
         } : {}),
+        ...(imdbVotes !== undefined ? { imdbVotes } : {}),
         ...(mergedAudio ? { audioLanguages: mergedAudio } : {}),
         // Ratings — conditional spreads so we never write an explicit undefined.
         ...(m.imdbRating !== undefined ? { imdbRating: m.imdbRating } : {}),

@@ -25,6 +25,7 @@ import {
   hasLanguagesSection,
   buildStampContext,
 } from "./_shared.js";
+import { wearsArrivalSeal } from "../shared/seal-decision.js";
 
 /**
  * Delete any stale wed-drop PNGs for this date before re-rendering, so an
@@ -166,7 +167,23 @@ export async function renderWedDrop(
       hasReleased: hasReleasedSection(enrichedRelease),
       hasLanguages: hasLanguagesSection(enrichedRelease),
     });
-    const stamp = buildStampContext(release);
+    // ── WD-046-SEAL — OTT ARRIVALS WEAR THE RATINGS SEAL ────────────────────
+    // Every Wed Drop card used to print NEW, including OTT arrivals of films
+    // that finished theatrical runs weeks earlier and had thousands of IMDb
+    // ballots behind them. buildStampContext was never the problem — it is fully
+    // data-driven and always was; the vote base simply never reached it
+    // (WD-046-SEAL-B fixed that upstream in the MDBList client).
+    //
+    // What is decided HERE is which films are ENTITLED to a number at all.
+    // wearsArrivalSeal answers that: OTT edition + a prior theatrical run + a
+    // real vote base. A card that is not entitled is shown the release's DATE
+    // ONLY, so buildStampContext resolves its honest "new" state with the
+    // correct NEW/UNRATED wording — the score fields are withheld rather than
+    // the seal being blanked, and nothing is ever fabricated.
+    const stampInput = wearsArrivalSeal(edition, release)
+      ? release
+      : (release.releaseDate ? { releaseDate: release.releaseDate } : undefined);
+    const stamp = buildStampContext(stampInput);
     // ISSUE 032 — the seal reserve. buildStampContext ALWAYS resolves a kind, and
     // _tbsi-stamp.html draws a seal for all three ("tbsi" / "tmdb" / "new"), so a
     // seal is always present and the blurb must always reserve its pocket. Derived

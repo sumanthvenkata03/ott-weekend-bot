@@ -18,18 +18,57 @@ const BASE_URL = "https://api.mdblist.com";
 // Be a polite client — same 2 req/s buffer as OMDb.
 const throttle = pThrottle({ limit: 2, interval: 1000 });
 
-// MDBList returns a `ratings` array of { source, value, ... }. value may be null
-// (source tracked but no score). We only read source + value; zod strips the rest.
+// MDBList returns a `ratings` array of { source, value, score, votes, url, ... }.
+// value may be null (source tracked but no score).
+//
+// ── WD-046-SEAL-B — `votes` IS NOW READ ────────────────────────────────────
+// This schema used to take source + value only, and zod stripped everything
+// else at parse time. The cost was invisible: MDBList mirrors IMDb's VOTE COUNT
+// on every rating row, and dropping it left Release.imdbVotes unset for every
+// film MDBList covered — so hasRealVoteBase (the ENG-10 seal floor) could only
+// ever be satisfied by TMDb's own count, which for new Indian releases sits at
+// 0–25 against a floor of 50. Every Wed Drop card therefore printed NEW,
+// including films with tens of thousands of real IMDb ballots behind them
+// (Welcome to the Jungle: 20,824 votes; Jana Nayagan: 5,158).
+//
+// OMDb was already the vote source, but it answers "N/A" for these titles —
+// verified across the whole deck — so MDBList is not a second opinion here, it
+// is the only one. It stays STRICTLY a fill-absent source behind OMDb.
 const MdblistResponseSchema = z.object({
   ratings: z
     .array(
       z.object({
         source: z.string(),
         value: z.number().nullable(),
+        // Accepts a bare number (what the API sends today) OR a formatted string,
+        // so a provider-side change to "20,824" cannot silently zero the count.
+        // Absent/null is normal and stays absent — never coerced to 0.
+        votes: z.union([z.number(), z.string()]).nullish(),
       })
     )
     .nullish(),
 });
+
+/**
+ * Normalize a vote count from whatever MDBList sent. Exported so the tolerance
+ * is pinned directly rather than inferred from a fixture.
+ *
+ * Returns undefined — never 0 — for anything unusable, because 0 and "unknown"
+ * mean different things to hasRealVoteBase: 0 is a real claim that nobody voted,
+ * undefined is the absence of evidence. Fabricating the former from the latter
+ * is exactly what the seal floor exists to prevent.
+ */
+export function parseVoteCount(v: unknown): number | undefined {
+  if (typeof v === "number") {
+    return Number.isFinite(v) && v >= 0 ? Math.trunc(v) : undefined;
+  }
+  if (typeof v === "string") {
+    // Thousands separators (",", spaces, thin spaces) and stray whitespace only.
+    const n = Number.parseFloat(v.replace(/[,\s  ]/g, ""));
+    return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : undefined;
+  }
+  return undefined;
+}
 
 /** Normalized MDBList ratings. Scales: imdb 0–10, rtCritic/rtAudience/metacritic
  *  0–100, letterboxd 0–5. All optional — a source is present only if MDBList
@@ -40,14 +79,28 @@ export interface MdblistRatings {
   rtAudience?: number;  // source "popcorn"     (0–100, RT audience %)
   metacritic?: number;  // source "metacritic"  (0–100)
   letterboxd?: number;  // source "letterboxd"  (0–5)
+  /**
+   * WD-046-SEAL-B — ballots behind the IMDb rating, mirrored by MDBList.
+   * Captured ONLY alongside a present `imdb` value: a count with no rating under
+   * it would back a score IMDb never gave, which is not what the seal claims.
+   */
+  imdbVotes?: number;
 }
 
-function mapRatings(ratings: Array<{ source: string; value: number | null }>): MdblistRatings {
+function mapRatings(
+  ratings: Array<{ source: string; value: number | null; votes?: unknown }>
+): MdblistRatings {
   const out: MdblistRatings = {};
   for (const r of ratings) {
     if (r.value === null) continue;
     switch (r.source) {
-      case "imdb":       out.imdb = r.value; break;
+      case "imdb": {
+        out.imdb = r.value;
+        // Same branch as the value on purpose — see MdblistRatings.imdbVotes.
+        const votes = parseVoteCount(r.votes);
+        if (votes !== undefined) out.imdbVotes = votes;
+        break;
+      }
       case "tomatoes":   out.rtCritic = r.value; break;
       case "popcorn":    out.rtAudience = r.value; break;
       case "metacritic": out.metacritic = r.value; break;
