@@ -30,6 +30,8 @@ import { callClaudeJSON } from "../content/claude.js";
 import { cached } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
 import { toPlatform } from "../shared/platform.js";
+import { normalizeTitle } from "../discovery/normalize.js";
+import { isManualAdd } from "./reconcile.js";
 import type {
   AiReviewVerdict,
   ReconciledFilm,
@@ -40,8 +42,32 @@ import type {
 
 // The model returns these FOUR verdicts. "unavailable" is set only by fail-soft
 // code here, never by the model.
+//
+// ── WD-ENG-21: tmdbId IS NULLABLE, AND `ref` IS THE REAL KEY ────────────────
+// `tmdbId: z.number()` made a TMDb-less film UNASSESSABLE. Manual adds carry no
+// tmdbId, the projection dropped the key entirely, the prompt demanded
+// `"tmdbId": <number>`, and the model — correctly — returned null for Judaa and
+// Brahmakamala. Schema validation failed; the retry "succeeded" by silently
+// OMITTING both rows; they fell through to "not returned by AI-review" and were
+// auto-removed as unconfirmed. Every manual add would have died that way, which
+// makes the WD-ENG-11 contract ("AI-review MAY contradict a manual entry")
+// unreachable: it could never assess one in the first place.
+//
+// Two changes, both deliberate:
+//   · tmdbId is nullable AND optional — a null is now the honest answer for a
+//     film that has no id, not a validation failure.
+//   · `ref` is the row's real handle (see reviewRef): it exists for EVERY
+//     reviewable film, TMDb-backed or not.
+//
+// NOT added: a `.refine()` requiring one of the two. That would re-introduce the
+// exact failure class this closes — a hard schema failure that costs a billed
+// retry and takes the whole edition's verdicts with it. A row that matches
+// nothing degrades to the honest "not returned by AI-review" instead.
 const VerdictSchema = z.object({
-  tmdbId: z.number(),
+  /** The film's `ref` from the prompt, echoed back. The primary match key. */
+  ref: z.string().nullable().optional(),
+  /** TMDb id when the film has one; null/absent for operator-added films. */
+  tmdbId: z.number().nullable().optional(),
   verdict: z.enum(["confirm", "doubt", "reject", "unverified"]),
   reason: z.string(),
   sourceUrl: z.string().optional(),
@@ -50,7 +76,13 @@ const VerdictSchema = z.object({
   // verdict: it fact-fills a gap in release.platform, it does not judge the film.
   platform: z.string().nullable().optional(),
 });
-const AiReviewSchema = z.object({
+/**
+ * Exported so the schema itself can be pinned directly. The mocked-transport
+ * tests replace callClaudeJSON, which is where zod actually runs — so without a
+ * test that parses a real payload through THIS object, the very validation that
+ * broke gate 7c07f9ce0a38 would go uncovered.
+ */
+export const AiReviewSchema = z.object({
   reviews: z.array(VerdictSchema).default([]),
 });
 
@@ -124,15 +156,72 @@ function trustVerdictFor(verdict: AiReviewVerdict["verdict"], domainTrust: Sourc
   return "unconfirmed"; // doubt / unverified
 }
 
+/**
+ * One model row, normalized. The source-stated `platform` rides WITH its verdict
+ * (it used to live in a parallel map keyed by tmdbId, which no manual add has).
+ */
+interface RawReview {
+  verdict: AiReviewVerdict["verdict"];
+  reason: string;
+  sourceUrl?: string;
+  platform?: string;
+}
+
 /** The 🟢/🟡 films an edition submits for review (🔴 is gate-excluded; skip it). */
 function reviewableFilms(r: ReconcileResult): ReconciledFilm[] {
   return r.reconciled.filter((f) => f.tier === "green" || f.tier === "yellow");
 }
 
+/**
+ * WD-ENG-21 — THE STABLE HANDLE A REVIEW ROW ECHOES BACK.
+ *
+ * `Release.id` is the choice, and it is COLLISION-SAFE where the exact title is
+ * not. Every reviewable film has a release (🔴 unverified leads are the only
+ * release-less rows, and they are gate-excluded from review), and the id is
+ * namespaced by origin: `tmdb-<id>` for a TMDb-backed film, `manual-<slug>` for
+ * an operator add, `disc-<slug>` for a TMDb-less discovery find.
+ *
+ * TITLE WOULD NOT DO. Reconcile can legitimately hold two reviewable rows with
+ * the same title — this very window had a TMDb "Judaa" (1649723, country-rejected
+ * at ingest) alongside the operator's Punjabi "Judaa", and a week where the TMDb
+ * one survives the country gate would give two 🟢/🟡 rows named "Judaa". Keying
+ * on title would hand one film's verdict to the other. The `manual-` / `tmdb-`
+ * prefixes make that impossible.
+ *
+ * The fallback exists only so this function is total; it is not expected to fire.
+ */
+export function reviewRef(f: ReconciledFilm): string {
+  return f.release?.id ?? `t:${normalizeTitle(f.title)}`;
+}
+
+/**
+ * Batch-unique refs, positionally aligned to `films`.
+ *
+ * Release ids are unique in practice, but "in practice" is not a guarantee worth
+ * betting a verdict on: two manual entries whose titles normalize identically
+ * would share `manual-<slug>`. A deterministic `#2` suffix keeps every submitted
+ * row addressable without inventing a new identity scheme.
+ */
+export function reviewRefs(films: readonly ReconciledFilm[]): string[] {
+  const seen = new Map<string, number>();
+  return films.map((f) => {
+    const base = reviewRef(f);
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    return n === 1 ? base : `${base}#${n}`;
+  });
+}
+
 /** Compact, fact-only projection of a film for the reviewer (no fabricated fields). */
-function projectForReview(f: ReconciledFilm) {
+function projectForReview(f: ReconciledFilm, ref: string) {
   return {
-    tmdbId: f.tmdbId,
+    ref,
+    // WD-ENG-21 — `?? null` makes the ABSENCE EXPLICIT. Previously an undefined
+    // tmdbId made JSON.stringify drop the key altogether, so the model saw a film
+    // object with no id at all while the output spec demanded `<number>`. Stating
+    // `null` is what lets it answer honestly instead of guessing or dropping the
+    // row. For a film that HAS an id this is byte-identical to before.
+    tmdbId: f.tmdbId ?? null,
     title: f.title,
     ...(f.resolvedTitle ? { resolvedTitle: f.resolvedTitle } : {}),
     ...(f.year !== undefined ? { year: f.year } : {}),
@@ -145,8 +234,14 @@ function projectForReview(f: ReconciledFilm) {
   };
 }
 
+/** The exact JSON the reviewer sees — one projection per film, refs assigned. */
+function projectAll(films: readonly ReconciledFilm[]) {
+  const refs = reviewRefs(films);
+  return films.map((f, i) => projectForReview(f, refs[i]!));
+}
+
 export function buildReviewPrompt(edition: string, windowLabel: string, films: ReconciledFilm[]): string {
-  const filmsJson = JSON.stringify(films.map(projectForReview), null, 2);
+  const filmsJson = JSON.stringify(projectAll(films), null, 2);
   return `You are a release fact-checker for The Big Screen Index. Using WEB SEARCH, you verify whether each film below is ACTUALLY releasing as claimed, in the stated window. You output DATA ONLY (strict JSON).
 
 #1 RULE — BASE EVERY VERDICT ONLY ON WHAT WEB SEARCH RETURNS (most important):
@@ -160,10 +255,16 @@ YOU ASSESS ONLY — you do NOT rewrite anything:
 PLATFORM (the ONE fact you MAY return, fabrication-guarded):
 - If a source you found explicitly states the OTT streaming platform for this film, return it as \`platform\` (the platform's common name, e.g. "Netflix", "SonyLIV", "JioHotstar", "Prime Video"). If no source states a platform, return null. Never guess or infer the platform — it must be explicitly stated in a source you actually found.
 
+OPERATOR-ADDED / TMDb-LESS FILMS — ASSESS THEM, NEVER SKIP THEM:
+- Some films have \`"tmdbId": null\`. These are real films an operator entered by hand from trade press because no TMDb record exists for them. A null tmdbId is EXPECTED and is NOT a reason to doubt, reject, or omit a film.
+- Assess them on exactly the same basis as every other film: what WEB SEARCH says about the release and the date. Their \`foundIn\` is \`["manual"]\`, which tells you no automated net found them — it tells you nothing about whether the release is real.
+- For these, "is this the RIGHT film?" is a TITLE + LANGUAGE + DATE question, not an id question. Judge whether the film the press describes is the film described here.
+- Return the row with \`"tmdbId": null\`. Do NOT invent an id, do NOT substitute a same-title film's id, and do NOT drop the row because you have no id for it.
+
 FOR EACH FILM, check via search:
 - Is this release actually CONFIRMED to happen in ${windowLabel}? (Official announcement / trade press / CBFC clearance — vs. stalled, postponed, cancelled, or "expected".)
 - Does the DATE hold up? (Does the press corroborate the given date, or a different one?)
-- Is this the RIGHT film? (Does the TMDb id / title / year match the film actually releasing — not a same-title different film?)
+- Is this the RIGHT film? (Does the title / language / year — and the TMDb id where one is given — match the film actually releasing, not a same-title different film?)
 
 SEARCH STRATEGY — release dates CHANGE, and old articles dominate generic results:
 - Do NOT rely on one generic "<title> release date" query per film. Dates get preponed/postponed, and months-old SEO articles often outrank the newer announcement — a generic query can show you ONLY the stale date.
@@ -187,8 +288,11 @@ VERDICTS (exactly one per film):
 FILMS (${edition} edition · window ${windowLabel}):
 ${filmsJson}
 
-OUTPUT — STRICT JSON ONLY (no prose, no markdown). Exactly ONE entry per film above, keyed by its tmdbId:
-{ "reviews": [ { "tmdbId": <number>, "verdict": "confirm|doubt|reject|unverified", "reason": "...", "sourceUrl": "https://...", "platform": "Netflix|null" } ] }`;
+OUTPUT — STRICT JSON ONLY (no prose, no markdown). Exactly ONE entry per film above — same count, same order — keyed by its \`ref\`:
+{ "reviews": [ { "ref": "<copy the film's ref string EXACTLY>", "tmdbId": <number or null>, "verdict": "confirm|doubt|reject|unverified", "reason": "...", "sourceUrl": "https://...", "platform": "Netflix|null" } ] }
+- \`ref\` is REQUIRED on every row and must be copied character-for-character from the film above. It is how each verdict is matched back to its film.
+- \`tmdbId\` mirrors the film's value: the number when it has one, \`null\` when it does not.
+- NEVER omit a film. If you could not assess one, return it with verdict "unverified" — a missing row is treated as a failure to assess and removes the film.`;
 }
 
 /**
@@ -199,7 +303,10 @@ OUTPUT — STRICT JSON ONLY (no prose, no markdown). Exactly ONE entry per film 
  * those needs NO bump. (Mirrors RESEARCH_CACHE_VERSION.)
  */
 // v3: search-strategy guidance + in-window reject-safety added to buildReviewPrompt.
-export const AI_REVIEW_CACHE_VERSION = "v3";
+// v4: WD-ENG-21 — `ref` added to the projection and required in the output, tmdbId
+//     nullable, and the operator-added section added to the prompt. Both the prompt
+//     AND the schema shape moved, so every v3 blob is stale by definition.
+export const AI_REVIEW_CACHE_VERSION = "v4";
 
 /** Verdicts are stable within a drop cycle; a same-day --approve must hit. */
 const AI_REVIEW_CACHE_TTL_HOURS = 24;
@@ -213,7 +320,7 @@ const AI_REVIEW_CACHE_TTL_HOURS = 24;
  */
 function reviewCacheKey(r: ReconcileResult, films: ReconciledFilm[]): string {
   const digest = createHash("sha256")
-    .update(JSON.stringify(films.map(projectForReview)))
+    .update(JSON.stringify(projectAll(films)))
     .digest("hex")
     .slice(0, 16);
   return `ai-review:${AI_REVIEW_CACHE_VERSION}:${r.pillar}:${r.window.start}-${r.window.end}:${digest}`;
@@ -249,23 +356,28 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
       { ttlSeconds: AI_REVIEW_CACHE_TTL_HOURS * 3600 }
     );
 
-    const byId = new Map<number, AiReviewVerdict>();
-    // Raw source-stated platform, kept OUT of AiReviewVerdict (it's a fact-fill,
-    // not part of the verdict). Only present when the model returned a non-null
-    // platform; normalized to an enum at the fill site below.
-    const platformById = new Map<number, string>();
+    // WD-ENG-21 — TWO indexes, and the raw platform now rides WITH its verdict
+    // instead of in a parallel map keyed by an id a manual add does not have.
+    // `ref` is the primary key (it exists for every reviewable film); tmdbId is
+    // kept as a fallback so a model that echoes only the id still matches, which
+    // is what keeps numeric-tmdbId behaviour identical to before.
+    const byRef = new Map<string, RawReview>();
+    const byId = new Map<number, RawReview>();
     for (const v of out.reviews) {
-      byId.set(v.tmdbId, {
+      const raw: RawReview = {
         verdict: v.verdict,
         reason: v.reason,
         ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
-      });
-      if (v.platform) platformById.set(v.tmdbId, v.platform);
+        ...(v.platform ? { platform: v.platform } : {}),
+      };
+      if (v.ref) byRef.set(v.ref, raw);
+      if (typeof v.tmdbId === "number") byId.set(v.tmdbId, raw);
     }
 
+    const refs = reviewRefs(films);
     let assessed = 0;
-    for (const f of films) {
-      const v = f.tmdbId !== undefined ? byId.get(f.tmdbId) : undefined;
+    for (const [i, f] of films.entries()) {
+      const v = byRef.get(refs[i]!) ?? (f.tmdbId !== undefined ? byId.get(f.tmdbId) : undefined);
       if (v) {
         // Discipline guard: a doubt/reject with no source reads as a bare claim —
         // downgrade to "unverified" so it never looks authoritative without a cite
@@ -274,7 +386,11 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
         if ((v.verdict === "doubt" || v.verdict === "reject") && !v.sourceUrl) {
           review = { verdict: "unverified", reason: `${v.reason} (no source cited)` };
         } else {
-          review = { ...v };
+          review = {
+            verdict: v.verdict,
+            reason: v.reason,
+            ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
+          };
         }
         // Phase 1 — code-owned TRUST fields (the enforcement axis). The denylist
         // overrides LLM optimism here: a confirm sourced only from a piracy/mirror
@@ -288,7 +404,7 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
         // computed against release.platform BEFORE the seam-#3 fill so a real
         // conflict is visible (press says X, our data says Y). A found platform
         // that maps to no enum can't be compared → leave platformAgrees undefined.
-        const rawFound = f.tmdbId !== undefined ? platformById.get(f.tmdbId) : undefined;
+        const rawFound = v.platform;
         if (rawFound) {
           review.platformFound = rawFound;
           const foundEnum = toPlatform(rawFound);
@@ -359,6 +475,24 @@ export interface EnforceOptions {
  * real data problem must still face the human.
  */
 function singleNetIsSoleYellowDriver(f: ReconciledFilm): boolean {
+  // ── WD-ENG-21 — A MANUAL ADD IS NEVER PROMOTED, WHATEVER SEARCH SAYS ──────
+  // WD-ENG-11 fixed the manual dial at YELLOW and said outright that no evidence
+  // basis upgrades it: "corroboration reassures, it never promotes." Until now
+  // that held by accident — a manual add could not receive a verdict at all, so
+  // it could not reach this predicate. Making it assessable makes this branch
+  // REACHABLE, and a manual add satisfies every other condition below (yellow,
+  // foundIn ["manual"] ⇒ single-net, no ambiguity/duplicate/conflict, landing
+  // pass). One search `confirm` would therefore set aiPromoted, and
+  // isEffectiveGreen in gate.ts returns true on `!!f.aiPromoted` ALONE — so a
+  // confirmed operator assertion could carry the whole drop into UNATTENDED
+  // auto-publish. That is precisely the outcome WD-ENG-11 and WD-ENG-19 both
+  // forbade, and it would have shipped as a side effect of a schema fix.
+  //
+  // The verdict is still attached, still shown to the operator, and a
+  // CONTRADICTION still removes the film — assessment is unaffected. Only the
+  // upgrade is refused.
+  if (isManualAdd(f)) return false;
+
   const singleNet = !(f.foundIn.includes("tmdb") && f.foundIn.includes("ai-net"));
   return (
     f.tier === "yellow" &&
