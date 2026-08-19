@@ -28,6 +28,7 @@ import type { Release } from "../shared/types.js";
 import { toPlatform } from "../shared/platform.js";
 import type { TmdbTitleHit, TmdbTitleSearch } from "../ingestion/releases/tmdb.js";
 import { qualifyingDate, inWindow } from "../shared/post-validator.js";
+import { isCorroborated, discoveryTagsOf } from "./net-independence.js";
 import type { BucketWindow, ManifestRow } from "../shared/post-validator.js";
 import { normalizeTitle } from "../discovery/normalize.js";
 import { wikiLanguageFor } from "../discovery/sources/wikiLanguageIndex.js";
@@ -319,7 +320,14 @@ export function assignTier(f: ReconciledFilm): { tier: Tier; reasons: string[] }
     return { tier: "red", reasons: [`manifest fail — ${f.landingReason ?? f.conflictDetail ?? "date check"}`] };
 
   const issues: string[] = [];
-  if (!(f.foundIn.includes("tmdb") && f.foundIn.includes("ai-net"))) issues.push("single-net");
+  // WD-ENG-19 — count DISTINCT INDEPENDENT nets, not the hardcoded tmdb/ai-net
+  // pair. tmdb+ai-net is still {tmdb, press} = 2 and still green, so no film that
+  // was green before changes; what this adds is tmdb+district (the Hushar Pittalu
+  // case, where District independently confirmed date and language off its own
+  // catalogue). Two PRESS nets share a class and still count as one — see
+  // net-independence.ts. Auto-publish is NOT widened by this: it has its own
+  // predicate and its own call site in gate.ts.
+  if (!isCorroborated(f.foundIn)) issues.push("single-net");
   if (f.landingStatus === "warn") issues.push(`manifest warn${f.landingReason ? ` — ${f.landingReason}` : ""}`);
   if (f.conflictDetail) issues.push("date-conflict");
   if (f.possibleDuplicate) issues.push("possible-duplicate");
@@ -440,7 +448,15 @@ function buildFromPool(
     dateSource: da.dateSource,
     ...(aiFilm?.sources?.[0]?.url ? { sourceUrl: aiFilm.sources[0]!.url } : {}),
     ...(aiFilm?.confidence ? { confidence: aiFilm.confidence } : {}),
-    foundIn: ai ? ["tmdb", "ai-net"] : ["tmdb"],
+    // WD-ENG-19 — discovery provenance is THREADED, not overwritten. This was
+    // hardcoded to ai ? ["tmdb","ai-net"] : ["tmdb"], which silently discarded
+    // every other net that found the film: District, Wikipedia and the news net
+    // all vanished here. `r.sources` carries the discovery tags through
+    // toReleaseStub and enrichment (which spreads ...r), and discoveryTagsOf
+    // strips enrichment tags (omdb / mdblist / tmdb-search) so provenance means
+    // "who found it", never "who decorated it". "tmdb" is always present for a
+    // pool film by construction; "ai-net" is added when the AI net joined.
+    foundIn: [...new Set([...discoveryTagsOf(r.sources), "tmdb", ...(ai ? ["ai-net"] : [])])],
     status: "confirmed",
     landingStatus,
     ...(landingReason ? { landingReason } : {}),

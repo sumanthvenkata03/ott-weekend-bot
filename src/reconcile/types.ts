@@ -150,7 +150,14 @@ export interface ReconciledFilm {
   confidence?: "high" | "medium" | "low";
 
   // Provenance + tier
-  foundIn: string[];          // subset of ["tmdb","ai-net"]
+  /**
+   * Which DISCOVERY nets found this film — threaded from Release.sources, not
+   * hardcoded (WD-ENG-19). May contain tmdb / wikipedia / district / ai-net /
+   * news / ott-calendar, or exactly ["manual"] for an operator add. Tiering
+   * counts INDEPENDENT classes over this (net-independence.ts); auto-publish
+   * reads it through its own, narrower predicate.
+   */
+  foundIn: string[];
   status: ReconStatus;
   landingStatus?: LandingStatus;
   /** The precise landing-check reason from assessDates (e.g. "no qualifying date"). */

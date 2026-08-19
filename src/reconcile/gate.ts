@@ -56,6 +56,7 @@ import { Client } from "@notionhq/client";
 import { ofetch } from "ofetch";
 import { config } from "../shared/config.js";
 import { log } from "../shared/logger.js";
+import { isAutoPublishEligible } from "./net-independence.js";
 import { redactSecrets, redactSecretValues } from "../shared/redact.js";
 import type { Release } from "../shared/types.js";
 import type { WedDropEdition } from "../shared/wed-drop-edition.js";
@@ -176,13 +177,30 @@ function renderableFor(result: ReconcileResult, greenOnly: boolean): Release[] {
 }
 
 /**
- * A renderable film that counts as effective-🟢 for auto-publish: a true 🟢, OR
- * a single-net 🟡 that enforcement PROMOTED (the web search corroborated it).
- * A plain 🟡 (multi-issue, or a confirm that wasn't promotable) is NOT effective
- * green — it forces the manual gate.
+ * A renderable film that counts as effective-🟢 for AUTO-PUBLISH: a true 🟢 that
+ * ALSO clears the narrow auto-publish bar, OR a single-net 🟡 that enforcement
+ * PROMOTED (the web search corroborated it). A plain 🟡 is not effective green —
+ * it forces the manual gate.
+ *
+ * ── WD-ENG-19 — WHY THE EXTRA CONJUNCT ─────────────────────────────────────
+ * The TIER widened to count independent nets, so 🟢 now includes pairs like
+ * tmdb+district. AUTO-PUBLISH did not widen: the operator's ruling was to report
+ * evidence more honestly WITHOUT changing what ships with nobody watching. So the
+ * gate asks BOTH questions, and they are deliberately different:
+ *
+ *     f.tier === "green"          → "how well evidenced is this film?"
+ *     isAutoPublishEligible(...)  → "may it ship unattended?"  (tmdb && ai-net)
+ *
+ * This keeps the auto-publish set BYTE-IDENTICAL to pre-WD-ENG-19: old-green was
+ * (tmdb && ai-net) && no-other-issues, and tmdb+ai-net is always ≥2 independent
+ * classes, so `new-green && isAutoPublishEligible` ⟺ old-green exactly.
+ *
+ * 🔴 DO NOT SIMPLIFY THIS BACK to `f.tier === "green"`. That would silently widen
+ * auto-publish to every newly-green pair — which is the one thing WD-ENG-19 was
+ * told not to do. A test pins that these are two distinct call sites.
  */
 function isEffectiveGreen(f: ReconciledFilm): boolean {
-  return f.tier === "green" || !!f.aiPromoted;
+  return (f.tier === "green" && isAutoPublishEligible(f.foundIn)) || !!f.aiPromoted;
 }
 
 /**
