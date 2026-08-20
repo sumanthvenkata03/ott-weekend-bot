@@ -27,7 +27,7 @@
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { callClaudeJSON } from "../content/claude.js";
-import { cached } from "../shared/cache.js";
+import { cached, invalidate } from "../shared/cache.js";
 import { log } from "../shared/logger.js";
 import { toPlatform } from "../shared/platform.js";
 import { normalizeTitle } from "../discovery/normalize.js";
@@ -358,6 +358,46 @@ function reviewCacheKey(r: ReconcileResult, films: ReconciledFilm[]): string {
   return `ai-review:${AI_REVIEW_CACHE_VERSION}:${r.pillar}:${r.window.start}-${r.window.end}:${digest}`;
 }
 
+/**
+ * WD-ENG-21 — TWO indexes, and the raw platform rides WITH its verdict instead
+ * of in a parallel map keyed by an id a manual add does not have. `ref` is the
+ * primary key (it exists for every reviewable film); tmdbId is kept as a
+ * fallback so a model that echoes only the id still matches, which is what
+ * keeps numeric-tmdbId behaviour identical to before.
+ *
+ * (WD-ENG-22B lifted this out of reviewEdition's body unchanged, so the
+ * partial-blob check and the annotation loop resolve a film by exactly the same
+ * rule — a gap check that matched more loosely than the loop would "verify"
+ * coverage the loop then fails to find.)
+ */
+function indexReviews(out: { reviews: Array<z.infer<typeof VerdictSchema>> }): {
+  byRef: Map<string, RawReview>;
+  byId: Map<number, RawReview>;
+} {
+  const byRef = new Map<string, RawReview>();
+  const byId = new Map<number, RawReview>();
+  for (const v of out.reviews) {
+    const raw: RawReview = {
+      verdict: v.verdict,
+      reason: v.reason,
+      ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
+      ...(v.platform ? { platform: v.platform } : {}),
+    };
+    if (v.ref) byRef.set(v.ref, raw);
+    if (typeof v.tmdbId === "number") byId.set(v.tmdbId, raw);
+  }
+  return { byRef, byId };
+}
+
+/** THE match rule — ref first, tmdbId as fallback. One definition, two callers. */
+function resolveReview(
+  index: { byRef: Map<string, RawReview>; byId: Map<number, RawReview> },
+  ref: string,
+  f: ReconciledFilm
+): RawReview | undefined {
+  return index.byRef.get(ref) ?? (f.tmdbId !== undefined ? index.byId.get(f.tmdbId) : undefined);
+}
+
 /** Fail-soft annotation: every reviewed film gets "unavailable" → pushes the operator to look closer. */
 function markUnavailable(films: ReconciledFilm[]): void {
   for (const f of films) {
@@ -486,6 +526,9 @@ function applyLedgerRow(f: ReconciledFilm, row: VerdictRow): void {
     trust: row.trust,
     sourceDomainTrust: row.source_domain_trust,
     provenance: "ledger",
+    // WD-ENG-22B — carried structurally so the Notion review can render
+    // "ledger - confirmed <date>" without parsing it back out of `reason`.
+    ledgerConfirmedAt: row.confirmed_at,
   };
 }
 
@@ -527,6 +570,7 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
   const plan = planWithLedger(r, films);
   for (const { film, row } of plan.covered) applyLedgerRow(film, row);
   const toReview = plan.toReview;
+  r.ledgerStats = { hit: plan.covered.length, billed: toReview.length, voided: plan.voided };
   log.info(`verdict ledger [${r.pillar}]: ${plan.covered.length} hit, ${toReview.length} billed, ${plan.voided} voided`);
 
   // Every film answered from the ledger ⇒ nothing to ask, nothing to pay for.
@@ -535,40 +579,65 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
   const windowLabel = `${r.window.start} → ${r.window.end}`;
   try {
     const prompt = buildReviewPrompt(r.pillar, windowLabel, toReview);
+    const key = reviewCacheKey(r, films);   // FULL reviewable set — see reviewCacheKey
+    const callModel = async () => callClaudeJSON(prompt, AiReviewSchema, "opus", { webSearch: true });
+
     // CACHE the raw model output, keyed by the exact reviewer input. The review
     // run misses (one live web-search call); the --approve re-run hits (no call)
     // → identical verdicts → identical demotion → identical gate hash. The mapping
     // + demotion below run FRESH outside the cache (mirrors verdict-research).
     let miss = false;
-    const out = await cached(
-      // The FULL reviewable set — deliberately not `toReview`. See reviewCacheKey.
-      reviewCacheKey(r, films),
-      async () => { miss = true; return callClaudeJSON(prompt, AiReviewSchema, "opus", { webSearch: true }); },
+    let out = await cached(
+      key,
+      async () => { miss = true; return callModel(); },
       { ttlSeconds: AI_REVIEW_CACHE_TTL_HOURS * 3600 }
     );
 
-    // WD-ENG-21 — TWO indexes, and the raw platform now rides WITH its verdict
-    // instead of in a parallel map keyed by an id a manual add does not have.
-    // `ref` is the primary key (it exists for every reviewable film); tmdbId is
-    // kept as a fallback so a model that echoes only the id still matches, which
-    // is what keeps numeric-tmdbId behaviour identical to before.
-    const byRef = new Map<string, RawReview>();
-    const byId = new Map<number, RawReview>();
-    for (const v of out.reviews) {
-      const raw: RawReview = {
-        verdict: v.verdict,
-        reason: v.reason,
-        ...(v.sourceUrl ? { sourceUrl: v.sourceUrl } : {}),
-        ...(v.platform ? { platform: v.platform } : {}),
-      };
-      if (v.ref) byRef.set(v.ref, raw);
-      if (typeof v.tmdbId === "number") byId.set(v.tmdbId, raw);
+    const refs = reviewRefs(toReview);
+    let index = indexReviews(out);
+
+    // ── WD-ENG-22B · PARTIAL-BLOB HARDENING ──────────────────────────────────
+    //
+    // The key is the FULL reviewable set while the blob covers only the films
+    // that were BILLED (WD-ENG-22A). Those two sets coincide on every path we
+    // can reason about — within a drop cycle the covered set only GROWS, so a
+    // later run's to-review set is a SUBSET of the one the blob was written
+    // for, and every void cause is either in the key already (date, pillar,
+    // foundIn, sourceUrl) or applies only to films that were billed anyway.
+    //
+    // "Every path we can reason about" is not "every path". If a blob ever DOES
+    // fail to cover a film we are asking about, today's honest fallback —
+    // "not returned by AI-review" — becomes a LIE: the model never omitted the
+    // film, it was never asked. Enforcement then removes a real release from a
+    // real deck, silently, on a cache hit that cost nothing and said nothing.
+    //
+    // So: on a HIT, prove the blob covers every to-review film. On a gap, say so
+    // loudly, drop the blob, and buy ONE fresh call for the whole to-review set.
+    // Exactly one — no loop. If the model itself then omits a film, that IS the
+    // model omitting it, and the "not returned" path is the truthful answer.
+    //
+    // A MISS is never checked: there the blob is this call's own output, and a
+    // missing film means the model omitted it. Re-billing that would be a retry
+    // loop dressed up as a repair.
+    if (!miss) {
+      const gaps = toReview.filter((f, i) => !resolveReview(index, refs[i]!, f));
+      if (gaps.length > 0) {
+        log.error(
+          `AI-review [${r.pillar}] CACHE BLOB GAP — the cached verdict blob covers ${out.reviews.length} row(s) ` +
+          `but does not answer ${gaps.length} of ${toReview.length} film(s) being reviewed: ` +
+          `${gaps.map((f) => plan.ledgerRef.get(f) ?? reviewRef(f)).join(", ")}. ` +
+          `Discarding the blob and re-billing ONCE for the full to-review set.`
+        );
+        invalidate(key);
+        miss = true;
+        out = await cached(key, callModel, { ttlSeconds: AI_REVIEW_CACHE_TTL_HOURS * 3600 });
+        index = indexReviews(out);
+      }
     }
 
-    const refs = reviewRefs(toReview);
     let assessed = 0;
     for (const [i, f] of toReview.entries()) {
-      const v = byRef.get(refs[i]!) ?? (f.tmdbId !== undefined ? byId.get(f.tmdbId) : undefined);
+      const v = resolveReview(index, refs[i]!, f);
       if (v) {
         // Discipline guard: a doubt/reject with no source reads as a bare claim —
         // downgrade to "unverified" so it never looks authoritative without a cite
@@ -624,9 +693,21 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
       // verdict differs from the one that aged out, that IS the week-to-week
       // flip — the event the ledger exists because of. Logged, and ONLY logged:
       // ENG-22B decides what to do about it; today nothing changes.
+      //
+      // WD-ENG-22B ELEVATES IT FROM A LOG LINE TO A DECISION. The marker below
+      // is what auto-contract.ts CLAUSE 3 refuses on: an unstable verdict is
+      // exactly the thing that must not ship unattended. The log line is kept
+      // verbatim so a week of existing run logs stays greppable.
       const stale = plan.expired.get(f);
       if (stale && f.aiReview && f.aiReview.verdict !== stale.verdict) {
-        log.info(`verdict changed vs expired ledger row: ${plan.ledgerRef.get(f) ?? reviewRef(f)} ${stale.verdict} -> ${f.aiReview.verdict}`);
+        const ref = plan.ledgerRef.get(f) ?? reviewRef(f);
+        log.info(`verdict changed vs expired ledger row: ${ref} ${stale.verdict} -> ${f.aiReview.verdict}`);
+        f.verdictFlip = {
+          ref,
+          previous: stale.verdict,
+          current: f.aiReview.verdict,
+          expiredAt: stale.expires_at,
+        };
       }
 
       // ── WD-ENG-22A · THE WRITE PATH ──────────────────────────────────────

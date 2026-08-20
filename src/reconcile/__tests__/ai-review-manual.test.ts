@@ -43,6 +43,8 @@ vi.mock("../../shared/cache.js", async () => {
       cacheMock.store.set(key, v);
       return v;
     },
+    // WD-ENG-22B — ai-review's partial-blob recovery drops the offending key.
+    invalidate: (key: string) => cacheMock.store.delete(key),
   };
 });
 import { callClaudeJSON } from "../../content/claude.js";

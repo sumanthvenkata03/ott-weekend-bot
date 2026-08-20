@@ -148,7 +148,13 @@ describe("the first real use initializes — once, and identically", () => {
     expect(cache.isInitializedForTests()).toBe(true);
   });
 
-  it("prepares the same three statements the eager version did", async () => {
+  it("prepares exactly the known statement set, in order", async () => {
+    // WD-ENG-10C pinned "the same THREE statements the eager version did".
+    // WD-ENG-22B added a fourth on purpose — `invalidate(key)`, the single-key
+    // delete ai-review's partial-blob recovery needs. The pin is re-aimed at
+    // the new fact rather than loosened: it still asserts the EXACT set and the
+    // EXACT order, so an unannounced fifth statement (or a reordering the six
+    // table-owning modules would notice) still fails here.
     const cache = await freshImport();
     await cache.cached("k", async () => 1, { ttlSeconds: 60 });
 
@@ -156,6 +162,7 @@ describe("the first real use initializes — once, and identically", () => {
       "SELECT value, expires_at FROM http_cache WHERE key = ?",
       "INSERT OR REPLACE INTO http_cache (key, value, expires_at) VALUES (?, ?, ?)",
       "DELETE FROM http_cache WHERE expires_at < ?",
+      "DELETE FROM http_cache WHERE key = ?",
     ]);
   });
 
@@ -168,7 +175,7 @@ describe("the first real use initializes — once, and identically", () => {
 
     expect(opened).toHaveLength(1);
     expect(writes).toHaveLength(2);
-    expect(statements).toHaveLength(3);
+    expect(statements).toHaveLength(4);
   });
 
   it("CONCURRENT first callers do not double-init", async () => {
@@ -186,7 +193,7 @@ describe("the first real use initializes — once, and identically", () => {
 
     expect(opened).toEqual(["data/cache.sqlite"]);
     expect(writes).toHaveLength(2);
-    expect(statements).toHaveLength(3);
+    expect(statements).toHaveLength(4);
   });
 
   it("purgeExpired() and cacheStats() also init on demand, not on import", async () => {
@@ -218,6 +225,7 @@ describe("the `db` export still behaves like the real connection", () => {
       "SELECT value, expires_at FROM http_cache WHERE key = ?",
       "INSERT OR REPLACE INTO http_cache (key, value, expires_at) VALUES (?, ?, ?)",
       "DELETE FROM http_cache WHERE expires_at < ?",
+      "DELETE FROM http_cache WHERE key = ?",   // WD-ENG-22B — invalidate(key)
       "SELECT 1",
     ]);
     expect(stmt).toBeDefined();

@@ -42,6 +42,7 @@ interface CacheHandles {
   get: Database.Statement;
   set: Database.Statement;
   purge: Database.Statement;
+  del: Database.Statement;
 }
 
 let handles: CacheHandles | null = null;
@@ -72,6 +73,7 @@ function init(): CacheHandles {
       "INSERT OR REPLACE INTO http_cache (key, value, expires_at) VALUES (?, ?, ?)"
     ),
     purge: conn.prepare("DELETE FROM http_cache WHERE expires_at < ?"),
+    del: conn.prepare("DELETE FROM http_cache WHERE key = ?"),
   };
   return handles;
 }
@@ -136,6 +138,22 @@ export async function cached<T>(
   const fresh = await loader();
   h.set.run(key, JSON.stringify(fresh), now + opts.ttlSeconds * 1000);
   return fresh;
+}
+
+/**
+ * WD-ENG-22B — DROP ONE KEY, so a caller that finds a cached value it can prove
+ * is UNUSABLE can force the next `cached()` to miss.
+ *
+ * Deliberately narrow. This is not a general "refresh" lever: a caller that
+ * merely dislikes a cached value must live with it until the TTL, or the cache
+ * stops being a budget control. The one sanctioned use is ai-review's
+ * partial-blob recovery, where the blob provably does not cover the films being
+ * asked about and re-reading it would silently remove them.
+ *
+ * Returns true if a row was actually removed.
+ */
+export function invalidate(key: string): boolean {
+  return init().del.run(key).changes > 0;
 }
 
 /**

@@ -142,16 +142,30 @@ describe("PART 3 — AUTO-PUBLISH STAYS NARROW", () => {
     // The whole point of WD-ENG-19: reporting evidence and shipping unattended
     // must not be the same check. If someone simplifies isEffectiveGreen back to
     // `f.tier === "green"`, auto-publish silently widens and this test catches it.
+    //
+    // ── WD-ENG-22B RE-AIMED THE FIRST HALF ───────────────────────────────────
+    // isEffectiveGreen MOVED out of gate.ts into auto-contract.ts, so the gate
+    // and the shadow contract cannot hold two drifting copies of it. The FACT
+    // being pinned is unchanged — the narrow predicate is still conjoined with
+    // the tier, and the tier still does not consult it — so the pin follows the
+    // code rather than being deleted. (Same treatment as the cache-lazy-init
+    // pin in WD-ENG-10C.)
+    const contract = read("src/reconcile/auto-contract.ts");
+    expect(contract).toContain("isAutoPublishEligible(f.foundIn)");
+    expect(contract).toMatch(/f\.tier === "green" && isAutoPublishEligible/);
+
+    // …and gate.ts must DELEGATE, never re-implement: exactly one definition.
     const gate = read("src/reconcile/gate.ts");
-    expect(gate).toContain("isAutoPublishEligible(f.foundIn)");
-    expect(gate).toMatch(/f\.tier === "green" && isAutoPublishEligible/);
+    expect(gate).not.toContain("function isEffectiveGreen");
+    expect(gate).toContain('from "./auto-contract.js"');
 
     const reconcile = read("src/reconcile/reconcile.ts");
     expect(reconcile).toContain("isCorroborated(f.foundIn)");
     // The tier must NOT consult the auto-publish predicate, or the split is fake.
     expect(reconcile).not.toContain("isAutoPublishEligible");
-    // …and the gate must not decide tiers.
+    // …and neither the gate nor the contract may decide tiers.
     expect(gate).not.toContain("isCorroborated(");
+    expect(contract).not.toContain("isCorroborated(");
   });
 
   it("the widened green + narrow gate reproduces the OLD auto-publish set exactly", () => {

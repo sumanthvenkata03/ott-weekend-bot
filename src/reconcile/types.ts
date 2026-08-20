@@ -136,6 +136,13 @@ export interface AiReviewVerdict {
    * behaviour is provenance-blind by construction.
    */
   provenance?: "ledger";
+  /**
+   * WD-ENG-22B — `confirmed_at` of the ledger row this verdict was replayed
+   * from, so the review can render "ledger - confirmed <date>" without parsing
+   * it back out of `reason`. Present only alongside `provenance: "ledger"`.
+   * Display only; not enforced on, not hashed.
+   */
+  ledgerConfirmedAt?: number;
 }
 
 /**
@@ -270,6 +277,36 @@ export interface ReconciledFilm {
   };
 
   /**
+   * WD-ENG-22B — THE FLIP MARKER. Set when this run's BILLED verdict disagrees
+   * with an EXPIRED verdict-ledger row for the same film: the same search
+   * question, asked a fortnight apart, answered two different ways.
+   *
+   * WD-ENG-22A logged that event; this makes it structured so the auto-publish
+   * contract can refuse on it (auto-contract.ts, CLAUSE 3). An unstable verdict
+   * is exactly what must not ship unattended — whichever reading is right, the
+   * search is telling us it cannot answer this film consistently.
+   *
+   * `ref` is carried ON the marker rather than re-derived, so auto-contract.ts
+   * needs no import of ai-review.ts (which would drag the LLM client into the
+   * gate's import graph for the sake of one string).
+   *
+   * NOT IN THE GATE HASH. filmFingerprint hashes provenance and enforcement
+   * outcomes, never advisory verdict data — a flip changes whether the drop may
+   * ship UNATTENDED, and changes nothing about what an approved run renders. A
+   * test pins that adding this field leaves computeDropHash value-stable.
+   */
+  verdictFlip?: {
+    /** The ledger key (bare reviewRef) the flip was observed on. */
+    ref: string;
+    /** The verdict the expired row held. */
+    previous: AiVerdict;
+    /** What the fresh, billed search returned instead. */
+    current: AiVerdict;
+    /** The expired row's `expires_at`, epoch ms. */
+    expiredAt: number;
+  };
+
+  /**
    * PLATFORM CONFIRMATION FILL (WD-ENG-03, "seam #3"). Set when this entry's
    * platform STRING was AI-review-confirmed and copied into an empty
    * release.platform, before enforcement classified the film. The counterpart to
@@ -306,4 +343,13 @@ export interface ReconcileResult {
   reconciled: ReconciledFilm[];          // full annotated list (augment-only; nothing dropped)
   rejected: RejectedExtraction[];        // series / non-film / non-Indian-language
   counts: ReconcileCounts;
+  /**
+   * WD-ENG-22B — this edition's verdict-ledger tally, recorded by
+   * annotateWithAiReview so the Notion review header can state it. Absent when
+   * the edition had no reviewable film (no consult happened).
+   *
+   * Review rendering only: computeDropHash reads `reconciled` film fingerprints
+   * and never touches the result envelope, so this cannot reach the gate hash.
+   */
+  ledgerStats?: { hit: number; billed: number; voided: number };
 }

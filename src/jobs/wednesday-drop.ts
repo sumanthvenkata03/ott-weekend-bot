@@ -22,6 +22,7 @@ import { verifyCandidates } from "../reconcile/verify.js";
 import { annotateWithAiReview, enforceVerification, voidDemotedLedgerRows } from "../reconcile/ai-review.js";
 import { fillConfirmedPlatforms } from "../reconcile/platform-seam.js";
 import { decideGate, writeReview, enforcementAuditLines, WED_DROP_LABELS } from "../reconcile/gate.js";
+import { evaluateAutoContract, shadowAutopilotLines } from "../reconcile/auto-contract.js";
 import { capPoolForSelector } from "../reconcile/select.js";
 import type { ReconcileResult } from "../reconcile/types.js";
 import { enrichReleases } from "../ingestion/releases/index.js";
@@ -702,6 +703,24 @@ export async function main() {
     alwaysGate,
   });
   log.info(`\n🚦 Gate: ${decision.mode} — ${decision.reason}`);
+
+  // 5a-bis. WD-ENG-22B — SHADOW AUTOPILOT. While the gate is ON, the run never
+  //     learns how close it came: decideGate answers "may this ship?" and the
+  //     answer is always no. Arming autonomy is a judgement that needs exactly
+  //     that evidence, week over week, so the contract is evaluated and REPORTED
+  //     here — with every failing clause named, not just the first.
+  //
+  //     OBSERVATION ONLY, three ways over: it runs AFTER decideGate on a
+  //     decision already made, evaluateAutoContract is pure and mutates nothing,
+  //     and it is printed rather than returned. Emitting it cannot arm anything,
+  //     and WED_DROP_ALWAYS_GATE's semantics are untouched.
+  //
+  //     Gated on `alwaysGate` because an ARMED run's shadow report would be a
+  //     restatement of the decision it just made — the report exists for the
+  //     runs where the gate is standing in the way.
+  if (alwaysGate) {
+    for (const line of shadowAutopilotLines(evaluateAutoContract(results))) log.info(line);
+  }
 
   // 5b. ANCHOR THE ISSUE NUMBER TO THE EDITION (WD-ENG-02).
   //

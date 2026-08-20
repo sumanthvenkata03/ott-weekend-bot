@@ -41,6 +41,8 @@ vi.mock("../../shared/cache.js", async () => {
       cacheMock.store.set(key, v);
       return v;
     },
+    // WD-ENG-22B — ai-review's partial-blob recovery drops the offending key.
+    invalidate: (key: string) => cacheMock.store.delete(key),
   };
 });
 
@@ -709,6 +711,191 @@ describe("PART 7 — THE EMPTY-LEDGER INVARIANT: run one behaves exactly as toda
     expect(src).toContain("reviewCacheKey(r, films)");
     expect(src).not.toContain("reviewCacheKey(r, toReview)");
     expect(src).toContain("buildReviewPrompt(r.pillar, windowLabel, toReview)");
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+describe("PART 9 (WD-ENG-22B) — PARTIAL-BLOB HARDENING", () => {
+  // The cache KEY is the full reviewable set while the BLOB covers only the
+  // billed subset. Those coincide on every path we can reason about — but if a
+  // blob ever fails to cover a film we are asking about, the honest-looking
+  // "not returned by AI-review" fallback becomes a LIE (the model never omitted
+  // the film; it was never asked), and enforcement removes a real release on a
+  // cache hit that cost nothing and said nothing.
+
+  it("HEADLINE: a GAP on a cache hit is detected, logged loudly, and repaired with ONE fresh call", async () => {
+    const err = vi.spyOn(log, "error").mockImplementation(() => {});
+    const mk = () => [result([film({ tmdbId: 80, title: "Kept" }), film({ tmdbId: 81, title: "Missing" })])];
+
+    // Run 1 bills and caches a blob covering BOTH films.
+    mockCall.mockResolvedValue({
+      reviews: [
+        { ref: "tmdb-80", verdict: "confirm", reason: "ok", sourceUrl: ALLOW_URL },
+        { ref: "tmdb-81", verdict: "doubt", reason: "contested", sourceUrl: ALLOW_URL },
+      ],
+    });
+    await annotateWithAiReview(mk());
+    expect(mockCall).toHaveBeenCalledTimes(1);
+
+    // Corrupt the cached blob into a PARTIAL one, exactly as a differently
+    // partitioned writer would have left it, then re-run over the full set.
+    const key = [...cacheMock.store.keys()].find((k) => k.startsWith("ai-review:"))!;
+    cacheMock.store.set(key, { reviews: [{ ref: "tmdb-80", verdict: "confirm", reason: "ok", sourceUrl: ALLOW_URL }] });
+    clearVerdictLedgerForTests();                       // force BOTH films to bill again
+    mockCall.mockClear();
+    mockCall.mockResolvedValue({
+      reviews: [
+        { ref: "tmdb-80", verdict: "confirm", reason: "ok", sourceUrl: ALLOW_URL },
+        { ref: "tmdb-81", verdict: "doubt", reason: "contested", sourceUrl: ALLOW_URL },
+      ],
+    });
+
+    const run = mk();
+    await annotateWithAiReview(run);
+
+    expect(mockCall).toHaveBeenCalledTimes(1);           // exactly ONE recovery call — no retry loop
+    const loud = err.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(loud).toContain("CACHE BLOB GAP");
+    expect(loud).toContain("tmdb-81");
+    // …and the rescued film got a real verdict, NOT the "not returned" lie.
+    expect(run[0]!.reconciled[1]!.aiReview?.verdict).toBe("doubt");
+    expect(run[0]!.reconciled[1]!.aiReview?.reason).not.toMatch(/not returned/);
+    // The blob left behind is COMPLETE, so the next run hits cleanly.
+    expect((cacheMock.store.get(key) as { reviews: unknown[] }).reviews).toHaveLength(2);
+  });
+
+  it("recovery rewrites a complete blob — a THIRD run hits it with no call and no error", async () => {
+    const err = vi.spyOn(log, "error").mockImplementation(() => {});
+    const mk = () => [result([film({ tmdbId: 82, title: "A" }), film({ tmdbId: 83, title: "B" })])];
+    const full = {
+      reviews: [
+        { ref: "tmdb-82", verdict: "confirm", reason: "ok", sourceUrl: ALLOW_URL },
+        { ref: "tmdb-83", verdict: "doubt", reason: "x", sourceUrl: ALLOW_URL },
+      ],
+    };
+    mockCall.mockResolvedValue(full);
+    await annotateWithAiReview(mk());
+    const key = [...cacheMock.store.keys()].find((k) => k.startsWith("ai-review:"))!;
+    cacheMock.store.set(key, { reviews: [full.reviews[0]] });
+    clearVerdictLedgerForTests();
+    await annotateWithAiReview(mk());                    // detects + repairs
+    clearVerdictLedgerForTests();
+    err.mockClear();
+    mockCall.mockClear();
+
+    await annotateWithAiReview(mk());                    // third run
+    expect(mockCall).not.toHaveBeenCalled();
+    expect(err).not.toHaveBeenCalled();
+  });
+
+  it("the NORMAL path never trips it: a complete blob on a plain re-run is silent", async () => {
+    const err = vi.spyOn(log, "error").mockImplementation(() => {});
+    const mk = () => [result([film({ tmdbId: 84, title: "A" }), film({ tmdbId: 85, title: "B", tier: "yellow" })])];
+    mockCall.mockResolvedValue({
+      reviews: [
+        { ref: "tmdb-84", verdict: "confirm", reason: "ok", sourceUrl: ALLOW_URL },
+        { ref: "tmdb-85", verdict: "doubt", reason: "x", sourceUrl: ALLOW_URL },
+      ],
+    });
+    await annotateWithAiReview(mk());
+    await annotateWithAiReview(mk());
+    expect(mockCall).toHaveBeenCalledTimes(1);
+    expect(err).not.toHaveBeenCalled();
+  });
+
+  it("🔒 UNREACHABLE ON --APPROVE: the re-run's to-review set is a SUBSET of the blob's", async () => {
+    // The WD-ENG-22A subset proof, asserted rather than argued: the review run
+    // bills for everything, writes rows for what it confirmed, and the approve
+    // re-run therefore asks about STRICTLY FEWER films — every one of which the
+    // blob already answers. So the gap check can never fire on the approve path.
+    const err = vi.spyOn(log, "error").mockImplementation(() => {});
+    const mk = () => [result([film({ tmdbId: 86, title: "Confirmed" }), film({ tmdbId: 87, title: "Doubted", tier: "yellow" })])];
+    mockCall.mockResolvedValue({
+      reviews: [
+        { ref: "tmdb-86", verdict: "confirm", reason: "ok", sourceUrl: ALLOW_URL },
+        { ref: "tmdb-87", verdict: "doubt", reason: "x", sourceUrl: ALLOW_URL },
+      ],
+    });
+    await annotateWithAiReview(mk());                    // review run: 2 billed
+    expect(readVerdictRow("tmdb-86")).toBeDefined();     // the ledger MOVED under the re-run
+
+    const approveRun = mk();
+    await annotateWithAiReview(approveRun);              // approve run: 1 billed (86 is covered)
+    expect(mockCall).toHaveBeenCalledTimes(1);
+    expect(err).not.toHaveBeenCalled();                  // no gap, no recovery, no extra call
+    expect(approveRun[0]!.reconciled[0]!.aiReview?.provenance).toBe("ledger");
+    expect(approveRun[0]!.reconciled[1]!.aiReview?.verdict).toBe("doubt");
+  });
+
+  it("a MISS is never gap-checked — an omitted film is the model omitting it, not a stale blob", async () => {
+    // Re-billing on a miss would be a retry loop dressed up as a repair, and it
+    // would also destroy the honest "not returned by AI-review" path.
+    const err = vi.spyOn(log, "error").mockImplementation(() => {});
+    mockCall.mockResolvedValue({ reviews: [{ ref: "tmdb-88", verdict: "confirm", reason: "ok", sourceUrl: ALLOW_URL }] });
+    const films = [film({ tmdbId: 88, title: "Returned" }), film({ tmdbId: 89, title: "Omitted" })];
+    await annotateWithAiReview([result(films)]);
+    expect(mockCall).toHaveBeenCalledTimes(1);           // ONE call, no repair attempt
+    expect(err).not.toHaveBeenCalled();
+    expect(films[1]!.aiReview?.reason).toMatch(/not returned/);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+describe("PART 10 (WD-ENG-22B) — ledger stats + provenance date on the result", () => {
+  it("each edition records its own hit/billed/voided tally for the review header", async () => {
+    seed({ ref: "tmdb-90", tmdbId: 90 });
+    mockCall.mockResolvedValue({ reviews: [{ ref: "tmdb-92", verdict: "unverified", reason: "x" }] });
+    const results = [result([
+      film({ tmdbId: 90, title: "Hit" }),
+      film({ tmdbId: 91, title: "Voided", conflictDetail: "dates disagree" }),
+      film({ tmdbId: 92, title: "Billed" }),
+    ])];
+    seed({ ref: "tmdb-91", tmdbId: 91 });
+    await annotateWithAiReview(results);
+    expect(results[0]!.ledgerStats).toEqual({ hit: 1, billed: 2, voided: 1 });
+  });
+
+  it("an edition with no reviewable film records NO tally (no consult happened)", async () => {
+    const results = [result([film({ tmdbId: 93, title: "Red", tier: "red", status: "unverified", foundIn: ["ai-net"] })])];
+    await annotateWithAiReview(results);
+    expect(results[0]!.ledgerStats).toBeUndefined();
+  });
+
+  it("a ledger-answered film carries ledgerConfirmedAt, so the review can date it", async () => {
+    seed({ ref: "tmdb-94", tmdbId: 94, ageDays: 3 });
+    mockCall.mockResolvedValue({ reviews: [] });
+    const f = film({ tmdbId: 94, title: "Replayed" });
+    await annotateWithAiReview([result([f])]);
+    expect(f.aiReview?.provenance).toBe("ledger");
+    expect(typeof f.aiReview?.ledgerConfirmedAt).toBe("number");
+    expect(f.aiReview!.ledgerConfirmedAt).toBe(readVerdictRow("tmdb-94")!.confirmed_at);
+  });
+
+  it("a freshly billed film carries NEITHER provenance nor a ledger date", async () => {
+    mockCall.mockResolvedValue({ reviews: [{ ref: "tmdb-95", verdict: "confirm", reason: "ok", sourceUrl: ALLOW_URL }] });
+    const f = film({ tmdbId: 95, title: "Fresh" });
+    await annotateWithAiReview([result([f])]);
+    expect(f.aiReview?.provenance).toBeUndefined();
+    expect(f.aiReview?.ledgerConfirmedAt).toBeUndefined();
+  });
+
+  it("THE FLIP MARKER is set at the same site as the flip log, with ref/previous/current/expiredAt", async () => {
+    vi.spyOn(log, "info").mockImplementation(() => {});
+    seed({ ref: "tmdb-96", tmdbId: 96, ageDays: 40 });
+    const expired = readVerdictRow("tmdb-96")!.expires_at;
+    mockCall.mockResolvedValue({ reviews: [{ ref: "tmdb-96", verdict: "unverified", reason: "couldn't confirm via search" }] });
+    const f = film({ tmdbId: 96, title: "Flipped" });
+    await annotateWithAiReview([result([f])]);
+    expect(f.verdictFlip).toEqual({ ref: "tmdb-96", previous: "confirm", current: "unverified", expiredAt: expired });
+  });
+
+  it("no flip marker when the fresh verdict AGREES with the expired row", async () => {
+    vi.spyOn(log, "info").mockImplementation(() => {});
+    seed({ ref: "tmdb-97", tmdbId: 97, ageDays: 40 });
+    mockCall.mockResolvedValue({ reviews: [{ ref: "tmdb-97", verdict: "confirm", reason: "still on", sourceUrl: ALLOW_URL }] });
+    const f = film({ tmdbId: 97, title: "Steady" });
+    await annotateWithAiReview([result([f])]);
+    expect(f.verdictFlip).toBeUndefined();
   });
 });
 

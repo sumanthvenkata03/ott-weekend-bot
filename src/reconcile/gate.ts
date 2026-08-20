@@ -56,12 +56,12 @@ import { Client } from "@notionhq/client";
 import { ofetch } from "ofetch";
 import { config } from "../shared/config.js";
 import { log } from "../shared/logger.js";
-import { isAutoPublishEligible } from "./net-independence.js";
+import { evaluateAutoContract, shadowVerdictLine } from "./auto-contract.js";
 import { redactSecrets, redactSecretValues } from "../shared/redact.js";
 import type { Release } from "../shared/types.js";
 import type { WedDropEdition } from "../shared/wed-drop-edition.js";
 import { EDITION_META } from "../shared/wed-drop-edition.js";
-import type { AiVerdict, ReconciledFilm, ReconcileResult, Tier } from "./types.js";
+import type { AiReviewVerdict, AiVerdict, ReconciledFilm, ReconcileResult, Tier } from "./types.js";
 
 const TIER_EMOJI: Record<Tier, string> = { green: "🟢", yellow: "🟡", red: "🔴" };
 // Distinct AI-review glyphs — ❓/unavailable must read as "needs your eyes", NOT a pass.
@@ -177,33 +177,6 @@ function renderableFor(result: ReconcileResult, greenOnly: boolean): Release[] {
 }
 
 /**
- * A renderable film that counts as effective-🟢 for AUTO-PUBLISH: a true 🟢 that
- * ALSO clears the narrow auto-publish bar, OR a single-net 🟡 that enforcement
- * PROMOTED (the web search corroborated it). A plain 🟡 is not effective green —
- * it forces the manual gate.
- *
- * ── WD-ENG-19 — WHY THE EXTRA CONJUNCT ─────────────────────────────────────
- * The TIER widened to count independent nets, so 🟢 now includes pairs like
- * tmdb+district. AUTO-PUBLISH did not widen: the operator's ruling was to report
- * evidence more honestly WITHOUT changing what ships with nobody watching. So the
- * gate asks BOTH questions, and they are deliberately different:
- *
- *     f.tier === "green"          → "how well evidenced is this film?"
- *     isAutoPublishEligible(...)  → "may it ship unattended?"  (tmdb && ai-net)
- *
- * This keeps the auto-publish set BYTE-IDENTICAL to pre-WD-ENG-19: old-green was
- * (tmdb && ai-net) && no-other-issues, and tmdb+ai-net is always ≥2 independent
- * classes, so `new-green && isAutoPublishEligible` ⟺ old-green exactly.
- *
- * 🔴 DO NOT SIMPLIFY THIS BACK to `f.tier === "green"`. That would silently widen
- * auto-publish to every newly-green pair — which is the one thing WD-ENG-19 was
- * told not to do. A test pins that these are two distinct call sites.
- */
-function isEffectiveGreen(f: ReconciledFilm): boolean {
-  return (f.tier === "green" && isAutoPublishEligible(f.foundIn)) || !!f.aiPromoted;
-}
-
-/**
  * Decide whether to render, with no I/O. Runs AFTER enforceVerification, so
  * `aiDemoted` / `aiPromoted` are already set. AUTO-PUBLISH (Phase 3) fires — with
  * no manual approval — iff the drop is fully verification-clean:
@@ -211,10 +184,18 @@ function isEffectiveGreen(f: ReconciledFilm): boolean {
  *   - no film left UNCERTAIN (AI-review "unavailable" — an infra failure needs eyes),
  *   - EVERY edition has ≥1 renderable film (an edition wiped to 0 by enforcement
  *     is a human signal, never an auto-publish — the empty-edition guard),
- *   - EVERY renderable film is effective-🟢 (true green OR promoted).
+ *   - EVERY renderable film is effective-🟢 (true green OR promoted),
+ *   - WD-ENG-22B: no film carries a VERDICT FLIP (see auto-contract CLAUSE 3).
  * Otherwise the manual gate is unchanged: `--approve <hash>` renders 🟢+🟡 minus
  * demoted; anything else blocks. A demotion no longer forces the gate on its own —
  * a clean remainder auto-publishes, with the enforcement audit reported to Slack.
+ *
+ * ── WD-ENG-22B — THE PREDICATE MOVED, THE DECISION DID NOT ─────────────────
+ * The three inline booleans are now ONE call to evaluateAutoContract, which
+ * enumerates EVERY failing clause instead of short-circuiting on the first.
+ * That is what lets the shadow report say why a run would not have shipped.
+ * For every input without a flip the answer is identical to the old
+ * expression — auto-contract.test.ts pins it against a hand-written copy.
  */
 export function decideGate(results: ReconcileResult[], opts: GateOptions): GateDecision {
   const hash = computeDropHash(results);
@@ -224,18 +205,7 @@ export function decideGate(results: ReconcileResult[], opts: GateOptions): GateD
     return out;
   };
 
-  const anyUncertain = results.some((r) =>
-    r.reconciled.some((f) => f.aiReview?.verdict === "unavailable")
-  );
-  const everyEditionNonEmpty =
-    results.length > 0 && results.every((r) => renderableFor(r, false).length > 0);
-  const everyRenderableGreen = results.every((r) =>
-    r.reconciled
-      .filter((f) => f.release && !f.aiDemoted && f.tier !== "red")
-      .every(isEffectiveGreen)
-  );
-
-  if (!opts.alwaysGate && !anyUncertain && everyEditionNonEmpty && everyRenderableGreen) {
+  if (!opts.alwaysGate && evaluateAutoContract(results).wouldAuto) {
     return {
       proceed: true,
       mode: "auto",
@@ -333,12 +303,38 @@ function imageBlock(url: string) {
   };
 }
 
-/** AI-review rich-text runs appended to a film's line: " · 🛑 AI-review: … [source]". */
+/**
+ * WD-ENG-22B — WHERE THIS VERDICT CAME FROM, on the row the operator approves.
+ *
+ * A replayed ledger confirm and a fresh search confirm read identically today,
+ * and they are not the same claim: one says "the web said so just now", the
+ * other says "the web said so on the 19th, and nothing has contradicted it
+ * since". An operator deciding whether to trust a row is entitled to know
+ * which, and — for a ledger row — how old the observation is.
+ *
+ * Display only. Nothing enforces on provenance (see types.ts), so this changes
+ * no tier, no demotion and no hash.
+ */
+function provenanceMarker(ar: AiReviewVerdict): string {
+  if (ar.provenance !== "ledger") return "[live]";
+  const on = ar.ledgerConfirmedAt !== undefined
+    ? new Date(ar.ledgerConfirmedAt).toISOString().slice(0, 10)
+    : "?";
+  return `[ledger - confirmed ${on}]`;
+}
+
+/** AI-review rich-text runs appended to a film's line: " · 🛑 AI-review: … [live] [source]". */
 function aiReviewRuns(f: ReconciledFilm): unknown[] {
   if (!f.aiReview) return [];
   const ar = f.aiReview;
-  const runs: unknown[] = [textRun(` · ${AI_GLYPH[ar.verdict]} AI-review: ${ar.reason} `)];
+  const runs: unknown[] = [textRun(` · ${AI_GLYPH[ar.verdict]} AI-review: ${ar.reason} ${provenanceMarker(ar)} `)];
   if (ar.sourceUrl) runs.push(linkRun("[source]", ar.sourceUrl));
+  // WD-ENG-22B — a FLIP is louder than a provenance marker: it is the reason
+  // the drop would not have auto-published, so it is stated on the film's own
+  // row rather than only in the shadow block at the top.
+  if (f.verdictFlip) {
+    runs.push(textRun(` · 🔄 FLIP: ${f.verdictFlip.previous} -> ${f.verdictFlip.current} vs expired ledger row `));
+  }
   return runs;
 }
 
@@ -382,10 +378,21 @@ function filmBlocks(f: ReconciledFilm): unknown[] {
 function buildReviewBlocks(results: ReconcileResult[], hash: string, labels: GateLabels): unknown[] {
   const children: unknown[] = [
     paragraph(`Reconciliation review · hash ${hash} · re-run with: ${labels.approveCommand} ${hash}`),
+    // WD-ENG-22B — the SHADOW AUTOPILOT verdict, at the top of the page the
+    // operator is about to read. Observation only: this artifact is written on
+    // the BLOCKED path, so by construction nothing here can publish anything.
+    paragraph(shadowVerdictLine(evaluateAutoContract(results))),
   ];
   for (const r of results) {
     const meta = labels.labelFor(r.pillar);
     children.push(heading(`${meta.notionTitle} — ${r.counts.green}🟢 / ${r.counts.yellow}🟡 / ${r.counts.red}🔴 (added by AI net: ${r.counts.addedByAiNet})`));
+    // WD-ENG-22B — where this edition's verdicts came from. A run that answered
+    // most of its films from the ledger is a materially different artifact from
+    // one that searched them all, and the header should say so.
+    if (r.ledgerStats) {
+      const s = r.ledgerStats;
+      children.push(paragraph(`verdict ledger: ${s.hit} hit, ${s.billed} billed, ${s.voided} voided`));
+    }
     // AUTO-REMOVED (Step 1) — films the advisory AI-review pulled (a sourced 🛑).
     // Surfaced FIRST and separately so the operator sees exactly what's NOT in the
     // drop and why; they're skipped in the tier loop below (no double-listing).
@@ -604,6 +611,9 @@ async function postReviewToSlack(
   const blocks: unknown[] = [
     { type: "header", text: { type: "plain_text", text: `🕵️ ${labels.reviewTitle}`, emoji: true } },
     section(`*Reconciliation review · ${windowLabel}*\nRender is GATED — nothing published until approved.`),
+    // WD-ENG-22B — the same one-line shadow verdict as the Notion header and the
+    // run log, so the three never disagree about what the contract said.
+    section(`_${shadowVerdictLine(evaluateAutoContract(results))}_`),
     section(editionLines.join("\n")),
     section(`*AI net added:* ${truncList(aiAddedNames(results))}`),
     ...(audit.promoted.length ? [section(`*🔼 Promoted (search-corroborated):* ${truncList(audit.promoted)}`)] : []),
