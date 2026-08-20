@@ -32,6 +32,14 @@ import { log } from "../shared/logger.js";
 import { toPlatform } from "../shared/platform.js";
 import { normalizeTitle } from "../discovery/normalize.js";
 import { isManualAdd } from "./reconcile.js";
+import {
+  classifyLedgerConsult,
+  readVerdictRow,
+  recordConfirm,
+  voidVerdictRow,
+  VOIDING_DEMOTION_CLASSES,
+  type VerdictRow,
+} from "../shared/verdict-ledger.js";
 import type {
   AiReviewVerdict,
   ReconciledFilm,
@@ -306,17 +314,41 @@ OUTPUT — STRICT JSON ONLY (no prose, no markdown). Exactly ONE entry per film 
 // v4: WD-ENG-21 — `ref` added to the projection and required in the output, tmdbId
 //     nullable, and the operator-added section added to the prompt. Both the prompt
 //     AND the schema shape moved, so every v3 blob is stale by definition.
-export const AI_REVIEW_CACHE_VERSION = "v4";
+// v5: WD-ENG-22A — the verdict ledger partitions the reviewable set before the
+//     PROMPT is built, so a blob may now cover only the films that were actually
+//     billed. The KEY is still a digest over the whole reviewable set (see
+//     reviewCacheKey — keying it on the partition breaks the --approve spine), so
+//     a v4 and a v5 blob can share a key while meaning different things: v4
+//     always covered every film, v5 need not. Bumping is what stops the two
+//     generations meeting, and it is why a v4 blob must never be read as v5.
+export const AI_REVIEW_CACHE_VERSION = "v5";
 
 /** Verdicts are stable within a drop cycle; a same-day --approve must hit. */
 const AI_REVIEW_CACHE_TTL_HOURS = 24;
 
 /**
- * Stable cache key over the EXACT reviewer input (the projected 🟢/🟡 films) +
- * window + version. Identical input ⇒ identical cached verdicts ⇒ identical
- * demotion ⇒ identical gate hash (the --approve determinism spine). ANY data
- * change to a reviewable film changes the projection ⇒ new key ⇒ a fresh call
- * (and the gate hash changes too, correctly forcing a re-review).
+ * Stable cache key over the projected 🟢/🟡 films + window + version. Identical
+ * input ⇒ identical cached verdicts ⇒ identical demotion ⇒ identical gate hash
+ * (the --approve determinism spine). ANY data change to a reviewable film
+ * changes the projection ⇒ new key ⇒ a fresh call (and the gate hash changes
+ * too, correctly forcing a re-review).
+ *
+ * ── WD-ENG-22A · THE KEY IS THE FULL REVIEWABLE SET, NOT THE BILLED SUBSET ──
+ * The prompt now covers only the films the verdict ledger did NOT answer, and
+ * it is tempting to key on that same subset — the blob is, after all, the
+ * output for it. That is WRONG, and it fails loudly: the review run writes
+ * ledger rows for everything it confirmed, so its --approve re-run partitions
+ * DIFFERENTLY (those films are now ledger-covered). A subset key therefore
+ * MISSES on the re-run, buys a second billed call inside a ≤2/drop budget, and
+ * lets the re-billed films come back with different verdicts — a different
+ * demotion set, a different gate hash, and an --approve that no longer matches
+ * what the human read. (Pinned by auto-demote.test.ts's CACHE-determinism case,
+ * which is exactly how this was caught.)
+ *
+ * Keying on the FULL set keeps the re-run a HIT: the ledger-covered films are
+ * answered from their rows and the rest are matched out of the cached blob,
+ * which — having been written by the run that billed for all of them — still
+ * contains every one. The two runs agree film for film.
  */
 function reviewCacheKey(r: ReconcileResult, films: ReconciledFilm[]): string {
   const digest = createHash("sha256")
@@ -333,24 +365,183 @@ function markUnavailable(films: ReconciledFilm[]): void {
   }
 }
 
+// ── WD-ENG-22A · THE VERDICT LEDGER SEAM ────────────────────────────────────
+//
+// A confirm that a trade-press source made last week is a dated observation,
+// not a cache entry, and re-searching it every Wednesday is what produced the
+// week-to-week FLIP class (same film, "confirm" one week and "unverified" the
+// next, purely because the query surfaced different pages — and an unverified
+// film is REMOVED by enforcement). shared/verdict-ledger.ts persists the
+// confirms; this seam decides, per film, whether a stored one still speaks to
+// the claim currently on the table.
+//
+// IT ONLY EVER SAVES A CALL. Only confirms are stored, so a film the ledger
+// declines to cover simply bills exactly as it does today, and the ledger can
+// never CAUSE a removal that would not otherwise have happened.
+
+/** How one edition's reviewable set splits, plus the bookkeeping the write path needs. */
+interface LedgerPlan {
+  /** Films that must go to the model — the ONLY ones the prompt and cache key see. */
+  toReview: ReconciledFilm[];
+  /** Films answered from a fresh, uncontradicted row. */
+  covered: Array<{ film: ReconciledFilm; row: VerdictRow }>;
+  /** Bare ledger ref per film, for the write path. Absent ⇒ never written. */
+  ledgerRef: Map<ReconciledFilm, string>;
+  /** The EXPIRED row a billed film had, for the flip-visibility log. */
+  expired: Map<ReconciledFilm, VerdictRow>;
+  /** Rows deleted at consult time because the film now contradicts them. */
+  voided: number;
+}
+
+/**
+ * The LEDGER KEY is `reviewRef(f)` — the BARE ref, deliberately NOT the
+ * batch-unique one from reviewRefs(). The `#2` suffix there is POSITIONAL: it
+ * depends on which other films happen to share the batch, so the same film
+ * could key as `manual-x` one week and `manual-x#2` the next. A persistent
+ * identity cannot be allowed to depend on its neighbours.
+ *
+ * The collision that suffix guards against is handled here instead, by
+ * ABSTENTION: if two reviewable films in one edition share a bare ref, NEITHER
+ * is consulted and NEITHER is written. Handing one film's stored confirm to
+ * another is the exact harm WD-ENG-21 introduced `ref` to prevent, and a saved
+ * call is not worth reopening it.
+ */
+function ledgerEligibleRefs(films: readonly ReconciledFilm[]): Map<ReconciledFilm, string> {
+  const counts = new Map<string, number>();
+  for (const f of films) {
+    const ref = reviewRef(f);
+    counts.set(ref, (counts.get(ref) ?? 0) + 1);
+  }
+  const out = new Map<ReconciledFilm, string>();
+  for (const f of films) {
+    const ref = reviewRef(f);
+    if (counts.get(ref) === 1) out.set(f, ref);
+  }
+  return out;
+}
+
+/**
+ * SEAM-#3 DEPENDENCY GUARD. An OTT film whose release.platform is still EMPTY
+ * at consult time depends on the billed call for a fact the ledger does not
+ * store: the source-stated `platform` that the seam-#3 fill below copies into
+ * release.platform. Answering such a film from the ledger would skip the fill
+ * and hand enforcement an OTT film with no platform — a `no-platform` demotion
+ * caused BY the optimisation, which breaks the "only ever saves a call" rule.
+ *
+ * So it bills. (Theatrical is unaffected: the seam is OTT-gated.)
+ */
+function needsLiveplatformFact(r: ReconcileResult, f: ReconciledFilm): boolean {
+  return r.pillar === "ott" && f.release !== undefined && f.release.platform.length === 0;
+}
+
+/** Partition one edition's reviewable films against the ledger. Deletes voided rows. */
+function planWithLedger(r: ReconcileResult, films: ReconciledFilm[]): LedgerPlan {
+  const ledgerRef = ledgerEligibleRefs(films);
+  const plan: LedgerPlan = { toReview: [], covered: [], ledgerRef, expired: new Map(), voided: 0 };
+  const now = Date.now();
+
+  for (const f of films) {
+    const ref = ledgerRef.get(f);
+    if (ref === undefined) { plan.toReview.push(f); continue; }          // ambiguous ref — abstain
+    if (needsLiveplatformFact(r, f)) { plan.toReview.push(f); continue; } // needs the live platform fact
+
+    const row = readVerdictRow(ref);
+    const consult = classifyLedgerConsult(row, {
+      pillar: r.pillar,
+      filmDate: f.date,
+      hasConflictDetail: f.conflictDetail !== undefined,
+      platformSuppressed: f.platformSuppressed !== undefined,
+      // Recomputed NOW, so a domain added to the denylist since the row was
+      // written retroactively invalidates the confirm that leaned on it.
+      sourceDeniedNow: row !== undefined && classifyDomainTrust(row.source_url) === "deny",
+      now,
+    });
+
+    if (consult.kind === "hit") { plan.covered.push({ film: f, row: consult.row }); continue; }
+    if (consult.kind === "void") {
+      voidVerdictRow(ref);
+      plan.voided++;
+      log.info(`  verdict ledger: voided ${ref} — ${consult.reason}`);
+    } else if (consult.kind === "expired") {
+      plan.expired.set(f, consult.row);
+    }
+    plan.toReview.push(f);
+  }
+  return plan;
+}
+
+/**
+ * Apply a stored confirm as if the model had just returned it. The SAME four
+ * fields enforcement reads (verdict / reason / sourceUrl / trust /
+ * sourceDomainTrust), so the gate hash, the demotion decision and the
+ * auto-publish predicate all see exactly what a billed run would have handed
+ * them. `provenance` is the one addition, and nothing enforces on it.
+ */
+function applyLedgerRow(f: ReconciledFilm, row: VerdictRow): void {
+  const confirmedOn = new Date(row.confirmed_at).toISOString().slice(0, 10);
+  f.aiReview = {
+    verdict: row.verdict,
+    reason: `search-confirmed ${confirmedOn} (verdict ledger; window ending ${row.window_end})`,
+    sourceUrl: row.source_url,
+    trust: row.trust,
+    sourceDomainTrust: row.source_domain_trust,
+    provenance: "ledger",
+  };
+}
+
+/**
+ * POST-ENFORCEMENT VOIDING. Called from the job right AFTER enforceVerification.
+ *
+ * It is deliberately NOT folded into enforceVerification: that function's
+ * contract is that it is PURE (no clock, no env, no I/O) so a review run and
+ * its --approve re-run enforce identically. A sqlite DELETE inside it would end
+ * that, and the determinism spine is worth more than the call-site saving.
+ *
+ * A film that ends the run demoted has, by definition, not been shown to be
+ * releasing as claimed — whatever a row from last week says. Deleting it here
+ * is what stops a stale confirm resurrecting a film the pipeline just removed.
+ */
+export function voidDemotedLedgerRows(results: ReconcileResult[]): number {
+  let voided = 0;
+  for (const r of results) {
+    for (const f of r.reconciled) {
+      const cls = f.aiDemoted?.demotionClass;
+      if (cls === undefined || !VOIDING_DEMOTION_CLASSES.includes(cls)) continue;
+      if (voidVerdictRow(reviewRef(f))) voided++;
+    }
+  }
+  if (voided > 0) log.info(`verdict ledger: voided ${voided} row(s) for enforcement-demoted film(s)`);
+  return voided;
+}
+
 /**
  * Review ONE edition's 🟢/🟡 films with a single web-search-grounded call, and
- * attach the verdicts. Never throws — on any failure the edition's films are
- * marked "unavailable".
+ * attach the verdicts. Never throws — on any failure the BILLED films are
+ * marked "unavailable" (a ledger-answered film keeps its verdict: no call was
+ * made for it, so no call failed).
  */
 async function reviewEdition(r: ReconcileResult): Promise<void> {
   const films = reviewableFilms(r);
   if (films.length === 0) return;
 
+  const plan = planWithLedger(r, films);
+  for (const { film, row } of plan.covered) applyLedgerRow(film, row);
+  const toReview = plan.toReview;
+  log.info(`verdict ledger [${r.pillar}]: ${plan.covered.length} hit, ${toReview.length} billed, ${plan.voided} voided`);
+
+  // Every film answered from the ledger ⇒ nothing to ask, nothing to pay for.
+  if (toReview.length === 0) return;
+
   const windowLabel = `${r.window.start} → ${r.window.end}`;
   try {
-    const prompt = buildReviewPrompt(r.pillar, windowLabel, films);
+    const prompt = buildReviewPrompt(r.pillar, windowLabel, toReview);
     // CACHE the raw model output, keyed by the exact reviewer input. The review
     // run misses (one live web-search call); the --approve re-run hits (no call)
     // → identical verdicts → identical demotion → identical gate hash. The mapping
     // + demotion below run FRESH outside the cache (mirrors verdict-research).
     let miss = false;
     const out = await cached(
+      // The FULL reviewable set — deliberately not `toReview`. See reviewCacheKey.
       reviewCacheKey(r, films),
       async () => { miss = true; return callClaudeJSON(prompt, AiReviewSchema, "opus", { webSearch: true }); },
       { ttlSeconds: AI_REVIEW_CACHE_TTL_HOURS * 3600 }
@@ -374,9 +565,9 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
       if (typeof v.tmdbId === "number") byId.set(v.tmdbId, raw);
     }
 
-    const refs = reviewRefs(films);
+    const refs = reviewRefs(toReview);
     let assessed = 0;
-    for (const [i, f] of films.entries()) {
+    for (const [i, f] of toReview.entries()) {
       const v = byRef.get(refs[i]!) ?? (f.tmdbId !== undefined ? byId.get(f.tmdbId) : undefined);
       if (v) {
         // Discipline guard: a doubt/reject with no source reads as a bare claim —
@@ -427,11 +618,41 @@ async function reviewEdition(r: ReconcileResult): Promise<void> {
         // Call succeeded but this film wasn't returned — never silently blank.
         f.aiReview = { verdict: "unverified", reason: "not returned by AI-review", trust: "unconfirmed", sourceDomainTrust: "unknown" };
       }
+
+      // ── WD-ENG-22A · FLIP VISIBILITY (groundwork for ENG-22B) ─────────────
+      // This film had a row and it had EXPIRED, so it billed. If the fresh
+      // verdict differs from the one that aged out, that IS the week-to-week
+      // flip — the event the ledger exists because of. Logged, and ONLY logged:
+      // ENG-22B decides what to do about it; today nothing changes.
+      const stale = plan.expired.get(f);
+      if (stale && f.aiReview && f.aiReview.verdict !== stale.verdict) {
+        log.info(`verdict changed vs expired ledger row: ${plan.ledgerRef.get(f) ?? reviewRef(f)} ${stale.verdict} -> ${f.aiReview.verdict}`);
+      }
+
+      // ── WD-ENG-22A · THE WRITE PATH ──────────────────────────────────────
+      // recordConfirm re-checks qualifiesForLedger at the storage boundary, so
+      // this is a persistence call, not a policy decision: a doubt / reject /
+      // unverified / sourceless / denylisted verdict is refused there. Films
+      // with an ambiguous bare ref have no entry in `ledgerRef` and are never
+      // written (see ledgerEligibleRefs).
+      const ledgerRef = plan.ledgerRef.get(f);
+      if (ledgerRef !== undefined && f.aiReview) {
+        recordConfirm({
+          ref: ledgerRef,
+          tmdbId: f.tmdbId,
+          review: f.aiReview,
+          windowEnd: r.window.end,
+          pillar: r.pillar,
+        });
+      }
     }
-    log.info(`AI-review [${r.pillar}]: ${assessed}/${films.length} films assessed via web search${miss ? "" : " (cache hit)"}`);
+    log.info(`AI-review [${r.pillar}]: ${assessed}/${toReview.length} films assessed via web search${miss ? "" : " (cache hit)"}`);
   } catch (err) {
     log.warn(`AI-review [${r.pillar}] failed — marking films unavailable`, err instanceof Error ? err.message : err);
-    markUnavailable(films);
+    // BILLED films only. A ledger-answered film had no call to fail, so
+    // blanking its verdict to "unavailable" would invent an infra failure it
+    // never suffered — and would push a perfectly-verified film at the human.
+    markUnavailable(toReview);
   }
 }
 

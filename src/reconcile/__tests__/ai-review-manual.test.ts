@@ -31,14 +31,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../../content/claude.js", () => ({ callClaudeJSON: vi.fn() }));
 const cacheMock = vi.hoisted(() => ({ store: new Map<string, unknown>() }));
-vi.mock("../../shared/cache.js", () => ({
-  cached: async (key: string, loader: () => Promise<unknown>) => {
-    if (cacheMock.store.has(key)) return cacheMock.store.get(key);
-    const v = await loader();
-    cacheMock.store.set(key, v);
-    return v;
-  },
-}));
+// WD-ENG-22A — in-memory sqlite for the verdict ledger's table (ai-review now
+// consults it). Cleared per-case below so a persisted confirm never leaks.
+vi.mock("../../shared/cache.js", async () => {
+  const Database = (await import("better-sqlite3")).default;
+  return {
+    db: new Database(":memory:"),
+    cached: async (key: string, loader: () => Promise<unknown>) => {
+      if (cacheMock.store.has(key)) return cacheMock.store.get(key);
+      const v = await loader();
+      cacheMock.store.set(key, v);
+      return v;
+    },
+  };
+});
 import { callClaudeJSON } from "../../content/claude.js";
 import {
   annotateWithAiReview,
@@ -54,6 +60,7 @@ import { buildManualFilm, type ManualEntry } from "../manual-adds.js";
 import { assignTier } from "../reconcile.js";
 import type { ReconcileResult, ReconciledFilm } from "../types.js";
 import type { Release } from "../../shared/types.js";
+import { clearVerdictLedgerForTests } from "../../shared/verdict-ledger.js";
 
 const mockCall = vi.mocked(callClaudeJSON);
 const ENFORCE = { requireOttPlatform: false };
@@ -107,6 +114,7 @@ function result(films: ReconciledFilm[], pillar = "theatrical"): ReconcileResult
 beforeEach(() => {
   mockCall.mockReset();
   cacheMock.store.clear();
+  clearVerdictLedgerForTests();
 });
 
 // ════════════════════════════════════════════════════════════════════════════

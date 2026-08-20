@@ -125,6 +125,17 @@ export interface AiReviewVerdict {
    * existing platform to compare against (seam-#3 fills that case instead).
    */
   platformAgrees?: boolean;
+  /**
+   * WD-ENG-22A — WHERE THIS VERDICT CAME FROM. "ledger" marks a verdict replayed
+   * from a persisted CONFIRM (shared/verdict-ledger.ts) instead of a fresh
+   * search. Absent ⇒ the model produced it on this run.
+   *
+   * ADVISORY ONLY, like the verdict text beside it: nothing enforces on this
+   * field, it is not in the gate hash, and a ledger-sourced verdict carries the
+   * SAME trust/sourceDomainTrust a billed one would have, so enforcement's
+   * behaviour is provenance-blind by construction.
+   */
+  provenance?: "ledger";
 }
 
 /**

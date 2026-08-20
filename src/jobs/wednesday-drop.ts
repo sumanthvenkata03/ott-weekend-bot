@@ -19,7 +19,7 @@ import type { BucketWindow } from "../shared/post-validator.js";
 import { reassessAfterEnrichment } from "../reconcile/reconcile.js";
 import { editionWindow, RECONCILE_LANGUAGES } from "../reconcile/run.js";
 import { verifyCandidates } from "../reconcile/verify.js";
-import { annotateWithAiReview, enforceVerification } from "../reconcile/ai-review.js";
+import { annotateWithAiReview, enforceVerification, voidDemotedLedgerRows } from "../reconcile/ai-review.js";
 import { fillConfirmedPlatforms } from "../reconcile/platform-seam.js";
 import { decideGate, writeReview, enforcementAuditLines, WED_DROP_LABELS } from "../reconcile/gate.js";
 import { capPoolForSelector } from "../reconcile/select.js";
@@ -654,6 +654,18 @@ export async function main() {
   //     WED_DROP_* dials; config.ts untouched).
   const requireOttPlatform = !["false", "0"].includes((process.env.WED_DROP_REQUIRE_PLATFORM ?? "true").trim().toLowerCase());
   enforceVerification(results, { requireOttPlatform });
+
+  // 4b-bis. WD-ENG-22A — POST-ENFORCEMENT LEDGER VOIDING.
+  //     Any film that ends enforcement DEMOTED (contradicted / unconfirmed /
+  //     platform-conflict / no-platform) has its persisted confirm DELETED, so a
+  //     stale row cannot resurrect next week a film this run just removed.
+  //
+  //     It is a separate call rather than a step inside enforceVerification on
+  //     purpose: that function is contractually PURE (no clock, no env, no I/O)
+  //     so a review run and its --approve re-run enforce identically, and a
+  //     sqlite DELETE inside it would end that. Ordering is load-bearing — it
+  //     must run AFTER enforcement, because aiDemoted is what it reads.
+  voidDemotedLedgerRows(results);
 
   // 4c. W-2 / R3 — FIELD PARITY. An AI-net-only film reaches here on the stub
   //     Release that buildFromNewAi hand-assembles, which carries no

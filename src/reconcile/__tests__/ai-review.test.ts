@@ -12,15 +12,25 @@ vi.mock("../../content/claude.js", () => ({ callClaudeJSON: vi.fn() }));
 // SAME reviewer input HITS the cache (no second LLM call). cache.js otherwise
 // opens real SQLite at import; mocking it keeps the suite offline + deterministic.
 const cacheMock = vi.hoisted(() => ({ store: new Map<string, unknown>() }));
-vi.mock("../../shared/cache.js", () => ({
-  cached: async (key: string, loader: () => Promise<unknown>) => {
-    if (cacheMock.store.has(key)) return cacheMock.store.get(key);
-    const v = await loader();
-    cacheMock.store.set(key, v);
-    return v;
-  },
-}));
+// WD-ENG-22A — `db` is now part of this mock because ai-review consults the
+// verdict ledger, which owns a table on the shared connection. An in-memory
+// sqlite keeps that hermetic (the reddit-radar precedent): no data/cache.sqlite
+// write, no cross-file state. clearVerdictLedgerForTests() in beforeEach is what
+// stops one case's persisted confirm becoming the next case's ledger HIT.
+vi.mock("../../shared/cache.js", async () => {
+  const Database = (await import("better-sqlite3")).default;
+  return {
+    db: new Database(":memory:"),
+    cached: async (key: string, loader: () => Promise<unknown>) => {
+      if (cacheMock.store.has(key)) return cacheMock.store.get(key);
+      const v = await loader();
+      cacheMock.store.set(key, v);
+      return v;
+    },
+  };
+});
 import { callClaudeJSON } from "../../content/claude.js";
+import { clearVerdictLedgerForTests } from "../../shared/verdict-ledger.js";
 import { annotateWithAiReview, buildReviewPrompt, classifyDomainTrust } from "../ai-review.js";
 import { computeDropHash } from "../gate.js";
 import type { ReconcileResult, ReconciledFilm } from "../types.js";
@@ -62,6 +72,7 @@ function result(films: ReconciledFilm[], pillar: "theatrical" | "ott" = "theatri
 beforeEach(() => {
   mockCall.mockReset();
   cacheMock.store.clear();
+  clearVerdictLedgerForTests();
 });
 
 describe("annotateWithAiReview — advisory attach, hash-invariant, no demotion", () => {

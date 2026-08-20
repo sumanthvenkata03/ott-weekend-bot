@@ -10,14 +10,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../../content/claude.js", () => ({ callClaudeJSON: vi.fn() }));
 const cacheMock = vi.hoisted(() => ({ store: new Map<string, unknown>() }));
-vi.mock("../../shared/cache.js", () => ({
-  cached: async (key: string, loader: () => Promise<unknown>) => {
-    if (cacheMock.store.has(key)) return cacheMock.store.get(key);
-    const v = await loader();
-    cacheMock.store.set(key, v);
-    return v;
-  },
-}));
+// WD-ENG-22A — in-memory sqlite for the verdict ledger's table (ai-review now
+// consults it). Cleared per-case below so a persisted confirm never leaks.
+vi.mock("../../shared/cache.js", async () => {
+  const Database = (await import("better-sqlite3")).default;
+  return {
+    db: new Database(":memory:"),
+    cached: async (key: string, loader: () => Promise<unknown>) => {
+      if (cacheMock.store.has(key)) return cacheMock.store.get(key);
+      const v = await loader();
+      cacheMock.store.set(key, v);
+      return v;
+    },
+  };
+});
 const notionMock = vi.hoisted(() => ({ createArgs: undefined as any, appendCalls: [] as any[] }));
 vi.mock("@notionhq/client", () => ({
   Client: class {
@@ -36,6 +42,7 @@ import { annotateWithAiReview, enforceVerification, type EnforceOptions } from "
 import { decideGate, computeDropHash, writeReview, WED_DROP_LABELS } from "../gate.js";
 import type { Release } from "../../shared/types.js";
 import type { ReconcileResult, ReconciledFilm } from "../types.js";
+import { clearVerdictLedgerForTests } from "../../shared/verdict-ledger.js";
 
 const mockCall = vi.mocked(callClaudeJSON);
 
@@ -81,6 +88,7 @@ const renderIds = (d: ReturnType<typeof decideGate>, pillar = "theatrical") => (
 beforeEach(() => {
   mockCall.mockReset();
   cacheMock.store.clear();
+  clearVerdictLedgerForTests();
   notionMock.createArgs = undefined;
   notionMock.appendCalls = [];
   vi.mocked(ofetch).mockClear();
