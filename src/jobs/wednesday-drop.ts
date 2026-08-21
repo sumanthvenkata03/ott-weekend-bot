@@ -1,4 +1,6 @@
 // src/jobs/wednesday-drop.ts
+import { mkdir, copyFile, writeFile } from "node:fs/promises";
+import { join, basename } from "node:path";
 import { getCandidates } from "../discovery/candidates.js";
 import type { Release, Platform } from "../shared/types.js";
 import { generateWednesdayDrop, MAX_WED_DROP_FILMS, parseLangOverrides, applyLangOverrides } from "../content/weekend/wednesday-drop.js";
@@ -23,6 +25,15 @@ import { annotateWithAiReview, enforceVerification, voidDemotedLedgerRows } from
 import { fillConfirmedPlatforms } from "../reconcile/platform-seam.js";
 import { decideGate, writeReview, enforcementAuditLines, WED_DROP_LABELS } from "../reconcile/gate.js";
 import { evaluateAutoContract, shadowAutopilotLines } from "../reconcile/auto-contract.js";
+import { buildAndUploadDeckZip, writeCaptionFile, writeKitFile } from "../delivery/deliver-deck-zip.js";
+import { buildPostingKit } from "../delivery/posting-kit.js";
+
+/**
+ * WD-ENG-22C — ONE definition of the render dir. renderWedDrop writes here and
+ * buildAndUploadDeckZip DISCOVERS the deck here by filename convention, so the
+ * two must not be able to drift to different literals.
+ */
+const RENDER_OUTPUT_DIR = "output/posts";
 import { capPoolForSelector } from "../reconcile/select.js";
 import type { ReconcileResult } from "../reconcile/types.js";
 import { enrichReleases } from "../ingestion/releases/index.js";
@@ -338,7 +349,7 @@ async function produceEdition(
   }
 
   log.info(`  Rendering PNGs (Issue ${issueNumber})...`);
-  const renderResult = await renderWedDrop(draft, issueNumber, edition, "output/posts");
+  const renderResult = await renderWedDrop(draft, issueNumber, edition, RENDER_OUTPUT_DIR);
 
   // Strict guard — one card per picked film. The 0-films (skip) case already
   // returned above, so at render time we expect 1..MAX.
@@ -385,6 +396,65 @@ async function produceEdition(
     return;
   }
   log.success(`  ✅ Render audit clean — ${audit.checked} surface(s) verified.`);
+
+  // ── WD-ENG-22C · POSTING KIT + DECK ZIP ───────────────────────────────────
+  //
+  // SLOT: after the render audit passes, before R2. That is deliberate — the
+  // kit describes the deck, so it must not be built from surfaces that failed
+  // verification, and the operator should have it in hand at the same moment
+  // the images become durable.
+  //
+  // NON-FATAL, WHOLE BLOCK. Deck-zip doctrine: the zip and the kit are
+  // convenience deliverables and the PNGs are the real product. A kit that
+  // refuses validation, an R2 hiccup, a missing sharp binary — none of them may
+  // stop a verified deck from reaching Notion and Slack. Everything below
+  // reports and moves on.
+  //
+  // NOTE ON HASHTAGS: buildHashtags (the 30-tag Notion/Slack set) runs LATER,
+  // after the R2 upload. The kit does not use it and does not need it — the
+  // caption's five tags are derived from film titles + the pillar, which is a
+  // different, deliberately narrower rule. The two must not be conflated.
+  let deckLine = "";
+  try {
+    const kit = buildPostingKit({
+      edition,
+      editionLabel: meta.slackLabel,
+      issueNumber,
+      windowStart,
+      windowEnd,
+      caption: draft.caption,
+      releases: draft.releases,
+    });
+    // Local, disposable working copy (output/ is gitignored). R2 holds the
+    // durable one; this exists so the operator can open the kit without
+    // downloading a zip.
+    const deliveryDir = `output/deliveries/wed-${meta.slug}-${issueNumber}`;
+    await mkdir(deliveryDir, { recursive: true });
+    for (const src of [renderResult.coverPath, ...renderResult.cardPaths]) {
+      await copyFile(src, join(deliveryDir, basename(src)));
+    }
+    await writeFile(join(deliveryDir, "POSTING-KIT.md"), kit.markdown, "utf-8");
+    log.success(`  ✅ Posting kit — ${kit.validation.hashtagCount} hashtags, ${kit.validation.keywordCount} keywords, ${kit.validation.totalTerms} terms: ${deliveryDir}/POSTING-KIT.md`);
+
+    // The zip is built from the RENDER dir (where the <slug>-<date>-cover.png
+    // naming deck-zip discovers already lives), not the delivery copy.
+    const wedSlug = `wed-drop-${meta.slug}`;
+    await writeCaptionFile(RENDER_OUTPUT_DIR, dateStr, kit.caption, wedSlug);
+    await writeKitFile(RENDER_OUTPUT_DIR, dateStr, kit.markdown, wedSlug);
+    // resize:false — Wed Drop's cover is 4:5 and its cards are SQUARE (see
+    // DeckZipOptions.resize). A fill-resize to 1080x1350 would stretch every
+    // card vertically by 1.25x.
+    const deck = await buildAndUploadDeckZip({
+      outputDir: RENDER_OUTPUT_DIR,
+      date: dateStr,
+      slug: wedSlug,
+      resize: false,
+    });
+    deckLine = `📦 IG-ready deck (${deck.slideCount} slides, ${(deck.sizeBytes / 1_048_576).toFixed(1)} MB, incl. POSTING-KIT.md): ${deck.url}`;
+    log.success(`  ✅ ${deckLine}`);
+  } catch (err) {
+    log.warn(`  Deck zip / posting kit failed — deck still delivering`, err instanceof Error ? err.message : err);
+  }
 
   // Upload to R2 under an edition-specific folder: wed-drop/{date}/{slug}/…
   log.info("  Uploading to R2...");
@@ -437,7 +507,10 @@ async function produceEdition(
   // boundary (redactSecrets is idempotent); doing it here too keeps the intent
   // legible at the site that assembles the audit.
   const validation = manifestToSlack(manifest);
-  const extraIssues = [...auditLines, ...langAuditLines, ...draft.nameFlags].map(redactSecrets);
+  // WD-ENG-22C — the deck-zip + kit link rides the EXISTING ping rather than
+  // adding a second notification. Empty string when the delivery step failed,
+  // so a failed zip removes the line and changes nothing else.
+  const extraIssues = [...auditLines, ...langAuditLines, ...draft.nameFlags, ...(deckLine ? [deckLine] : [])].map(redactSecrets);
   if (extraIssues.length > 0) {
     validation.issuesBlock = [validation.issuesBlock, ...extraIssues].filter(Boolean).join("\n");
   }

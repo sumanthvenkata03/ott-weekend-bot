@@ -55,14 +55,49 @@ export interface DeckZipOptions {
   /** Filename/key slug. Default "sat-verdict" (backward-compatible); Archives
    *  passes "tbsi-archives" so the same builder finds its PNGs + names its zip. */
   slug?: string;
+  /**
+   * WD-ENG-22C — TARGET SIZE FOR THE FILL-RESIZE. Default 1080x1350, which is
+   * what every pre-22C caller got and still gets.
+   */
+  igSize?: { width: number; height: number };
+  /**
+   * WD-ENG-22C — RESIZE ON/OFF. Default true (the historical behaviour).
+   *
+   * `false` means NO GEOMETRIC CHANGE AT ALL: the image is re-encoded to the
+   * ship format at its NATIVE pixel size. That is not a nicety — see the Wed
+   * Drop note below. It is not the same as skipping the pipeline: the format
+   * conversion still happens, so the zip stays JPEG and stays small.
+   *
+   * ── WHY WEDNESDAY NEEDS IT ────────────────────────────────────────────────
+   * `fit: "fill"` is only harmless when the source aspect already MATCHES the
+   * target, which is what the "sources are exact multiples" comment above is
+   * really asserting. Wed Drop breaks that assumption: its cover renders
+   * 1080x1350 CSS at deviceScaleFactor 2 (2160x2700, 4:5) but its CARDS render
+   * 1080x1080 at 2x (2160x2160, SQUARE). Filling a square into 4:5 stretches
+   * every card vertically by 1.25x — faces, seal ring, type, all of it. So
+   * Wednesday ships resize:false and keeps its two native aspects.
+   */
+  resize?: boolean;
 }
 
-/** Resize one rendered image to exactly 1080x1350 (lanczos) in the ship format. */
-async function toIgImage(srcPath: string): Promise<Buffer> {
-  const pipeline = sharp(srcPath).resize(IG_WIDTH, IG_HEIGHT, {
-    kernel: sharp.kernel.lanczos3,
-    fit: "fill",   // sources already 4:5 → fill = exact size, no crop, no distortion
-  });
+/**
+ * Convert one rendered image to the ship format, resizing to the IG target
+ * unless the caller opted out.
+ *
+ * `fit: "fill"` is EXACT-SIZE-NO-CROP, which also means it will happily distort
+ * a source whose aspect does not match the target — that is precisely why
+ * `resize:false` exists rather than a different fit mode. Cropping a card would
+ * cut off content the render audit just verified; letterboxing would add bars
+ * the design never accounted for. Shipping the native aspect is the only option
+ * that changes nothing.
+ */
+async function toIgImage(srcPath: string, opts: DeckZipOptions): Promise<Buffer> {
+  const doResize = opts.resize ?? true;
+  const { width, height } = opts.igSize ?? { width: IG_WIDTH, height: IG_HEIGHT };
+  const base = sharp(srcPath);
+  const pipeline = doResize
+    ? base.resize(width, height, { kernel: sharp.kernel.lanczos3, fit: "fill" })
+    : base;
   return IG_FORMAT === "jpeg"
     ? pipeline.jpeg({ quality: 92, chromaSubsampling: "4:4:4", progressive: true }).toBuffer()
     : pipeline.png({ compressionLevel: 9 }).toBuffer();
@@ -83,6 +118,15 @@ async function resolveCaption(opts: DeckZipOptions): Promise<{ text: string; sou
   const t = await tryRead(dirCaption);
   if (t != null) return { text: t.trim(), source: "dir-file" };
   return { text: CAPTION_PLACEHOLDER, source: "placeholder" };
+}
+
+/** The deck dir's posting kit, or null when the caller did not write one. */
+async function tryReadKit(outputDir: string, slug: string, date: string): Promise<string | null> {
+  try {
+    return await readFile(join(outputDir, `${slug}-${date}-POSTING-KIT.md`), "utf-8");
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -112,15 +156,21 @@ export async function buildAndUploadDeckZip(opts: DeckZipOptions): Promise<DeckZ
 
   const zip = new AdmZip();
 
-  zip.addFile(`ig/cover.${IG_EXT}`, await toIgImage(join(outputDir, coverName)));
+  zip.addFile(`ig/cover.${IG_EXT}`, await toIgImage(join(outputDir, coverName), opts));
   for (let i = 0; i < cardNames.length; i++) {
-    const buf = await toIgImage(join(outputDir, cardNames[i]!));
+    const buf = await toIgImage(join(outputDir, cardNames[i]!), opts);
     zip.addFile(`ig/card-${String(i + 1).padStart(2, "0")}.${IG_EXT}`, buf);
   }
 
   const caption = await resolveCaption(opts);
   const captionTxt = `${CAPTION_HEADER}\n\n${caption.text}\n`;
   zip.addFile("caption-draft.txt", Buffer.from(captionTxt, "utf-8"));
+
+  // WD-ENG-22C — the posting kit rides in the zip when the caller wrote one
+  // into the deck dir. Optional and silent when absent, so the three pre-22C
+  // callers produce a byte-identical archive.
+  const kit = await tryReadKit(outputDir, slug, date);
+  if (kit != null) zip.addFile("POSTING-KIT.md", Buffer.from(kit, "utf-8"));
 
   const slideCount = 1 + cardNames.length;   // cover + body cards
   const zipBuf = zip.toBuffer();
@@ -147,6 +197,20 @@ export async function writeCaptionFile(
   slug = "sat-verdict"
 ): Promise<void> {
   await writeFile(join(outputDir, `${slug}-${date}-caption.txt`), caption, "utf-8");
+}
+
+/**
+ * WD-ENG-22C — write POSTING-KIT.md into the deck dir so buildAndUploadDeckZip
+ * folds it into the archive. Mirrors writeCaptionFile exactly (same dir, same
+ * `<slug>-<date>-` naming) so the two deliverables cannot drift apart.
+ */
+export async function writeKitFile(
+  outputDir: string,
+  date: string,
+  markdown: string,
+  slug = "sat-verdict"
+): Promise<void> {
+  await writeFile(join(outputDir, `${slug}-${date}-POSTING-KIT.md`), markdown, "utf-8");
 }
 
 // ── Standalone entry (guarded — importing this module must NOT run main) ──────

@@ -36,6 +36,7 @@
 // deduped headline list, cached 24h — the same one-call-per-window discipline
 // ottCalendar uses. This cannot become a quota problem.
 import { z } from "zod";
+import { recordRadarFind } from "../radar-pool.js";
 import { callClaudeJSON } from "../../content/claude.js";
 import { fetchCached } from "../../research/http.js";
 import { cached } from "../../shared/cache.js";
@@ -313,6 +314,18 @@ export async function discoverNewsNet(
     // undated headline.
     if (!hasUsableDate(ai)) {
       dropped++;
+      // WD-ENG-22C — the find is DROPPED from discovery exactly as before (the
+      // three lines above are untouched and the `continue` still fires), but a
+      // copy goes to the QUARANTINED radar pool on the way out. "Film X is
+      // heading to SonyLIV" is a real sourced observation; it is simply not a
+      // release, and only the posting-kit's first-comment generator may read it.
+      // No date is stored, so nothing here can ever reach a landing-window check.
+      // recordRadarFind never throws — this guard stays load-bearing.
+      recordRadarFind({
+        title: ai.title,
+        platform: ai.platform,
+        sourceUrl: ai.sources[0]?.url,
+      });
       continue;
     }
     const search = ai.isSeries

@@ -10,6 +10,10 @@ data/*
 !data/manual-adds/
 data/manual-adds/*
 !data/manual-adds/*.json
+# WD-ENG-22C — the Instagram handle map is the ONLY source of @handles, and it
+# is a reviewed, human-ticked artifact. It has to travel with the code, or a
+# fresh checkout silently renders every photo-tag as "search".
+!data/handles.json
 data/research-archive/
 *.log
 .DS_Store

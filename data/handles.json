@@ -1,0 +1,20 @@
+{
+  "_README": "WD-ENG-22C - THE ONLY SOURCE OF INSTAGRAM HANDLES. Keys are canonical names spelled EXACTLY as the cards print them (release.leadCast / release.musicDirector / release.platform). Only entries with tick:true ever emit an @handle in a posting kit; anything else - including a name absent from this file - renders as '<name> - search'. tick means a human opened the profile and confirmed it is the right account, on lastChecked. Never set tick:true from a guess.",
+  "handles": {
+    "Vijay": { "handle": "actorvijay", "tick": true, "lastChecked": "2026-08-19" },
+    "Pooja Hegde": { "handle": "hegdepooja", "tick": true, "lastChecked": "2026-08-19" },
+    "Anirudh Ravichander": { "handle": "anirudhofficial", "tick": true, "lastChecked": "2026-08-19" },
+    "ZEE5": { "handle": "zee5", "tick": true, "lastChecked": "2026-08-19" },
+    "Akshay Kumar": { "handle": "akshaykumar", "tick": true, "lastChecked": "2026-08-19" },
+    "Suniel Shetty": { "handle": "suniel.shetty", "tick": true, "lastChecked": "2026-08-19" },
+    "JioHotstar": { "handle": "jiohotstar", "tick": true, "lastChecked": "2026-08-19" },
+    "Kiran Abbavaram": { "handle": "kiran_abbavaram", "tick": true, "lastChecked": "2026-08-19" },
+    "SonyLIV": { "handle": "sonylivindia", "tick": true, "lastChecked": "2026-08-19" },
+    "Jackie Shroff": { "handle": "apnabhidu", "tick": true, "lastChecked": "2026-08-19" },
+    "Yuvan Shankar Raja": { "handle": "itsyuvan", "tick": true, "lastChecked": "2026-08-19" },
+    "Netflix": { "handle": "netflix_in", "tick": true, "lastChecked": "2026-08-19" },
+    "Rasha Thadani": { "handle": "rashathadani", "tick": true, "lastChecked": "2026-08-19" },
+    "Mohan Babu": { "handle": "themohanbabu", "tick": true, "lastChecked": "2026-08-19" },
+    "Prime Video": { "handle": "primevideoin", "tick": true, "lastChecked": "2026-08-19" }
+  }
+}
