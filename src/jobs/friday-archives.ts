@@ -237,7 +237,15 @@ async function main(deliver = true) {
   let deckUrl = cover.publicUrl;
   try {
     await writeCaptionFile("output/posts", dateStr, caption, ARCHIVES_SLUG);
-    const zip = await buildAndUploadDeckZip({ outputDir: "output/posts", date: dateStr, slug: ARCHIVES_SLUG });
+    // resize:false — Archives renders SQUARE surfaces (cover 1080x1080 at
+    // deviceScaleFactor 2 = 2160x2160; cards 1080x1080 at 3 = 3240x3240), and
+    // deck-zip's default fill-resize targets 1080x1350. Filling a 1:1 source
+    // into 4:5 stretched every card vertically by 1.25x — faces, seal ring and
+    // type alike — for as long as this caller has existed. Shipping the native
+    // aspect is the only option that changes nothing about a verified render:
+    // cropping would cut content, letterboxing would add bars the design never
+    // accounted for. Same doctrine Wed Drop adopted in WD-ENG-22C.
+    const zip = await buildAndUploadDeckZip({ outputDir: "output/posts", date: dateStr, slug: ARCHIVES_SLUG, resize: false });
     const mb = (zip.sizeBytes / 1_048_576).toFixed(1);
     deckZipLine = `📦 IG-ready deck (${zip.slideCount} slides, ${mb} MB): ${zip.url}`;
     deckUrl = zip.url;

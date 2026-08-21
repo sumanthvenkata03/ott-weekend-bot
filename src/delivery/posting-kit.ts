@@ -37,6 +37,14 @@ import type { Release } from "../shared/types.js";
 /** Mirrors deliver-deck-zip's CAPTION_HEADER doctrine: nothing ships unreviewed. */
 export const KIT_HEADER = "DRAFT / UNREVIEWED — review before posting; hand-built captions supersede this";
 
+/**
+ * U+2116 NUMERO SIGN, built from its code point so this source file stays
+ * ASCII-only. (Written as fromCharCode rather than a "№" literal because
+ * the two are identical at runtime and this form survives every editor and
+ * encoding hop between here and the file on disk.)
+ */
+const NUMERO = String.fromCharCode(0x2116);
+
 export const REQUIRED_HASHTAGS = 5;
 export const MIN_KEYWORDS = 25;
 export const MIN_TOTAL_TERMS = 30;
@@ -52,7 +60,17 @@ export interface KitInput {
   edition: string;
   /** Human label, e.g. "Now Streaming". */
   editionLabel: string;
-  issueNumber: number | string;
+  /**
+   * The ISSUE ANCHOR STRING, VERBATIM — "046", not 46.
+   *
+   * Deliberately `string` and not `number | string`. getIssueNumber produces it
+   * with `String(count).padStart(3, "0")` and every hop from there to here
+   * carries it as a string, so the padding is intact by the time the kit sees
+   * it. A union that ALSO accepted a number would make "just pass 46" type-check
+   * and silently print Issue 46 on a deck the rest of the pipeline calls 046 —
+   * so the union is closed rather than defended against.
+   */
+  issueNumber: string;
   /** Editorial window, for the header. */
   windowStart: string;
   windowEnd: string;
@@ -189,6 +207,50 @@ export function pickRadarLines(pool: readonly RadarPoolRow[], releases: readonly
 
 // ── ALT TEXT ────────────────────────────────────────────────────────────────
 
+/** "A" · "A and B" · "A, B and C" — a list a screen reader can actually parse. */
+function andList(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
+
+/** Split a comma-joined credit string into individual names. */
+export function splitNames(raw: string): string[] {
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/**
+ * "2026-08-21" -> "21 August 2026". Section-508-friendly: a screen reader
+ * announces an ISO date as a run of digits and hyphens ("two thousand twenty
+ * six dash zero eight dash twenty one"), which is unusable read aloud. Day,
+ * full month name, year is the form that survives being spoken.
+ *
+ * NO toLocaleDateString: that depends on the runtime's ICU build and the
+ * ambient locale, so the same deck could render two different strings on two
+ * machines. The month table here is the whole point — alt text must be as
+ * reproducible as everything else in this module.
+ *
+ * The day is Number()-ed to drop a leading zero ("05" -> "5"); this is the ONE
+ * place in the kit where a numeric coercion is correct, and it is applied to a
+ * calendar day, never to the issue number (see buildPostingKit).
+ *
+ * Returns null for anything that is not a plain ISO date, so a malformed value
+ * drops its clause rather than printing garbage into an accessibility field.
+ */
+export function humanDate(iso: string | undefined): string | null {
+  if (!iso) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
+  if (!m) return null;
+  const month = MONTHS[Number(m[2]) - 1];
+  if (!month) return null;
+  return `${Number(m[3])} ${month} ${m[1]}`;
+}
+
 /**
  * Per-card alt text, built from release fields. Describes what the card SHOWS
  * (a title card for a film, with its poster, platform and credits), because
@@ -197,13 +259,6 @@ export function pickRadarLines(pool: readonly RadarPoolRow[], releases: readonly
  * Every clause is conditional on its field, so a sparse release degrades to a
  * shorter sentence rather than printing "undefined" or an empty "directed by".
  */
-/** "A" · "A and B" · "A, B and C" — a list a screen reader can actually parse. */
-function andList(items: readonly string[]): string {
-  if (items.length <= 1) return items[0] ?? "";
-  if (items.length === 2) return `${items[0]} and ${items[1]}`;
-  return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
-}
-
 export function altTextFor(r: Release, edition: string): string {
   const parts: string[] = [];
   parts.push(`Title card for the ${r.language} film ${r.title}`);
@@ -211,9 +266,15 @@ export function altTextFor(r: Release, edition: string): string {
   const where = r.platform.length > 0 ? andList(r.platform) : null;
   if (edition === "ott" && where) parts.push(`streaming on ${where}`);
   else if (edition === "ott") parts.push("streaming platform to be announced");
-  const date = edition === "ott" ? r.releaseDates?.ott : r.releaseDates?.theatrical;
+  const date = humanDate(edition === "ott" ? r.releaseDates?.ott : r.releaseDates?.theatrical);
   if (date) parts.push(`from ${date}`);
-  if (r.director) parts.push(`directed by ${r.director}`);
+  // Director is ONE string that may name several people ("Lucky Bezawada, Ravi
+  // Namburii"). Split it before listing, or the comma reads as a clause break
+  // in a sentence already comma-joined — a screen reader gets "directed by
+  // Lucky Bezawada, Ravi Namburii, starring ..." with no way to tell where the
+  // directors end.
+  const directors = r.director ? splitNames(r.director) : [];
+  if (directors.length > 0) parts.push(`directed by ${andList(directors)}`);
   const cast = r.leadCast && r.leadCast.length > 0 ? r.leadCast : r.cast.slice(0, 2);
   if (cast.length > 0) parts.push(`starring ${andList(cast)}`);
   if (r.musicDirector) parts.push(`music by ${r.musicDirector}`);
@@ -307,7 +368,11 @@ export function buildPostingKit(input: KitInput): PostingKit {
   const captionText = `${KIT_HEADER}\n\n${caption.trim()}\n\n${hashtags.join(" ")}`;
 
   const L: string[] = [];
-  L.push(`# POSTING KIT — Wed Drop · ${editionLabel} · Issue ${issueNumber}`);
+  // NUMERO SIGN + the anchor string with NO space between them, so the issue
+  // reads as ONE token and matches how every other surface prints it (run log,
+  // Slack, issue anchor). `issueNumber` is interpolated straight in — never
+  // Number()-ed, never re-padded — so "046" stays "046".
+  L.push(`# POSTING KIT — Wed Drop · ${editionLabel} · ${NUMERO}${issueNumber}`);
   L.push("");
   L.push(`> ${KIT_HEADER}`);
   L.push("");

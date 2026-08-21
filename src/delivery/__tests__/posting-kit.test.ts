@@ -42,7 +42,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   buildPostingKit, validateKit, pickHashtags, buildKeywords, renderRadarLine,
-  pickRadarLines, altTextFor, tagNamesFor, titleTag,
+  pickRadarLines, altTextFor, tagNamesFor, titleTag, humanDate, splitNames,
   KIT_HEADER, REQUIRED_HASHTAGS, MIN_KEYWORDS, MIN_TOTAL_TERMS,
 } from "../posting-kit.js";
 import {
@@ -55,6 +55,16 @@ import {
 import type { Release } from "../../shared/types.js";
 
 const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+
+/**
+ * Source with COMMENTS STRIPPED. A "this file must not call X" pin has to scan
+ * code, not prose — these modules explain at length WHY they avoid
+ * toLocaleDateString and re-padding, and a naive substring scan flags the
+ * explanation as the offence.
+ */
+const codeOnly = (rel: string) =>
+  read(rel).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
 const DAY = 24 * 60 * 60 * 1000;
 
 function rel(p: Partial<Release> & { title: string }): Release {
@@ -83,7 +93,7 @@ function sixFilms(): Release[] {
 
 const KIT = (over: Partial<Parameters<typeof buildPostingKit>[0]> = {}) =>
   buildPostingKit({
-    edition: "ott", editionLabel: "Now Streaming", issueNumber: 46,
+    edition: "ott", editionLabel: "Now Streaming", issueNumber: "046",
     windowStart: "2026-08-17", windowEnd: "2026-08-23",
     caption: "Six films, one couch.", releases: sixFilms(),
     radar: [], handleMap: {}, ...over,
@@ -363,11 +373,57 @@ describe("PART 5 — ALT TEXT, PHOTO TAGS, HEADER, ORDER", () => {
     const kit = KIT();
     expect(kit.altText).toHaveLength(6);
     expect(kit.altText[0]).toBe(
-      "Title card for the Tamil film Jana Nayagan, shown beside its poster, streaming on ZEE5, from 2026-08-21, " +
+      "Title card for the Tamil film Jana Nayagan, shown beside its poster, streaming on ZEE5, from 21 August 2026, " +
       "directed by H. Vinoth, starring Vijay and Pooja Hegde, music by Anirudh Ravichander, 186 minutes."
     );
     expect(kit.markdown).toContain("- **C1** — Title card for the Tamil film Jana Nayagan");
     expect(kit.markdown).toContain("- **C6** — ");
+  });
+
+  it("🔒 508: dates are SPOKEN dates, never ISO — day, full month, year", () => {
+    // A screen reader announces "2026-08-21" as a run of digits and hyphens.
+    expect(humanDate("2026-08-21")).toBe("21 August 2026");
+    expect(humanDate("2026-01-01")).toBe("1 January 2026");
+    expect(humanDate("2026-12-09")).toBe("9 December 2026");    // no leading zero on the day
+    expect(KIT().altText.join(" ")).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+
+  it("a sparse or malformed date drops its clause rather than printing garbage", () => {
+    expect(humanDate(undefined)).toBeNull();
+    expect(humanDate("")).toBeNull();
+    expect(humanDate("2026-13-01")).toBeNull();                 // month 13 has no name
+    expect(humanDate("21 Aug 2026")).toBeNull();                // not ISO
+    const noDate = rel({ title: "Undated", releaseDates: {} });
+    const text = altTextFor(noDate, "ott");
+    expect(text).not.toContain("from ");
+    expect(text).not.toContain("null");
+    expect(text).toContain("streaming on Netflix");             // the rest survives
+  });
+
+  it("🔒 the month table is hand-written — no toLocaleDateString, no ICU dependence", () => {
+    // Same deck must render the same string on every machine. Scanned on CODE
+    // ONLY — the module's own doc comment explains why it avoids these APIs,
+    // and that explanation must not read as the offence.
+    const code = codeOnly("src/delivery/posting-kit.ts");
+    expect(code).not.toContain("toLocaleDateString");
+    expect(code).not.toContain("Intl.");
+    expect(code).toContain('"July", "August", "September"');
+  });
+
+  it("DIRECTORS render through andList — two and three names both read correctly", () => {
+    // Chennai Love Story's director field is one comma-joined string; without
+    // the split, the comma reads as a clause break in an already comma-joined
+    // sentence and the list has no discernible end.
+    expect(splitNames("Lucky Bezawada, Ravi Namburii")).toEqual(["Lucky Bezawada", "Ravi Namburii"]);
+    expect(splitNames("  A ,, B , ")).toEqual(["A", "B"]);
+    const two = altTextFor(rel({ title: "Two", director: "Lucky Bezawada, Ravi Namburii" }), "ott");
+    expect(two).toContain("directed by Lucky Bezawada and Ravi Namburii");
+    const three = altTextFor(rel({ title: "Three", director: "A, B, C" }), "ott");
+    expect(three).toContain("directed by A, B and C");
+    // A single director keeps its own name and gains no list punctuation.
+    const one = altTextFor(rel({ title: "One", director: "H. Vinoth" }), "ott");
+    expect(one).toContain("directed by H. Vinoth");
+    expect(one).not.toContain("H. Vinoth and");
   });
 
   it("a THREE-name cast reads as a list, not 'A and B and C'", () => {
@@ -423,6 +479,38 @@ describe("PART 5 — ALT TEXT, PHOTO TAGS, HEADER, ORDER", () => {
     expect(read("src/delivery/deliver-deck-zip.ts")).toContain('CAPTION_HEADER = "DRAFT — review before posting; hand-built captions supersede this"');
   });
 
+  it("🔒 THE ISSUE PRINTS VERBATIM — leading zeros survive, as ONE token", () => {
+    const NUMERO = String.fromCharCode(0x2116);
+    const head = KIT().markdown.split("\n")[0]!;
+    expect(head).toBe(`# POSTING KIT — Wed Drop · Now Streaming · ${NUMERO}046`);
+    expect(head).toContain(`${NUMERO}046`);          // one token, no space
+    expect(head).not.toContain(`${NUMERO} 046`);
+    expect(head).not.toContain(`${NUMERO}46`);       // the zero is NOT dropped
+    // A different anchor string flows through untouched, padding and all.
+    expect(KIT({ issueNumber: "007" }).markdown.split("\n")[0]).toContain(`${NUMERO}007`);
+    expect(KIT({ issueNumber: "1234" }).markdown.split("\n")[0]).toContain(`${NUMERO}1234`);
+  });
+
+  it("🔒 the kit NEVER Number-coerces the issue — the union is closed, not defended", () => {
+    const code = codeOnly("src/delivery/posting-kit.ts");
+    expect(code).toContain("issueNumber: string;");
+    expect(code).not.toContain("issueNumber: number");
+    expect(code).not.toContain("Number(issueNumber)");
+    expect(code).not.toContain("parseInt(issueNumber");
+    expect(code).not.toContain("padStart");           // the anchor arrives padded; never re-pad
+    // The ONE numeric coercion in the module is on a calendar day, not the issue.
+    expect(code).toContain("`${Number(m[3])} ${month} ${m[1]}`");
+    // …and the producer really does hand over a string.
+    expect(read("src/shared/issue-number.ts")).toContain('String(count).padStart(3, "0")');
+    expect(read("src/shared/issue-anchor.ts")).toContain("issueNumber: string;");
+  });
+
+  it("🔒 the source stays ASCII where it counts — the numero sign is a code point, not a glyph", () => {
+    const src = read("src/delivery/posting-kit.ts");
+    expect(src).toContain("String.fromCharCode(0x2116)");
+    expect(src).toContain("${NUMERO}${issueNumber}");
+  });
+
   it("location + carousel order name every card in deck order", () => {
     const kit = KIT();
     expect(kit.markdown).toContain("Location: India");
@@ -452,17 +540,33 @@ describe("PART 5 — ALT TEXT, PHOTO TAGS, HEADER, ORDER", () => {
 
 // ════════════════════════════════════════════════════════════════════════════
 describe("PART 6 — DECK-ZIP: Wednesday's options, and everyone else's byte-identity", () => {
-  it("🔒 the three pre-22C callers pass NO new options — defaults preserve their behaviour", () => {
+  it("🔒 SAT-VERDICT AND NEWS ARE UNTOUCHED — their literals are byte-identical to pre-22C", () => {
+    // These two render 4:5 on BOTH surfaces, so the default fill-resize is
+    // correct for them and nothing about their call may move.
     const sat = read("src/jobs/saturday-verdict.ts");
     const news = read("src/jobs/news-edition.ts");
-    const arch = read("src/jobs/friday-archives.ts");
     expect(sat).toContain('buildAndUploadDeckZip({ outputDir: "output/posts", date: dateStr })');
     expect(news).toContain('buildAndUploadDeckZip({ outputDir: "output/posts", date: istDate, slug: NEWS_SLUG })');
-    expect(arch).toContain('buildAndUploadDeckZip({ outputDir: "output/posts", date: dateStr, slug: ARCHIVES_SLUG })');
-    for (const s of [sat, news, arch]) {
+    for (const s of [sat, news]) {
       expect(s).not.toContain("resize:");
       expect(s).not.toContain("igSize:");
     }
+  });
+
+  it("🔒 ARCHIVES SHIPS resize:false — square sources through a 4:5 fill were being stretched", () => {
+    // RE-AIMED (ENG-22C-POLISH). The 22C pin asserted archives passed NO new
+    // options, which was true and was the bug: cover 1080x1080 @dsf2
+    // (2160x2160) and cards 1080x1080 @dsf3 (3240x3240) are 1:1, and the
+    // default fill to 1080x1350 is a 1.25x vertical stretch. The pin now
+    // asserts the FIX, and still asserts igSize is untouched.
+    const arch = read("src/jobs/friday-archives.ts");
+    expect(arch).toContain('buildAndUploadDeckZip({ outputDir: "output/posts", date: dateStr, slug: ARCHIVES_SLUG, resize: false })');
+    expect(arch).not.toContain("igSize:");
+    // The measurement the fix rests on, pinned so it cannot drift silently.
+    const render = read("src/rendering/render-archives.ts");
+    expect(render).toContain("templateName: \"archives-cover\"");
+    expect(read("src/rendering/templates/archives-cover.html")).toContain("width: 1080px; height: 1080px;");
+    expect(read("src/rendering/templates/archives-card.html")).toContain("width: 1080px; height: 1080px;");
   });
 
   it("the defaults ARE the historical values — resize on, 1080x1350", () => {

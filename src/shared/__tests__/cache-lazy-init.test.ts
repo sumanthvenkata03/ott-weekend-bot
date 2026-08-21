@@ -21,7 +21,7 @@
 // from a genuinely un-initialized module instance rather than inheriting
 // whatever an earlier case in this file did.
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 /** Everything the fake driver saw, in order. Reset before each case. */
@@ -272,5 +272,58 @@ describe("the source records the change where the next reader will look", () => 
       expect(text).not.toMatch(/^const \w*[Ss]tmt\w* = db\.prepare/m);
       expect(text).toMatch(/db\.prepare/);
     }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+describe("WD-ENG-22C-POLISH — invalidate() stays a narrow lever, structurally", () => {
+  /** Every production .ts under src/ — tests, fixtures and cache.ts itself excluded. */
+  function productionSources(dir: string, acc: string[] = []): string[] {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) {
+        if (e.name === "__tests__" || e.name === "__fixtures__") continue;
+        productionSources(p, acc);
+      } else if (e.name.endsWith(".ts") && !e.name.includes(".test.") && !e.name.includes(".spec.") && !e.name.endsWith(".check.ts")) {
+        acc.push(p.replace(/\\/g, "/"));
+      }
+    }
+    return acc;
+  }
+
+  it("🔒 ai-review.ts is the ONLY production caller of cache.invalidate", () => {
+    // cache.ts's doc comment says outright that this is "not a general
+    // 'refresh' lever: a caller that merely dislikes a cached value must live
+    // with it until the TTL, or the cache stops being a budget control." That
+    // sentence is a promise a future edit can quietly break, so it becomes a
+    // TEST. The one sanctioned use is ai-review's partial-blob recovery, where
+    // the blob is PROVABLY unusable — re-reading it would silently remove films
+    // that were never asked about.
+    //
+    // Matches the CALL `invalidate(` rather than the word: three modules use
+    // "invalidate" in prose ("must retroactively invalidate every confirm",
+    // "a shape change must invalidate its cache") and none of them is a caller.
+    const callers = productionSources("src")
+      .filter((f) => f !== "src/shared/cache.ts")
+      .filter((f) => /(^|[^.\w])invalidate\(/.test(readFileSync(join(process.cwd(), f), "utf8")));
+    expect(callers).toEqual(["src/reconcile/ai-review.ts"]);
+  });
+
+  it("the sanctioned call sits in the partial-blob recovery, not on the hot path", () => {
+    const ai = readFileSync(join(process.cwd(), "src/reconcile/ai-review.ts"), "utf8");
+    const gap = ai.indexOf("CACHE BLOB GAP");
+    const call = ai.indexOf("invalidate(key);");
+    expect(gap).toBeGreaterThan(-1);
+    expect(call).toBeGreaterThan(gap);                 // inside the gap branch
+    expect(ai.match(/invalidate\(key\);/g)).toHaveLength(1);   // exactly one call, no loop
+  });
+
+  it("cache.ts still records WHY the lever is narrow", () => {
+    // Read here rather than reusing the outer `src`: that binding is scoped to
+    // the describe above, and this block is a sibling.
+    const cacheSrc = readFileSync(join(process.cwd(), "src/shared/cache.ts"), "utf8");
+    expect(cacheSrc).toContain('This is not a general "refresh" lever');
+    expect(cacheSrc).toContain("stops being a budget control");
+    expect(cacheSrc).toContain("The one sanctioned use is ai-review's");
   });
 });
