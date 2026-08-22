@@ -39,14 +39,35 @@ import { verifyStories, MAX_VERIFIED_STORIES, type VerifiedStory } from "../cont
 import { resolveStories, type ResolvedStory } from "../content/news/news-resolve.js";
 import { composeEdition, type ComposedEdition } from "../content/news/news-compose.js";
 import { buildPackage, type NewsPackage } from "../content/news/news-caption.js";
-import { renderNews, NEWS_SLUG, type NewsRenderResult } from "../rendering/render-news.js";
+import {
+  CANDIDATES_MAX_AGE_HOURS,
+  MACHINE_ROOM_DIR,
+  PACKAGE_MAX_AGE_HOURS,
+  REDISCOVER_REMEDY,
+  REGENERATE_REMEDY,
+  buildPackageText,
+  checkFreshness,
+  packageStoryUrls,
+  readCandidates,
+  readPackage,
+  readPicks,
+  toCandidateRecord,
+  toScoredCluster,
+  validatePickedIds,
+  writeCandidates,
+  writePackage,
+  type NewsCandidates,
+  type NewsPackageArtifact,
+  type PackageStory,
+} from "../content/news/news-picks.js";
+import { renderNews, NEWS_SLUG, type CardCopyMap, type NewsRenderResult } from "../rendering/render-news.js";
 import { closeBrowser } from "../rendering/renderer.js";
 import { uploadPngToR2 } from "../delivery/r2-upload.js";
 import { buildAndUploadDeckZip, writeCaptionFile } from "../delivery/deliver-deck-zip.js";
 import { postToWebhook } from "../delivery/slack.js";
 import { config } from "../shared/config.js";
 import { editorialTodayStamp } from "../shared/editorial-clock.js";
-import { log } from "../shared/logger.js";
+import { log } from "../shared/logger.js";
 import { startRunLog } from "../shared/run-artifacts.js";
 
 function escapeMd(s: string): string {
@@ -494,6 +515,334 @@ async function main(opts: { slack: boolean; mode: RunMode }): Promise<void> {
   log.success(`  Package sent · ${unseen.length} item(s) marked seen.`);
 }
 
+// ============================================================================
+// MR-M2 NEWSDESK - the INTERACTIVE path: discover -> pick -> generate -> mark.
+//
+// This is a SECOND way to drive the same pipeline, not a change to the first.
+// main() above is untouched: a bare run, --now and --test-banner behave exactly
+// as they did, and the flags below are dispatched before main is ever reached.
+//
+// The four steps are four separate processes because the operator sits between
+// them, so the state has to survive on disk (news-picks.ts owns those files):
+//
+//   --discover     gather -> seen-filter (READ ONLY) -> cluster -> score, then
+//                  write news-candidates.json. ZERO model calls, nothing marked
+//                  seen, nothing sent.
+//   --from-picks   read news-picks.json (written by the SERVER, never by a
+//                  browser), then verify -> resolve -> compose -> package ->
+//                  render over EXACTLY the picked clusters. Cards land in
+//                  output/posts as usual; the posting kit is written to
+//                  news-package.json. NOTHING outward: no Slack, no R2, no zip.
+//   --mark-posted  read news-package.json and mark seen EXACTLY the story URLs
+//                  of the stories that made the package.
+//
+// TWO INVARIANTS THAT MUST NEVER SOFTEN:
+//   1. An OPERATOR OVERRIDE (picking a story the desk HELD) changes what gets
+//      VERIFIED, never what gets CONFIRMED. verifyStories runs over the pick
+//      exactly as it would over any story, and an unconfirmed pick is dropped
+//      with its basis. The override is carried into the package text so the
+//      person about to post knows the desk disagreed.
+//   2. Nothing here marks seen except --mark-posted, and --mark-posted marks
+//      only the URLs of stories that actually made the package. A dropped
+//      story must remain available to a later run.
+// ============================================================================
+
+/** The desk verifies at most this many stories per run, so a pick set is capped. */
+export const MAX_PICKS = MAX_VERIFIED_STORIES;
+
+export interface DiscoverDeps {
+  gather: (nowMs: number) => Promise<NewsItem[]>;
+  isSeen: (url: string) => boolean;
+  loadJudged: (nowMs: number) => JudgedFilm[];
+}
+
+export const LIVE_DISCOVER_DEPS: DiscoverDeps = {
+  gather: gatherNews,
+  isSeen: alreadySeen,
+  loadJudged: (nowMs) => [...readVerdictArchive(nowMs), ...readEvergreensPicks()],
+};
+
+/**
+ * DISCOVER. Everything up to and including scoring, and not one step further.
+ *
+ * The seen filter is applied on READ and nothing is written back: an item the
+ * ledger already knows is HIDDEN from the picker (it has been reported once
+ * already) and the artifact records how many were hidden, so the operator can
+ * tell "quiet news day" from "the morning run already took today's stories".
+ */
+export async function runDiscover(
+  nowMs: number = Date.now(),
+  deps: DiscoverDeps = LIVE_DISCOVER_DEPS,
+  dir: string = MACHINE_ROOM_DIR
+): Promise<NewsCandidates> {
+  const istDate = editorialTodayStamp(new Date(nowMs));
+  log.info(`  News Desk DISCOVER - ${istDate} IST - feed reads only, ZERO model calls`);
+
+  const fresh: NewsItem[] = await deps.gather(nowMs);
+  const unseen = fresh.filter((i) => !deps.isSeen(i.url));
+  const hiddenSeenCount = fresh.length - unseen.length;
+  log.info(
+    `  ${fresh.length} fresh - ${hiddenSeenCount} hidden by the seen ledger (READ ONLY) - ${unseen.length} on offer`
+  );
+
+  const judged: JudgedFilm[] = deps.loadJudged(nowMs);
+  const clusters = clusterItems(unseen);
+  const scored = scoreClusters(clusters, judged, findJudgedMention);
+  log.info(`  ${clusters.length} cluster(s) scored (judged scope ${judged.length}):`);
+  printScoringTable(scored);
+
+  const artifact: NewsCandidates = {
+    generatedAt: new Date(nowMs).toISOString(),
+    istDate,
+    windowHours: WINDOW_HOURS,
+    hiddenSeenCount,
+    gatheredCount: fresh.length,
+    clusters: scored.map(toCandidateRecord),
+  };
+  const path = writeCandidates(artifact, dir);
+  log.success(`  ${artifact.clusters.length} candidate(s) -> ${path}`);
+  log.info("  Nothing marked seen. Nothing sent. No model called.");
+  return artifact;
+}
+
+export interface FromPicksDeps {
+  loadJudged: (nowMs: number) => JudgedFilm[];
+  verify: (clusters: ScoredCluster[], istDate: string) => Promise<VerifiedStory[]>;
+  resolve: (
+    confirmed: VerifiedStory[],
+    judged: JudgedFilm[],
+    findJudged: typeof findJudgedMention,
+    windowYear: number
+  ) => Promise<ResolvedStory[]>;
+  buildPkg: (edition: ComposedEdition, istDate: string) => Promise<NewsPackage>;
+  render: (edition: ComposedEdition, istDate: string, cardCopy: CardCopyMap) => Promise<NewsRenderResult>;
+  shutdownBrowser: () => Promise<void>;
+}
+
+export const LIVE_FROM_PICKS_DEPS: FromPicksDeps = {
+  loadJudged: (nowMs) => [...readVerdictArchive(nowMs), ...readEvergreensPicks()],
+  verify: verifyStories,
+  resolve: resolveStories,
+  buildPkg: buildPackage,
+  render: renderNews,
+  shutdownBrowser: closeBrowser,
+};
+
+/**
+ * GENERATE from the operator's picks.
+ *
+ * Every refusal below is LOUD and terminal. Guessing here is worse than
+ * stopping: a mismatched or stale artifact means the ids in the picks file no
+ * longer denote the stories the operator was looking at when they ticked them,
+ * and generating anyway would render a set nobody chose.
+ */
+export async function runFromPicks(
+  nowMs: number = Date.now(),
+  deps: FromPicksDeps = LIVE_FROM_PICKS_DEPS,
+  dir: string = MACHINE_ROOM_DIR
+): Promise<NewsPackageArtifact> {
+  const istDate = editorialTodayStamp(new Date(nowMs));
+  log.info(`  News Desk GENERATE FROM PICKS - ${istDate} IST`);
+
+  const picksRead = readPicks(dir);
+  if (!picksRead.ok) throw new Error(`--from-picks refused: ${picksRead.reason}`);
+  const candRead = readCandidates(dir);
+  if (!candRead.ok) throw new Error(`--from-picks refused: ${candRead.reason}`);
+  const picks = picksRead.value;
+  const candidates = candRead.value;
+
+  if (picks.candidatesGeneratedAt !== candidates.generatedAt) {
+    throw new Error(
+      `--from-picks refused: the picks were made against candidates generated at ` +
+        `${picks.candidatesGeneratedAt}, but the artifact on disk was generated at ` +
+        `${candidates.generatedAt} - ${REDISCOVER_REMEDY}, then pick again.`
+    );
+  }
+  const freshness = checkFreshness(
+    candidates.generatedAt,
+    nowMs,
+    CANDIDATES_MAX_AGE_HOURS,
+    "candidates",
+    REDISCOVER_REMEDY
+  );
+  if (!freshness.fresh) throw new Error(`--from-picks refused: ${freshness.reason}`);
+
+  const valid = validatePickedIds(candidates, picks.pickedIds);
+  if (!valid.ok) throw new Error(`--from-picks refused: ${valid.reason}`);
+
+  const byId = new Map(candidates.clusters.map((c) => [c.id, c]));
+  const pickedRecords = valid.ids.map((id) => byId.get(id)!);
+  const picked: ScoredCluster[] = pickedRecords.map(toScoredCluster);
+
+  // A picked-but-HELD story is an OVERRIDE. Recorded here, carried all the way
+  // to the package text, and at no point allowed to skip verification.
+  const overrideById = new Map<string, string>();
+  for (const r of pickedRecords) {
+    if (!r.eligible) overrideById.set(r.id, r.holdReason || "held by the desk (no reason recorded)");
+  }
+  for (const [id, reason] of overrideById) {
+    log.warn(`  OPERATOR OVERRIDE - ${id} was HELD by the desk: ${reason}`);
+  }
+
+  const dropped: { headline: string; reason: string }[] = [];
+
+  // The verification cap is a real ceiling, not a suggestion - verifyStories
+  // slices to it. Saying so out loud beats letting a pick silently vanish.
+  const slate = picked.slice(0, MAX_PICKS);
+  for (const c of picked.slice(MAX_PICKS)) {
+    const reason = `beyond the ${MAX_PICKS}-story verification cap - NOT verified, NOT in this package`;
+    dropped.push({ headline: c.headline, reason });
+    log.warn(`  OVER CAP - "${c.headline}": ${reason}`);
+  }
+
+  log.info(`  Verifying ${slate.length} operator-picked story/stories - ONE batched call over the PICKS only`);
+  const verified = await deps.verify(slate, istDate);
+  const confirmed = verified.filter((v) => v.confirmed);
+  for (const held of verified.filter((v) => !v.confirmed)) {
+    const ov = overrideById.get(held.cluster.id);
+    dropped.push({
+      headline: held.cluster.headline,
+      reason: ov
+        ? `OPERATOR OVERRIDE did NOT bypass verification - ${held.basis} (the desk had held it: ${ov})`
+        : held.basis,
+    });
+  }
+  log.info(`  ${confirmed.length} of ${verified.length} confirmed`);
+
+  const judged: JudgedFilm[] = deps.loadJudged(nowMs);
+  const windowYear = Number.parseInt(istDate.slice(0, 4), 10);
+  const resolved: ResolvedStory[] = confirmed.length
+    ? await deps.resolve(confirmed, judged, findJudgedMention, windowYear)
+    : [];
+  for (const r of resolved) log.info(`  resolve - ${r.reason}`);
+
+  // gatheredCount is the PICKED count here, not the day's gather: the quiet-day
+  // line must describe what the operator actually put in front of the pipeline.
+  const edition = composeEdition(resolved, picked.length);
+  log.info(`  FORMAT: ${edition.format}`);
+  log.info(`  WHY: ${edition.why}`);
+  for (const d of edition.dropped) log.info(`  dropped - ${d.headline} - ${d.reason}`);
+  dropped.push(...edition.dropped);
+
+  const pkg = await deps.buildPkg(edition, istDate);
+  if (pkg.heldFor.length) log.warn(`  Caption HELD - unbacked names: ${pkg.heldFor.join(", ")}`);
+
+  let render: NewsRenderResult = { cardPaths: [], notes: [] };
+  if (edition.format !== "none") {
+    render = await deps.render(edition, istDate, pkg.cardCopy);
+    for (const n of render.notes) log.info(`  render - ${n}`);
+    await deps.shutdownBrowser();
+  }
+  const cardFiles = [render.coverPath, ...render.cardPaths]
+    .filter((p): p is string => Boolean(p))
+    .map((p) => p.split(/[\\/]/).pop()!);
+
+  // Same ordering rule as the Slack package: cover first, then the rest.
+  const shown = edition.cover
+    ? [edition.cover, ...edition.cards.filter((c) => c !== edition.cover)]
+    : edition.cards;
+  const stories: PackageStory[] = shown.map((s) => {
+    const c = s.resolved.story.cluster;
+    return {
+      id: c.id,
+      headline: c.headline,
+      badge: s.segment.badge,
+      segmentReason: s.segmentReason,
+      sourceUrl: s.resolved.story.sourceUrl,
+      score: c.score,
+      storyClass: c.storyClass,
+      operatorOverride: overrideById.get(c.id) ?? null,
+      itemUrls: c.items.map((i) => i.url),
+    };
+  });
+
+  const packageText = buildPackageText({
+    istDate,
+    format: edition.format,
+    why: edition.why,
+    caption: pkg.caption,
+    captionHashtags: pkg.captionHashtags,
+    commentHashtags: pkg.commentHashtags,
+    pinnedComment: pkg.pinnedComment,
+    badgeCheckBoard: pkg.badgeCheckBoard,
+    heldFor: pkg.heldFor,
+    stories,
+    dropped,
+    cardFiles,
+  });
+
+  const artifact: NewsPackageArtifact = {
+    generatedAt: new Date(nowMs).toISOString(),
+    istDate,
+    format: edition.format,
+    why: edition.why,
+    caption: pkg.caption,
+    captionHashtags: pkg.captionHashtags,
+    commentHashtags: pkg.commentHashtags,
+    pinnedComment: pkg.pinnedComment,
+    badgeCheckBoard: pkg.badgeCheckBoard,
+    heldFor: pkg.heldFor,
+    overrides: stories
+      .filter((s) => s.operatorOverride !== null)
+      .map((s) => ({ id: s.id, headline: s.headline, holdReason: s.operatorOverride! })),
+    stories,
+    dropped,
+    cardFiles,
+    packageText,
+  };
+  const path = writePackage(artifact, dir);
+
+  // eslint-disable-next-line no-console
+  console.log(`\n${packageText}\n`);
+  log.success(`  Package -> ${path} - NOTHING sent, nothing marked seen.`);
+  return artifact;
+}
+
+export interface MarkPostedDeps {
+  markAll: (urls: string[], now: number) => void;
+}
+
+export const LIVE_MARK_POSTED_DEPS: MarkPostedDeps = { markAll: markAllSeen };
+
+/**
+ * MARK AS POSTED. The ONLY step in this path that writes the seen ledger.
+ *
+ * It marks EXACTLY the item URLs behind the stories that made the package.
+ * Dropped stories are excluded on purpose: a story the desk held, the verifier
+ * refused, or the composer cut was never reported, so burning it here would
+ * silently delete it from every future run.
+ *
+ * Idempotent by construction - markAllSeen is INSERT OR IGNORE on the URL key.
+ */
+export async function runMarkPosted(
+  nowMs: number = Date.now(),
+  deps: MarkPostedDeps = LIVE_MARK_POSTED_DEPS,
+  dir: string = MACHINE_ROOM_DIR
+): Promise<{ marked: number; urls: string[] }> {
+  const read = readPackage(dir);
+  if (!read.ok) throw new Error(`--mark-posted refused: ${read.reason}`);
+  const pkg = read.value;
+
+  const freshness = checkFreshness(
+    pkg.generatedAt,
+    nowMs,
+    PACKAGE_MAX_AGE_HOURS,
+    "package",
+    REGENERATE_REMEDY
+  );
+  if (!freshness.fresh) throw new Error(`--mark-posted refused: ${freshness.reason}`);
+
+  const urls = packageStoryUrls(pkg);
+  deps.markAll(urls, nowMs);
+  log.success(
+    `  ${urls.length} story URL(s) from ${pkg.stories.length} posted story/stories marked seen (${pkg.istDate}).`
+  );
+  if (pkg.dropped.length > 0) {
+    log.info(`  ${pkg.dropped.length} dropped story/stories were NOT marked - they never made the package.`);
+  }
+  return { marked: urls.length, urls };
+}
+
 // Hardened truthiness guard — endsWith("") is vacuously true, so the argv1.length
 // clause stops a bare import from running main (the runs-main-on-import landmine).
 const argv1 = (process.argv[1] ?? "").replace(/\\/g, "/");
@@ -501,13 +850,31 @@ const isMainModule = argv1.length > 0 && import.meta.url.endsWith(argv1);
 
 if (isMainModule) {
   const args = process.argv.slice(2);
-  const mode: RunMode = args.includes("--test-banner")
-    ? "test"
-    : args.includes("--now")
-      ? "now"
-      : "scheduled";
-  main({ slack: !args.includes("--no-slack"), mode }).catch((err) => {
+  // MR-M2: the three interactive flags are dispatched BEFORE the scheduled
+  // path, and each returns. The `else` branch below is the original entry,
+  // unchanged, so a bare run / --now / --test-banner is byte-identical.
+  const fail = (err: unknown) => {
     log.error("News Desk failed", err);
     process.exit(1);
-  });
+  };
+  if (args.includes("--discover")) {
+    startRunLog("news-edition");
+    runDiscover(Date.now()).catch(fail);
+  } else if (args.includes("--from-picks")) {
+    startRunLog("news-edition");
+    runFromPicks(Date.now()).catch(fail);
+  } else if (args.includes("--mark-posted")) {
+    startRunLog("news-edition");
+    runMarkPosted(Date.now()).catch(fail);
+  } else {
+    const mode: RunMode = args.includes("--test-banner")
+      ? "test"
+      : args.includes("--now")
+        ? "now"
+        : "scheduled";
+    main({ slack: !args.includes("--no-slack"), mode }).catch((err) => {
+      log.error("News Desk failed", err);
+      process.exit(1);
+    });
+  }
 }

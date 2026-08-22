@@ -24,6 +24,10 @@ describe("each job builds its EXACT argv", () => {
     ["monday", ["tsx", "src/jobs/monday-movement.ts"]],
     ["sunday", ["tsx", "src/jobs/sunday-spotlight.ts"]],
     ["thursday", ["tsx", "src/jobs/thursday-compare.ts"]],
+    // MR-M2 NEWS DESK. Three specs, one entry, three LITERAL flags.
+    ["news-discover", ["tsx", "src/jobs/news-edition.ts", "--discover"]],
+    ["news-generate", ["tsx", "src/jobs/news-edition.ts", "--from-picks"]],
+    ["news-mark-posted", ["tsx", "src/jobs/news-edition.ts", "--mark-posted"]],
   ];
   for (const [id, argv] of cases) {
     it(`${id} → npx ${argv.join(" ")}`, () => {
@@ -80,8 +84,64 @@ describe("M1 offers NO dials — the hash-neutral gap stays unarmed", () => {
   });
 });
 
+/**
+ * MR-M2's central safety claim, asserted over the WHOLE registry rather than
+ * over the three new entries: no argv anywhere contains anything but the entry
+ * file and flags that begin with "--". If a pick id, a headline, a filename or
+ * any other operator-supplied string ever reached buildArgv, it would have to
+ * show up here as a token that is neither.
+ */
+describe("LITERAL FLAGS ONLY — nothing operator-supplied can reach argv", () => {
+  it("every argv is [tsx, <entry>, ...--flags] and nothing else", () => {
+    for (const id of ids) {
+      const argv = buildArgv(JOBS[id]);
+      expect(argv[0], id).toBe("tsx");
+      expect(argv[1], id).toBe(JOBS[id].entry);
+      for (const flag of argv.slice(2)) {
+        expect(flag, `${id} flag ${flag}`).toMatch(/^--[a-z][a-z-]*$/);
+      }
+    }
+  });
+
+  it("no argv token carries a shell metacharacter, a space or a quote", () => {
+    for (const id of ids) {
+      for (const token of buildArgv(JOBS[id])) {
+        expect(token, `${id}: ${token}`).not.toMatch(/[\s&|;<>^"'`$()]/);
+      }
+    }
+  });
+
+  it("the three News Desk specs share one entry and differ ONLY by their flag", () => {
+    const desk = ["news-discover", "news-generate", "news-mark-posted"] as JobId[];
+    for (const id of desk) {
+      expect(JOBS[id].entry).toBe("src/jobs/news-edition.ts");
+      expect(JOBS[id].flags).toHaveLength(1);
+      expect(JOBS[id].requiresLiveConfirm).toBe(false);
+    }
+    expect(desk.map((id) => JOBS[id].flags[0])).toEqual(["--discover", "--from-picks", "--mark-posted"]);
+  });
+
+  it("every News Desk spec states honestly that nothing goes outward", () => {
+    for (const id of ["news-discover", "news-generate", "news-mark-posted"] as JobId[]) {
+      expect(JOBS[id].willSend).toBe("nothing outward");
+      expect(JOBS[id].willNotSend).toContain("no Slack post");
+      expect(JOBS[id].willNotSend).toContain("no R2 upload");
+    }
+    expect(JOBS["news-discover"].spend).toContain("zero model calls");
+    expect(JOBS["news-generate"].spend).toContain("one batched verify call");
+    expect(JOBS["news-generate"].spend).toContain("one caption call");
+    expect(JOBS["news-mark-posted"].spend).toContain("nothing");
+  });
+
+  it("only news-mark-posted claims a ledger write; the other two mark nothing", () => {
+    expect(JOBS["news-discover"].willNotSend).toContain("NOTHING is marked seen");
+    expect(JOBS["news-generate"].willNotSend).toContain("NOTHING is marked seen");
+    expect(JOBS["news-mark-posted"].willNotSend).toContain("seen ledger");
+  });
+});
+
 describe("isJobId", () => {
-  it("accepts the eight ids and nothing else", () => {
+  it("accepts every registered id and nothing else", () => {
     for (const id of ids) expect(isJobId(id)).toBe(true);
     for (const junk of ["", "__proto__", "constructor", "wed", 7, null, undefined, "__fake"]) {
       expect(isJobId(junk)).toBe(false);

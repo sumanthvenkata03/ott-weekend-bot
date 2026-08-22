@@ -107,6 +107,28 @@
   .galhead h4{font-family:var(--serif);font-size:15px;margin:0;font-weight:600}
   .kv{font-family:var(--mono);font-size:12px}
   ul.notes{margin:8px 0 0;padding-left:18px;color:var(--cream-dim);font-size:12px}
+
+  /* news desk */
+  .ndbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .ndmeta{font-family:var(--mono);font-size:11px;color:var(--cream-dim)}
+  ul.picks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+  li.pick{background:var(--ink);border:1px solid var(--ink-3);border-radius:3px;padding:10px 12px;display:flex;gap:11px;align-items:flex-start}
+  li.pick input[type=checkbox]{margin-top:3px;width:15px;height:15px;accent-color:var(--vermillion);flex:none;cursor:pointer}
+  li.pick .body{flex:1;min-width:0}
+  li.pick .hl{font-size:13px;line-height:1.4;color:var(--cream)}
+  li.pick .meta{font-family:var(--mono);font-size:11px;color:var(--cream-dim);margin-top:4px;word-break:break-word}
+  li.pick .sc{font-family:var(--mono);font-size:12px;color:var(--brass);flex:none;min-width:30px;text-align:right}
+  /* A HELD row stays TICKABLE. The loud styling is the warning, not a lock. */
+  li.pick.held{border-color:var(--rust);background:rgba(163,50,35,.10)}
+  li.pick.held .held-why{margin-top:6px;font-family:var(--mono);font-size:11px;color:#e2705c;
+    border-left:3px solid var(--rust);padding:4px 0 4px 9px;text-transform:uppercase;letter-spacing:.05em}
+  li.pick .judged{color:var(--brass)}
+  .ndover{border-left:3px solid var(--rust);background:rgba(163,50,35,.14);padding:10px 14px;border-radius:3px;
+    margin-bottom:12px;font-size:13px}
+  .ndover b{color:#e2705c}
+  pre.kit{background:#100d0c;border:1px solid var(--ink-3);border-radius:3px;padding:12px 14px;overflow:auto;
+    max-height:340px;font-family:var(--mono);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word;
+    color:var(--cream);margin:10px 0 0}
 </style>
 </head>
 <body>
@@ -145,6 +167,40 @@
       M1 forces the safest mode each job supports. There are no dials and no approve field here.
     </p>
     <div class="grid" id="jobs"></div>
+
+    <!-- ── NEWS DESK ─────────────────────────────────────────────────────
+         Four steps, in the order you do them. Each one is a registry job with
+         a literal flag; the SELECTION travels as a file this server writes.
+         Nothing on this panel is ever sent anywhere. -->
+    <h2>News Desk</h2>
+    <div class="card" id="newsCard">
+      <div class="ndbar">
+        <button id="ndDiscover" class="ghost">Get the latest news</button>
+        <span class="ndmeta" id="ndWhen">not run yet</span>
+      </div>
+      <p class="muted" style="margin:0 0 10px">
+        Reads the feeds and scores what it finds. No model is called and nothing is marked seen,
+        so running this costs nothing and changes nothing.
+      </p>
+
+      <div id="ndStale" class="banner warn hidden"></div>
+      <div id="ndPickWrap" class="hidden">
+        <div class="ndbar" style="margin-top:6px">
+          <span class="ndmeta" id="ndCount"></span>
+          <span style="flex:1"></span>
+          <button id="ndGenerate">Generate cards for selected</button>
+        </div>
+        <ul class="picks" id="ndPicks"></ul>
+      </div>
+
+      <div id="ndPackage" class="hidden" style="margin-top:20px">
+        <div class="galhead" style="margin-top:0"><h4>Posting kit</h4><span style="flex:1"></span>
+          <button class="ghost" id="ndCopy" style="padding:5px 11px">Copy caption</button>
+          <button id="ndMark">Mark as posted</button>
+        </div>
+        <div id="ndPkgBody"></div>
+      </div>
+    </div>
 
     <h2>Preflight</h2>
     <div class="card">
@@ -214,6 +270,10 @@ async function boot() {
   $("prov").textContent = STATE.provenance + "  ·  " + STATE.today;
   renderLock(); renderSchedule(); renderJobs();
   if (STATE.preflight) renderPreflight(STATE.preflight.report, STATE.preflight.at);
+  // Only AFTER the session is proven — an unauthenticated fetch would 401 and
+  // leave the panel showing a refusal that is really just "not signed in".
+  if (!NDCAND) loadCandidates();
+  if (!NDPKG) loadPackage();
 }
 
 /* ── lock + scheduler advisory ──────────────────────────────────────────── */
@@ -284,6 +344,7 @@ function renderSchedule() {
 }
 
 /* ── jobs ──────────────────────────────────────────────────────────────── */
+const NEWS_DESK_JOBS = ["news-discover", "news-generate", "news-mark-posted"];
 function pillClass(mode) { return mode === "live" ? "live" : mode === "gated" ? "gated" : "dry"; }
 function pillText(j) {
   if (j.mode === "live") return "LIVE — no dry run";
@@ -294,7 +355,10 @@ function pillText(j) {
 function renderJobs() {
   const host = $("jobs");
   host.innerHTML = "";
-  const specs = STATE.jobs.slice();
+  // The three News Desk steps are registry jobs like any other, but they are
+  // driven from the News Desk panel because two of them need an artifact the
+  // panel produces. A bare "Run" button for --from-picks would just refuse.
+  const specs = STATE.jobs.filter((j) => !NEWS_DESK_JOBS.includes(j.id));
   if (STATE.allowFake) specs.push({ id: "__fake", label: "FAKE child", mode: "no-deliver", flags: ["(verification)"],
     requiresLiveConfirm: false, willSend: "nothing — synthetic child", willNotSend: "everything", spend: "nothing" });
 
@@ -387,7 +451,9 @@ function addLine(n, text) {
   if ($("autoscroll").checked) pane.scrollTop = pane.scrollHeight;
 }
 
-function attach(runId, label) {
+/* `onDone` is how the News Desk chains a step to its own follow-up fetch: the
+   panel must not read an artifact until the run that writes it has exited. */
+function attach(runId, label, onDone) {
   if (ES) { ES.close(); ES = null; }
   CURRENT = runId;
   $("logpane").innerHTML = "";
@@ -400,6 +466,7 @@ function attach(runId, label) {
     renderSummary(d.summary, d.exitCode);
     ES.close(); ES = null;
     boot();
+    if (onDone) onDone(d.exitCode);
   });
   ES.onerror = () => { setStatus("stream lost · " + runId); };
 }
@@ -478,6 +545,205 @@ function renderGallery(s) {
 }
 
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+/* ── NEWS DESK ─────────────────────────────────────────────────────────────
+   The panel never builds a path and never sends a string that becomes an
+   argument. It POSTs a set of ids the server itself handed it moments earlier;
+   the server checks each one against its own artifact and writes the picks file
+   itself. Everything below is presentation. */
+let NDCAND = null, NDPKG = null;
+
+function ndBusy(on) {
+  for (const id of ["ndDiscover", "ndGenerate", "ndMark"]) {
+    const b = $(id); if (b) b.disabled = on;
+  }
+}
+
+$("ndDiscover").addEventListener("click", async () => {
+  ndBusy(true);
+  setStatus("starting News Desk discovery…");
+  const r = await api("/api/run", { method: "POST", body: JSON.stringify({ job: "news-discover" }) });
+  ndBusy(false);
+  if (r.status !== 200) {
+    if (r.status === 412) { renderPreflight(r.body.report, new Date().toISOString()); alert("Preflight failed — nothing was spent."); return; }
+    alert("Refused — " + ((r.body && r.body.error) || r.status));
+    return;
+  }
+  attach(r.body.runId, "News · discover", () => loadCandidates());
+});
+
+async function loadCandidates() {
+  const r = await api("/api/news/candidates");
+  if (r.status !== 200) {
+    $("ndWhen").textContent = (r.body && r.body.error) || "no candidates yet";
+    $("ndPickWrap").classList.add("hidden");
+    return;
+  }
+  NDCAND = r.body;
+  renderCandidates();
+}
+
+function renderCandidates() {
+  const c = NDCAND;
+  $("ndPickWrap").classList.remove("hidden");
+  $("ndWhen").textContent =
+    c.istDate + " · " + c.clusters.length + " candidate(s) from " + c.gatheredCount + " gathered · " +
+    c.hiddenSeenCount + " hidden as already reported · window " + c.windowHours + "h · " +
+    (c.ageHours === null ? "age unknown" : c.ageHours.toFixed(1) + "h old");
+
+  const stale = $("ndStale");
+  if (c.stale) {
+    stale.classList.remove("hidden");
+    stale.innerHTML = "<b>These candidates are stale.</b> Generating from them is refused — " +
+                      'press "Get the latest news" again.';
+  } else stale.classList.add("hidden");
+
+  const host = $("ndPicks");
+  host.innerHTML = "";
+  for (const row of c.clusters) {
+    const li = document.createElement("li");
+    li.className = "pick" + (row.eligible ? "" : " held");
+    const bits = [
+      row.storyClass,
+      "Tier " + row.bestTier,
+      row.outletCount + " outlet" + (row.outletCount === 1 ? "" : "s"),
+      row.itemCount + " item" + (row.itemCount === 1 ? "" : "s"),
+    ];
+    li.innerHTML =
+      '<input type="checkbox" />' +
+      '<div class="body"><div class="hl"></div>' +
+      '<div class="meta"></div>' +
+      (row.eligible ? "" : '<div class="held-why"></div>') +
+      "</div>" +
+      '<div class="sc"></div>';
+    li.querySelector(".hl").textContent = row.headline;
+    const meta = li.querySelector(".meta");
+    meta.textContent = bits.join(" · ") + " · " + (row.outlets.join(", ") || "no outlet name");
+    if (row.judgedTitle) {
+      const star = document.createElement("span");
+      star.className = "judged";
+      star.textContent = "  ★ " + row.judgedTitle;
+      meta.appendChild(star);
+    }
+    if (!row.eligible) {
+      // Loud, and still tickable: the desk's hold is advice to an operator who
+      // may know something it does not. Overriding it is a decision, not an
+      // accident, and the generated package says so on every surface.
+      li.querySelector(".held-why").textContent = "HELD — " + (row.holdReason || "no reason recorded") +
+        " · tick to override";
+    }
+    li.querySelector(".sc").textContent = row.score;
+    const box = li.querySelector("input");
+    box.value = row.id;
+    box.disabled = c.stale;
+    box.addEventListener("change", ndSelectionChanged);
+    host.appendChild(li);
+  }
+  ndSelectionChanged();
+}
+
+function ndChecked() {
+  return [...document.querySelectorAll("#ndPicks input:checked")].map((b) => b.value);
+}
+
+function ndSelectionChanged() {
+  const max = (NDCAND && NDCAND.maxPicks) || 5;
+  const picked = ndChecked();
+  // The cap is the desk's verification cap, enforced by the server too. Locking
+  // the unticked boxes at the ceiling is friendlier than a 400 after the click.
+  for (const b of document.querySelectorAll("#ndPicks input")) {
+    b.disabled = (NDCAND && NDCAND.stale) || (!b.checked && picked.length >= max);
+  }
+  $("ndCount").textContent = picked.length + " of " + max + " selected" +
+    (picked.length >= max ? " (cap reached)" : "");
+  $("ndGenerate").disabled = picked.length === 0 || (NDCAND && NDCAND.stale);
+}
+
+$("ndGenerate").addEventListener("click", async () => {
+  const ids = ndChecked();
+  if (ids.length === 0) return;
+  ndBusy(true);
+  setStatus("starting News Desk generation…");
+  const r = await api("/api/news/picks", { method: "POST", body: JSON.stringify({ ids: ids }) });
+  ndBusy(false);
+  if (r.status !== 200) {
+    if (r.status === 412) { renderPreflight(r.body.report, new Date().toISOString()); alert("Preflight failed — nothing was spent."); return; }
+    alert("Refused — " + ((r.body && r.body.error) || r.status));
+    if (r.status === 409 || r.status === 404) loadCandidates();
+    return;
+  }
+  attach(r.body.runId, "News · generate", () => loadPackage());
+});
+
+async function loadPackage() {
+  const r = await api("/api/news/package");
+  if (r.status !== 200) { $("ndPackage").classList.add("hidden"); return; }
+  NDPKG = r.body;
+  renderPackage();
+}
+
+function renderPackage() {
+  const p = NDPKG;
+  $("ndPackage").classList.remove("hidden");
+  let h = "";
+
+  if (p.overrides && p.overrides.length) {
+    h += '<div class="ndover"><b>OPERATOR OVERRIDE — ' + p.overrides.length +
+         " story/stories in this package were HELD by the desk and you picked them anyway.</b>" +
+         "<div class='muted' style='margin-top:6px'>Each was still verified — an unconfirmed pick was dropped — " +
+         "but the desk's reason for holding it stands.</div><ul class='notes'>";
+    for (const o of p.overrides) h += "<li>" + esc(o.headline) + " — <b>" + esc(o.holdReason) + "</b></li>";
+    h += "</ul></div>";
+  }
+
+  h += '<div class="kv">' + esc(p.istDate) + " · format <b>" + esc(p.format) + "</b> · " +
+       p.stories.length + " story/stories · " + p.cards.length + " card(s)" +
+       (p.stale ? " · <span class='red'>STALE — regenerate before marking posted</span>" : "") + "</div>";
+  h += '<p class="muted" style="margin:8px 0 0">' + esc(p.why) + "</p>";
+
+  if (p.cards.length) {
+    h += '<div class="gal">';
+    for (const c of p.cards) {
+      h += '<div class="shot"><a href="' + c.url + '" target="_blank" rel="noopener">' +
+           '<img loading="lazy" src="' + c.url + '" alt="' + esc(c.name) + '" /></a>' +
+           '<div class="fn">' + esc(c.name) + "</div></div>";
+    }
+    h += "</div>";
+  } else {
+    h += '<div class="banner warn" style="margin-top:12px">No cards were rendered. ' +
+         "Read the format line above — this is a legal outcome, not a failure.</div>";
+  }
+
+  h += "<pre class='kit' id='ndText'></pre>";
+  $("ndPkgBody").innerHTML = h;
+  $("ndText").textContent = p.packageText;
+}
+
+$("ndCopy").addEventListener("click", async () => {
+  if (!NDPKG) return;
+  try { await navigator.clipboard.writeText(NDPKG.packageText); $("ndCopy").textContent = "Copied"; }
+  catch (_) { $("ndCopy").textContent = "Select the text below"; }
+  setTimeout(() => { $("ndCopy").textContent = "Copy caption"; }, 2000);
+});
+
+$("ndMark").addEventListener("click", async () => {
+  if (!NDPKG) return;
+  const n = NDPKG.stories.length;
+  const urls = NDPKG.stories.reduce((a, s) => a + s.itemUrls.length, 0);
+  // The confirm names the count on purpose: this is the ONE button on the panel
+  // that writes state a later run cannot recover.
+  const ok = confirm(
+    "Mark " + n + " story/stories (" + urls + " source URL(s)) as posted?\n\n" +
+    "They will never be offered again. Dropped stories are NOT marked.\n" +
+    "Only press this AFTER you have actually posted the deck."
+  );
+  if (!ok) return;
+  ndBusy(true);
+  const r = await api("/api/news/mark-posted", { method: "POST" });
+  ndBusy(false);
+  if (r.status !== 200) { alert("Refused — " + ((r.body && r.body.error) || r.status)); return; }
+  attach(r.body.runId, "News · mark posted", () => { NDPKG = null; $("ndPackage").classList.add("hidden"); });
+});
 
 boot();
 setInterval(() => { if (STATE && !CURRENT) boot(); }, 20000);

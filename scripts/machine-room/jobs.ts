@@ -21,6 +21,21 @@
 //                operator TYPE "LIVE", and the UI says plainly what will be
 //                sent. An unavailable safety must be stated, never simulated.
 
+// ── MR-M2: THE NEWS DESK IS THREE JOBS, NOT ONE ─────────────────────────────
+//
+// The interactive News Desk splits the pipeline at the two points where a human
+// decides something: WHICH stories, and WHETHER they were actually posted. Each
+// step is its own spec with its own LITERAL flag, so the operator's choice never
+// becomes an argument.
+//
+//   news-discover     --discover      feed reads only; zero model calls
+//   news-generate     --from-picks    reads the SERVER-written picks file
+//   news-mark-posted  --mark-posted   reads the package artifact
+//
+// buildArgv is untouched and still concatenates entry + frozen flags. The pick
+// SET travels as a file at a fixed literal path that the server writes and
+// validates; there is no argument through which it could reach a command line.
+
 export type JobId =
   | "wednesday"
   | "saturday"
@@ -29,7 +44,10 @@ export type JobId =
   | "radar"
   | "monday"
   | "sunday"
-  | "thursday";
+  | "thursday"
+  | "news-discover"
+  | "news-generate"
+  | "news-mark-posted";
 
 export type RunMode = "gated" | "no-deliver" | "no-slack" | "live";
 
@@ -141,6 +159,42 @@ export const JOBS: Record<JobId, JobSpec> = {
     willSend: "a Notion page + a Slack draft ping — for real",
     willNotSend: "nothing is withheld; this job has no dry-run mode",
     spend: "one claude copy call",
+  },
+
+  // ── MR-M2 NEWS DESK — three steps, three literal flags ────────────────────
+  "news-discover": {
+    id: "news-discover",
+    label: "News · Get the latest news",
+    entry: "src/jobs/news-edition.ts",
+    flags: ["--discover"],
+    mode: "no-slack",
+    requiresLiveConfirm: false,
+    willSend: "nothing outward",
+    willNotSend: "no Slack post, no R2 upload, and NOTHING is marked seen",
+    spend: "feed reads only — zero model calls",
+  },
+  "news-generate": {
+    id: "news-generate",
+    label: "News · Generate cards for selected",
+    entry: "src/jobs/news-edition.ts",
+    flags: ["--from-picks"],
+    mode: "no-slack",
+    requiresLiveConfirm: false,
+    willSend: "nothing outward",
+    willNotSend: "no Slack post, no R2 upload, no zip, and NOTHING is marked seen",
+    spend: "one batched verify call + one caption call + card renders",
+  },
+  "news-mark-posted": {
+    id: "news-mark-posted",
+    label: "News · Mark as posted",
+    entry: "src/jobs/news-edition.ts",
+    flags: ["--mark-posted"],
+    mode: "no-slack",
+    requiresLiveConfirm: false,
+    willSend: "nothing outward",
+    willNotSend:
+      "no Slack post, no R2 upload — it writes ONLY the seen ledger, and only the URLs of stories that made the package",
+    spend: "nothing — a local ledger write",
   },
 };
 

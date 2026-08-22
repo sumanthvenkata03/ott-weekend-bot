@@ -357,7 +357,8 @@ describe("with a session", () => {
     expect(r.status).toBe(200);
     const body = (await r.json()) as Record<string, unknown>;
     expect(Array.isArray(body.jobs)).toBe(true);
-    expect((body.jobs as unknown[]).length).toBe(8);
+    // 8 pillars + the 3 MR-M2 News Desk steps.
+    expect((body.jobs as unknown[]).length).toBe(11);
     expect(body).toHaveProperty("lock");
     expect(body).toHaveProperty("provenance");
     // The fake child must NOT be exposed when the flag is off.

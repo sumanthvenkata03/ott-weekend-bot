@@ -124,6 +124,42 @@ export const JOB_ARTIFACTS: Record<JobId, JobArtifactSpec> = {
     emptyIsNormal: "this job writes no artifacts — it drafts to Notion and pings Slack",
     dryRun: false,
   },
+
+  // ── MR-M2 NEWS DESK ───────────────────────────────────────────────────────
+  // These three write to output/machine-room/, which is NOT one of the three
+  // artifact classes this registry observes (manifests / results / posts PNGs).
+  // Saying "expects: []" is therefore the honest entry, not a shrug: the News
+  // Desk panel reads its own artifacts over its own endpoints, and the generic
+  // summary's job is only to avoid claiming a failure that did not happen.
+  "news-discover": {
+    expects: [],
+    optional: [],
+    pngPrefix: null,
+    emptyIsNormal:
+      "discovery renders nothing — it writes output/machine-room/news-candidates.json, which the News Desk panel reads",
+    dryRun: true,
+    withheld: "no Slack post, no R2 upload, nothing marked seen",
+  },
+  "news-generate": {
+    // Cards ARE the point here, but a picked set can legitimately render none:
+    // an unconfirmed pick drops, and fewer than two confirmed stories is law N4.
+    expects: ["pngs"],
+    optional: [],
+    pngPrefix: "tbsi-news-",
+    emptyIsNormal:
+      "the picked stories can fail verification, and fewer than two confirmed stories is a quiet day (edition.format === \"none\")",
+    dryRun: true,
+    withheld: "no Slack post, no R2 upload, no zip, nothing marked seen",
+  },
+  "news-mark-posted": {
+    expects: [],
+    optional: [],
+    pngPrefix: null,
+    emptyIsNormal:
+      "this step renders nothing — it writes the seen ledger for the stories that made the package",
+    // NOT a dry run: the seen ledger is exactly what it exists to write.
+    dryRun: false,
+  },
 };
 
 export type RunVerdictKind =

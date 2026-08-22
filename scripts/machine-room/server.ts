@@ -51,8 +51,16 @@ import { JOBS, isJobId, type JobSpec } from "./jobs.js";
 import { PUBLISH_LOCK, breakLock, holderAgeMs, inspectLock } from "./lock.js";
 import { HERE, MR_RUN_LOGS } from "./paths.js";
 import { buildArtifactZip, pickArtifact, readArtifact, zipFilename } from "./artifacts.js";
+import { toCandidatesView, validateAndWritePicks } from "./news-desk.js";
+import {
+  PACKAGE_MAX_AGE_HOURS,
+  REGENERATE_REMEDY,
+  checkFreshness,
+  readCandidates,
+  readPackage,
+} from "../../src/content/news/news-picks.js";
 import { probeDisk, runLivePreflight, runPreflight, type PreflightReport } from "./preflight.js";
-import { activeRunId, getRun, isOwnLiveHolder, killAll, recentRuns, startRun, subscribe } from "./runner.js";
+import { activeRunId, getRun, isOwnLiveHolder, killAll, recentRuns, startRun, subscribe, type StartOutcome } from "./runner.js";
 import { sseFrame } from "./stream.js";
 import { buildSummary } from "./summary.js";
 
@@ -176,6 +184,26 @@ function livePreflight(selfHolderPid?: number): Promise<PreflightReport> {
   });
 }
 
+/**
+ * The /api/run refusal mapping, for the MR-M2 News Desk routes.
+ *
+ * Written out rather than factored out of /api/run: that handler is the one
+ * every existing acceptance test drives, and leaving it byte-identical is worth
+ * six duplicated lines. The status codes here are the same three — 409 locked,
+ * 428 needs a typed confirmation, 412 preflight RED — so an operator sees one
+ * behaviour whichever button they pressed.
+ */
+function replyToStart(res: ServerResponse, outcome: Extract<StartOutcome, { ok: false }>): void {
+  if (outcome.code === "locked") {
+    return sendJson(res, 409, { error: outcome.reason, holder: outcome.holder, code: "locked" });
+  }
+  if (outcome.code === "confirm") {
+    return sendJson(res, 428, { error: outcome.reason, code: "confirm" });
+  }
+  preflightCache = { report: outcome.report, at: new Date().toISOString() };
+  return sendJson(res, 412, { error: "preflight failed", code: "preflight", report: outcome.report });
+}
+
 /** Append a break-lock audit line next to the run logs. Never throws. */
 function auditBreakLock(line: string): void {
   try {
@@ -280,6 +308,93 @@ const server = createServer(async (req, res) => {
       if (outcome.code === "confirm") return sendJson(res, 428, { error: outcome.reason, code: "confirm" });
       preflightCache = { report: outcome.report, at: new Date().toISOString() };
       return sendJson(res, 412, { error: "preflight failed", code: "preflight", report: outcome.report });
+    }
+
+    // ── NEWS DESK (MR-M2): discover → pick → generate → mark posted ────────
+    //
+    // Four routes, all behind the same session gate as everything else above,
+    // and all starting their runs through the SAME startRun + livePreflight +
+    // publish-lock path /api/run uses. The only thing new is WHERE the run's
+    // input comes from: a file this server writes, never an argument.
+
+    if (path === "/api/news/candidates" && method === "GET") {
+      const read = readCandidates();
+      // A STALE artifact is still SHOWN — the panel greys the picks and says
+      // why, which is more use than an empty page. Only "no artifact at all"
+      // is a 404. The POST is where staleness becomes a refusal.
+      if (!read.ok) return sendJson(res, 404, { error: `${read.reason} — run "Get the latest news" first` });
+      return sendJson(res, 200, toCandidatesView(read.value, Date.now()));
+    }
+
+    if (path === "/api/news/picks" && method === "POST") {
+      const body = await readJsonBody(req);
+      // The server decides. `ids` is the ONLY thing taken from the request, and
+      // it is checked by exact equality against this server's own artifact.
+      const written = validateAndWritePicks(body.ids, Date.now());
+      if (!written.ok) return sendJson(res, written.status, { error: written.error });
+
+      const outcome = await startRun({
+        job: "news-generate",
+        preflight: (selfHolderPid: number) => livePreflight(selfHolderPid),
+      });
+      if (outcome.ok) {
+        return sendJson(res, 200, {
+          ok: true,
+          runId: outcome.runId,
+          picked: written.picks.pickedIds,
+        });
+      }
+      return replyToStart(res, outcome);
+    }
+
+    if (path === "/api/news/package" && method === "GET") {
+      const read = readPackage();
+      if (!read.ok) return sendJson(res, 404, { error: read.reason });
+      const pkg = read.value;
+      const fresh = checkFreshness(pkg.generatedAt, Date.now(), PACKAGE_MAX_AGE_HOURS, "package", REGENERATE_REMEDY);
+      return sendJson(res, 200, {
+        ...pkg,
+        ageHours: fresh.ageHours,
+        stale: !fresh.fresh,
+        // Card PNGs are served through the SAME exact-match allowlist plumbing
+        // as run artifacts — the request never contributes to a path.
+        cards: pkg.cardFiles.map((name) => ({ name, url: `/api/news/card?f=${encodeURIComponent(name)}` })),
+      });
+    }
+
+    // The package's own cardFiles ARE the allowlist. pickArtifact + readArtifact
+    // are the identical pair /api/artifacts uses; only the allowlist's source
+    // differs (a package artifact rather than a run summary).
+    if (path === "/api/news/card" && method === "GET") {
+      const read = readPackage();
+      if (!read.ok) return sendJson(res, 404, { error: read.reason });
+      const picked = pickArtifact(read.value.cardFiles, url.searchParams.get("f"));
+      if (!picked.ok) return sendJson(res, picked.status, { error: picked.reason });
+      try {
+        const bytes = readArtifact(picked.name);
+        res.writeHead(200, {
+          "Content-Type": "image/png",
+          "Content-Length": String(bytes.length),
+          "Cache-Control": "no-store",
+          "Content-Disposition": `inline; filename="${picked.name}"`,
+        });
+        return void res.end(bytes);
+      } catch {
+        return sendJson(res, 410, { error: "artifact no longer on disk" });
+      }
+    }
+
+    if (path === "/api/news/mark-posted" && method === "POST") {
+      const read = readPackage();
+      if (!read.ok) return sendJson(res, 404, { error: read.reason });
+      const outcome = await startRun({
+        job: "news-mark-posted",
+        preflight: (selfHolderPid: number) => livePreflight(selfHolderPid),
+      });
+      if (outcome.ok) {
+        return sendJson(res, 200, { ok: true, runId: outcome.runId, stories: read.value.stories.length });
+      }
+      return replyToStart(res, outcome);
     }
 
     // ── ARTIFACTS: this run's rendered cards ───────────────────────────────

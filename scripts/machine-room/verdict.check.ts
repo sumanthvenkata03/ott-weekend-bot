@@ -128,9 +128,20 @@ describe("PARTIAL — produced some of what it should, not all", () => {
 });
 
 describe("the registry matches what the jobs actually do", () => {
-  it("only archives, news and radar can legitimately produce nothing", () => {
+  it("only news, radar, thursday and the three News Desk steps can legitimately produce nothing", () => {
     const normal = (Object.keys(JOB_ARTIFACTS) as JobId[]).filter((j) => JOB_ARTIFACTS[j].emptyIsNormal);
-    expect(normal.sort()).toEqual(["news", "radar", "thursday"]);
+    // MR-M2 added three. news-discover and news-mark-posted write to
+    // output/machine-room/, which is not an artifact class this registry
+    // observes; news-generate can legitimately render nothing when the picked
+    // stories fail verification or fall under law N4.
+    expect(normal.sort()).toEqual([
+      "news",
+      "news-discover",
+      "news-generate",
+      "news-mark-posted",
+      "radar",
+      "thursday",
+    ]);
   });
 
   it("radar and thursday render no PNGs, so they carry no prefix", () => {
@@ -147,8 +158,18 @@ describe("the registry matches what the jobs actually do", () => {
     expect(JOB_ARTIFACTS.sunday.pngPrefix).toBe("sun-spotlight-");
   });
 
-  it("M1's forced dry-run jobs are exactly saturday, archives, news, radar", () => {
+  it("the forced dry-run jobs are saturday, archives, news, radar + the two read-only News Desk steps", () => {
     const dry = (Object.keys(JOB_ARTIFACTS) as JobId[]).filter((j) => JOB_ARTIFACTS[j].dryRun);
-    expect(dry.sort()).toEqual(["archives", "news", "radar", "saturday"]);
+    // news-mark-posted is deliberately NOT here: writing the seen ledger is the
+    // whole point of that step, so calling it a dry run would be a lie.
+    expect(dry.sort()).toEqual([
+      "archives",
+      "news",
+      "news-discover",
+      "news-generate",
+      "radar",
+      "saturday",
+    ]);
+    expect(JOB_ARTIFACTS["news-mark-posted"].dryRun).toBe(false);
   });
 });
